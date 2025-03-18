@@ -4,7 +4,8 @@ before:
   
 builds:
   - id: "tokensmith"
-    main: "cmd/tokenservice/main.go"
+    binary: "tokensmith"
+    dir: "cmd/tokenservice"
     goos:
       - linux
       - darwin
@@ -44,7 +45,7 @@ dockers:
       - CHANGELOG.md
     
 archives:
-  - format: tar.gz
+  - id: "tokensmith"
     # this name template makes the OS and Arch compatible with the results of uname.
     name_template: >-
       {{ .ProjectName }}_
