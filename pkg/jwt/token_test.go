@@ -18,7 +18,7 @@ func TestTokenOperations(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create token manager
-	tm := NewTokenManager(km, "test-issuer")
+	tm := NewTokenManager(km, "test-issuer", "test-cluster-id", "test-openchami-id")
 	require.NotNil(t, tm)
 
 	t.Run("GenerateToken with standard claims", func(t *testing.T) {

@@ -50,19 +50,21 @@ func TestTokenService(t *testing.T) {
 	// Create token service
 	config := Config{
 		HydraAdminURL: "http://mock-hydra",
-		Issuer:        "test-issuer",
-		Audience:      "test-audience",
+		Issuer:        "https://openchami.example.com",
+		Audience:      "smd,bss,cloud-init",
 		GroupScopes: map[string][]string{
 			"admin":    {"admin", "write", "read"},
 			"operator": {"write", "read"},
 			"viewer":   {"read"},
 			"user":     {"read"},
 		},
+		ClusterID:   "test-cluster-id",
+		OpenCHAMIID: "test-openchami-id",
 	}
 
 	// Create service with mock client
 	service := &TokenService{
-		TokenManager: jwt.NewTokenManager(keyManager, config.Issuer),
+		TokenManager: jwt.NewTokenManager(keyManager, config.Issuer, config.ClusterID, config.OpenCHAMIID),
 		Config:       config,
 		HydraClient:  mockHydra,
 		Issuer:       config.Issuer,

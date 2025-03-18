@@ -37,12 +37,16 @@ type Config struct {
 	Audience string
 	// GroupScopes maps Hydra group claims to OpenCHAMI scopes
 	GroupScopes map[string][]string
+	// ClusterID is the ID of the cluster
+	ClusterID string
+	// OpenCHAMIID is the ID of the OpenCHAMI instance
+	OpenCHAMIID string
 }
 
 // NewTokenService creates a new TokenService instance
 func NewTokenService(keyManager *jwtauth.KeyManager, config Config) *TokenService {
 	return &TokenService{
-		TokenManager: jwtauth.NewTokenManager(keyManager, config.Issuer),
+		TokenManager: jwtauth.NewTokenManager(keyManager, config.Issuer, config.ClusterID, config.OpenCHAMIID),
 		Config:       config,
 		HydraClient:  jwtauth.NewHydraClient(config.HydraAdminURL),
 		Issuer:       config.Issuer,

@@ -59,7 +59,7 @@ type keySetCache struct {
 }
 
 // Middleware creates a new JWT middleware
-func Middleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) http.Handler {
+func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) http.Handler {
 	if opts == nil {
 		opts = DefaultMiddlewareOptions()
 	}

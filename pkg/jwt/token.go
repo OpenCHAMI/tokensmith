@@ -14,15 +14,19 @@ import (
 
 // TokenManager handles JWT token operations
 type TokenManager struct {
-	keyManager *KeyManager
-	issuer     string
+	keyManager  *KeyManager
+	issuer      string
+	clusterID   string
+	openchamiID string
 }
 
 // NewTokenManager creates a new TokenManager instance
-func NewTokenManager(keyManager *KeyManager, issuer string) *TokenManager {
+func NewTokenManager(keyManager *KeyManager, issuer string, clusterID string, openchamiID string) *TokenManager {
 	return &TokenManager{
-		keyManager: keyManager,
-		issuer:     issuer,
+		keyManager:  keyManager,
+		issuer:      issuer,
+		clusterID:   clusterID,
+		openchamiID: openchamiID,
 	}
 }
 
@@ -30,6 +34,8 @@ func NewTokenManager(keyManager *KeyManager, issuer string) *TokenManager {
 func (tm *TokenManager) GenerateToken(claims *Claims) (string, error) {
 	if claims == nil {
 		claims = NewClaims()
+		claims.ClusterID = tm.clusterID
+		claims.OpenCHAMIID = tm.openchamiID
 	}
 
 	// Validate claims
@@ -123,6 +129,8 @@ func (tm *TokenManager) GenerateToken(claims *Claims) (string, error) {
 func (tm *TokenManager) GenerateTokenWithClaims(claims *Claims, additionalClaims map[string]interface{}) (string, error) {
 	if claims == nil {
 		claims = NewClaims()
+		claims.ClusterID = tm.clusterID
+		claims.OpenCHAMIID = tm.openchamiID
 	}
 
 	// Validate claims
@@ -266,6 +274,8 @@ func (tm *TokenManager) ParseToken(tokenString string) (*Claims, map[string]inte
 		NotBefore:      token.NotBefore().Unix(),
 		IssuedAt:       token.IssuedAt().Unix(),
 		JTI:            token.JwtID(),
+		ClusterID:      token.PrivateClaims()["cluster_id"].(string),
+		OpenCHAMIID:    token.PrivateClaims()["openchami_id"].(string),
 	}
 
 	// Extract custom claims
@@ -309,6 +319,8 @@ func (tm *TokenManager) GenerateServiceToken(serviceID, targetService string, sc
 		NotBefore:      now.Unix(),
 		IssuedAt:       now.Unix(),
 		Scope:          scopes,
+		ClusterID:      tm.clusterID,
+		OpenCHAMIID:    tm.openchamiID,
 	}
 
 	// Add service-specific claims

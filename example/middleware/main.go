@@ -46,13 +46,13 @@ func main() {
 	opts.RequiredClaims = []string{"sub", "iss", "aud", "scope"}
 
 	// Example 1: Using static key
-	staticKeyMiddleware := jwtauth.Middleware(&privateKey.PublicKey, opts)
+	staticKeyMiddleware := jwtauth.JWTMiddleware(&privateKey.PublicKey, opts)
 
 	// Example 2: Using JWKS URL (e.g., from Auth0)
 	optsWithJWKS := *opts
 	optsWithJWKS.JWKSURL = "https://your-tenant.auth0.com/.well-known/jwks.json"
 	optsWithJWKS.JWKSRefreshInterval = 15 * time.Minute
-	jwksMiddleware := jwtauth.Middleware(nil, &optsWithJWKS)
+	jwksMiddleware := jwtauth.JWTMiddleware(nil, &optsWithJWKS)
 
 	// Create a chi router
 	r := chi.NewRouter()

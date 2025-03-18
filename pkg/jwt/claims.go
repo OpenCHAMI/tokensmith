@@ -19,6 +19,8 @@ type Claims struct {
 	Name          string `json:"name,omitempty"`
 	Email         string `json:"email,omitempty"`
 	EmailVerified bool   `json:"email_verified,omitempty"`
+	ClusterID     string `json:"cluster_id,omitempty"`
+	OpenCHAMIID   string `json:"openchami_id,omitempty"`
 }
 
 // ServiceClaims extends Claims for service-to-service communication

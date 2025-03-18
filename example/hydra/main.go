@@ -25,7 +25,7 @@ func main() {
 	if err := keyManager.SetKeyPair(privateKey, &privateKey.PublicKey); err != nil {
 		log.Fatal(err)
 	}
-	tokenManager := jwtauth.NewTokenManager(keyManager, "internal-service")
+	tokenManager := jwtauth.NewTokenManager(keyManager, "internal-service", "test-cluster-id", "test-openchami-id")
 
 	// Create Hydra client
 	hydraClient := jwtauth.NewHydraClient("http://hydra:4445") // Replace with your Hydra admin URL
@@ -74,7 +74,7 @@ func main() {
 
 	// Routes protected by internal tokens (service-to-service)
 	r.Group(func(r chi.Router) {
-		r.Use(jwtauth.Middleware(&privateKey.PublicKey, opts))
+		r.Use(jwtauth.JWTMiddleware(&privateKey.PublicKey, opts))
 
 		r.Get("/internal", func(w http.ResponseWriter, r *http.Request) {
 			claims, err := jwtauth.GetClaimsFromContext(r.Context())
