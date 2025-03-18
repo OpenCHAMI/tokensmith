@@ -15,7 +15,7 @@ func main() {
 
 	// Create key manager
 	keyManager := jwtauth.NewKeyManager()
-	err = keyManager.GenerateKeyPair(2048)
+	err := keyManager.GenerateKeyPair(2048)
 	if err != nil {
 		log.Fatalf("Failed to generate RSA key: %v", err)
 	}
