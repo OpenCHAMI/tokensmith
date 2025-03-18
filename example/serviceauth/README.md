@@ -49,7 +49,7 @@ The example will:
 
 ## OpenCHAMI Integration
 
-This example includes OpenCHAMI-specific custom claims in the service tokens:
+This example uses the `tokenservice` package from tokensmith to handle service authentication. The service tokens include OpenCHAMI-specific custom claims:
 
 - `instance_id`: The OpenCHAMI instance identifier
 - `cluster_id`: The OpenCHAMI cluster identifier
@@ -64,6 +64,78 @@ The tokensmith service will include these claims in the generated JWT tokens, wh
 - Cluster-specific authorization
 - Instance-level tracking and monitoring
 
-## Code Structure
+## Implementation Details
 
-The example consists of a `ServiceClient`
+The example uses the `tokenservice` package from tokensmith, which provides:
+
+1. **Service Client Creation**
+   ```go
+   client := tokenservice.NewServiceClient(
+       tokensmithURL,
+       serviceName,
+       serviceID,
+       instanceID,
+       clusterID,
+   )
+   ```
+
+2. **Token Management**
+   - `GetToken()`: Obtains a new service token
+   - `RefreshTokenIfNeeded()`: Automatically refreshes the token when close to expiration
+   - `GetServiceToken()`: Retrieves the current service token
+
+3. **Service Communication**
+   - `CallTargetService()`: Makes authenticated requests to other services
+   - Automatic token refresh before making requests
+   - Proper error handling and context management
+
+## Error Handling
+
+The example includes comprehensive error handling for:
+- Missing required parameters (instance-id, cluster-id)
+- Token request failures
+- Token refresh failures
+- Service communication errors
+- Invalid responses
+
+## Security Considerations
+
+- Tokens are automatically refreshed when they're close to expiration
+- All HTTP requests use HTTPS in production (update URLs accordingly)
+- Context timeouts are used to prevent hanging requests
+- Service credentials are managed securely through the tokenservice package
+
+## Integration with Your Services
+
+To integrate this pattern into your services:
+
+1. Import the tokenservice package:
+   ```go
+   import "github.com/openchami/tokensmith/pkg/tokenservice"
+   ```
+
+2. Create a service client with your configuration:
+   ```go
+   client := tokenservice.NewServiceClient(
+       "https://your-tokensmith-service",
+       "your-service-name",
+       "your-service-id",
+       "your-instance-id",
+       "your-cluster-id",
+   )
+   ```
+
+3. Use the client to make authenticated requests:
+   ```go
+   ctx := context.Background()
+   
+   // Get initial token
+   if err := client.GetToken(ctx); err != nil {
+       // Handle error
+   }
+   
+   // Make authenticated request
+   if err := client.CallTargetService(ctx, "https://api.example.com/protected"); err != nil {
+       // Handle error
+   }
+   ```

@@ -24,6 +24,8 @@ type TokenService struct {
 	Audience     string
 	// Group to scope mapping
 	GroupScopes map[string][]string
+	ClusterID   string
+	OpenCHAMIID string
 	mu          sync.RWMutex
 }
 

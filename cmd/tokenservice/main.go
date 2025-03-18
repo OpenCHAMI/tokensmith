@@ -28,6 +28,8 @@ var (
 	keyFile     string
 	keyDir      string
 	groupScopes map[string][]string
+	clusterID   string
+	openchamiID string
 
 	rootCmd = &cobra.Command{
 		Use:   "tokenservice",
@@ -46,7 +48,8 @@ func init() {
 	rootCmd.Flags().IntVar(&port, "port", 8080, "Server port")
 	rootCmd.Flags().StringVar(&keyFile, "key-file", "", "RSA private key file (if not provided, generates a new key)")
 	rootCmd.Flags().StringVar(&keyDir, "key-dir", "keys", "Directory for storing key files")
-
+	rootCmd.Flags().StringVar(&clusterID, "cluster-id", "test-cluster-id", "Cluster ID")
+	rootCmd.Flags().StringVar(&openchamiID, "openchami-id", "test-openchami-id", "OpenCHAMI ID")
 	// Initialize group scopes map
 	groupScopes = map[string][]string{
 		"admin":    {"admin", "write", "read"},
@@ -95,6 +98,8 @@ func run(cmd *cobra.Command, args []string) error {
 		Issuer:        issuer,
 		Audience:      audience,
 		GroupScopes:   groupScopes,
+		ClusterID:     clusterID,
+		OpenCHAMIID:   openchamiID,
 	}
 
 	// Create token service

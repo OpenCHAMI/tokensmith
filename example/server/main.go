@@ -31,6 +31,8 @@ func main() {
 			"viewer":   {"read"},
 			"user":     {"read"},
 		},
+		ClusterID:   "test-cluster-id",
+		OpenCHAMIID: "test-openchami-id",
 	}
 
 	// Create token service

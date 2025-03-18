@@ -41,7 +41,9 @@ tokenservice serve \
   --issuer=http://tokensmith:8080 \
   --audience=api \
   --port=8080 \
-  --key-dir=/etc/tokensmith/keys
+  --key-dir=/etc/tokensmith/keys \
+  --cluster-id=test-cluster-id \
+  --openchami-id=test-openchami-id
 ```
 
 ## Installation
@@ -94,37 +96,13 @@ See the [example](example/) directory for a complete working example, which incl
 
 1. Token Service Setup (`example/server/main.go`):
 ```go
-func main() {
+
+...
+
     // Create key manager
     km := jwt.NewKeyManager()
-
-    // Set up key directory
-    keyDir := "/etc/tokensmith/keys"
-    if err := os.MkdirAll(keyDir, 0700); err != nil {
-        log.Fatalf("Failed to create key directory: %v", err)
-    }
-
-    // Try to load existing keys
-    privateKeyPath := filepath.Join(keyDir, "private.pem")
-    publicKeyPath := filepath.Join(keyDir, "public.pem")
-
-    if err := km.LoadPrivateKey(privateKeyPath); err != nil {
-        // No existing keys, generate new ones
-        log.Println("No existing keys found, generating new key pair...")
-        if err := km.GenerateKeyPair(2048); err != nil {
-            log.Fatalf("Failed to generate key pair: %v", err)
-        }
-
-        // Save the generated keys
-        if err := km.SavePrivateKey(privateKeyPath); err != nil {
-            log.Fatalf("Failed to save private key: %v", err)
-        }
-        if err := km.SavePublicKey(publicKeyPath); err != nil {
-            log.Fatalf("Failed to save public key: %v", err)
-        }
-        log.Println("Generated and saved new key pair")
-    } else {
-        log.Println("Loaded existing keys successfully")
+    if err := km.GenerateKeyPair(2048); err != nil {
+        log.Fatalf("Failed to generate key pair: %v", err)
     }
 
     // Configure token service
@@ -138,26 +116,19 @@ func main() {
             "viewer":   {"read"},
             "user":     {"read"},
         },
+        ClusterID:   "test-cluster-id",
+		OpenCHAMIID: "test-openchami-id",
     }
 
     // Create token service
-    ts := tokenservice.NewTokenService(km, config)
+    ts := tokenservice.NewTokenService(km, config,)
 
     // Set up routes
     r := chi.NewRouter()
     r.Use(middleware.Logger)
     r.Use(middleware.Recoverer)
 
-    // Public endpoints
-    r.Route("/.well-known", func(r chi.Router) {
-        r.Get("/jwks.json", ts.JWKSHandler)
-    })
-
-    // Token exchange endpoint
-    r.Route("/token", func(r chi.Router) {
-        r.Post("/", ts.TokenExchangeHandler)
-        r.Post("/service", ts.ServiceTokenHandler)
-    })
+...
 
     // Protected API endpoints
     r.Group(func(r chi.Router) {
@@ -172,23 +143,7 @@ func main() {
             r.Delete("/users/{id}", deleteUser)
         })
 
-        // Service endpoints
-        r.Group(func(r chi.Router) {
-            r.Use(jwt.RequireServiceToken("inventory"))
-            r.Post("/inventory/sync", syncInventory)
-        })
-
-        // General API endpoints
-        r.With(jwt.RequireScope("read")).Get("/items", listItems)
-        r.With(jwt.RequireScope("write")).Post("/items", createItem)
-    })
-
-    // Start server
-    log.Printf("Starting server on :%s", config.Port)
-    if err := http.ListenAndServe(":"+config.Port, r); err != nil {
-        log.Fatalf("Server failed: %v", err)
-    }
-}
+...
 ```
 
 2. Running the Example:
@@ -266,6 +221,8 @@ The token service supports the following configuration options:
 | `--audience` | `AUDIENCE` | Default token audience | `api` |
 | `--port` | `PORT` | HTTP server port | `8080` |
 | `--key-dir` | `KEY_DIR` | Directory for key storage | `/etc/tokensmith/keys` |
+| `--cluster-id` | `CLUSTER_ID` | Unique identifier for this cluster | `cl-F00F00F00` |
+| `--openchami-id` | `OPENCHAMI_ID` | Unique identifier for this instance of OpenCHAMI | `oc-F00F00F00` |
 
 ## Contributing
 
