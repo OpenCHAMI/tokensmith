@@ -9,7 +9,7 @@ import (
 
 	tsmiddleware "github.com/openchami/tokensmith/middleware"
 	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
-	hydraclient "github.com/openchami/tokensmith/pkg/oidc/hydra"
+	hydraclient "github.com/openchami/tokensmith/pkg/jwt/oidc/hydra"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
