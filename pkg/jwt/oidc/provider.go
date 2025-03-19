@@ -2,6 +2,7 @@ package oidc
 
 import (
 	"context"
+	"net/http"
 )
 
 // Provider defines the interface for OIDC token validation and introspection.
@@ -72,4 +73,12 @@ type ProviderMetadata struct {
 
 	// ScopesSupported is a list of OAuth 2.0 scopes supported by the provider
 	ScopesSupported []string `json:"scopes_supported"`
+}
+
+func OIDCMiddleware(provider Provider) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			provider.IntrospectToken(r.Context(), r.Header.Get("Authorization"))
+		})
+	}
 }

@@ -7,12 +7,12 @@ import (
 	"log"
 	"net/http"
 
-	tsmiddleware "github.com/openchami/tokensmith/middleware"
-	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
-	hydraclient "github.com/openchami/tokensmith/pkg/jwt/oidc/hydra"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	tsmiddleware "github.com/openchami/tokensmith/middleware"
+	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
+	"github.com/openchami/tokensmith/pkg/jwt/oidc"
+	hydraclient "github.com/openchami/tokensmith/pkg/jwt/oidc/hydra"
 )
 
 func main() {
@@ -30,7 +30,7 @@ func main() {
 	tokenManager := jwtauth.NewTokenManager(keyManager, "internal-service", "test-cluster-id", "test-openchami-id")
 
 	// Create Hydra client
-	hydraClient := hydraclient.NewHydraClient("http://hydra:4445") // Replace with your Hydra admin URL
+	hydraClient := hydraclient.NewClient("http://hydra:4445") // Replace with your Hydra admin URL
 
 	// Create middleware options for internal token validation
 	opts := tsmiddleware.DefaultMiddlewareOptions()
@@ -52,7 +52,7 @@ func main() {
 
 	// Routes protected by Hydra (external tokens)
 	r.Group(func(r chi.Router) {
-		r.Use(tsmiddleware.HydraMiddleware(hydraClient, tokenManager))
+		r.Use(oidc.OIDCMiddleware(hydraClient))
 
 		r.Get("/protected", func(w http.ResponseWriter, r *http.Request) {
 			claims, err := tsmiddleware.GetClaimsFromContext(r.Context())
