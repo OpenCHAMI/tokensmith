@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
+	"github.com/openchami/tokensmith/pkg/jwt"
 	tokenservice "github.com/openchami/tokensmith/pkg/tokenservice"
 	"github.com/spf13/cobra"
 )
@@ -61,7 +61,7 @@ func init() {
 
 func run(cmd *cobra.Command, args []string) error {
 	// Create key manager
-	keyManager := jwtauth.NewKeyManager()
+	keyManager := jwt.NewKeyManager()
 
 	// Handle key loading/generation
 	if keyFile != "" {
@@ -103,7 +103,10 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create token service
-	tokenService := tokenservice.NewTokenService(keyManager, config)
+	tokenService, err := tokenservice.NewTokenService(keyManager, config)
+	if err != nil {
+		return fmt.Errorf("failed to create token service: %w", err)
+	}
 
 	// Create router
 	r := chi.NewRouter()

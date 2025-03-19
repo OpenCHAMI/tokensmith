@@ -11,110 +11,203 @@ import (
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
-
 	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
+	"github.com/openchami/tokensmith/pkg/jwt/oidc"
+	"github.com/openchami/tokensmith/pkg/jwt/oidc/authelia"
+	"github.com/openchami/tokensmith/pkg/jwt/oidc/hydra"
+	"github.com/openchami/tokensmith/pkg/jwt/oidc/keycloak"
 )
 
-// TokenService handles token exchange and management
+// ProviderType represents the type of OIDC provider
+type ProviderType string
+
+const (
+	ProviderTypeHydra    ProviderType = "hydra"
+	ProviderTypeAuthelia ProviderType = "authelia"
+	ProviderTypeKeycloak ProviderType = "keycloak"
+)
+
+// Config holds the configuration for the token service
+type Config struct {
+	Issuer       string
+	Audience     string
+	GroupScopes  map[string][]string
+	ClusterID    string
+	OpenCHAMIID  string
+	ProviderType ProviderType
+	// Hydra-specific config
+	HydraAdminURL     string
+	HydraClientID     string
+	HydraClientSecret string
+	// Authelia-specific config
+	AutheliaURL string
+	// Keycloak-specific config
+	KeycloakURL          string
+	KeycloakRealm        string
+	KeycloakClientID     string
+	KeycloakClientSecret string
+}
+
+// TokenService handles token operations and provider interactions
 type TokenService struct {
 	TokenManager *jwtauth.TokenManager
 	Config       Config
-	HydraClient  jwtauth.HydraClient
 	Issuer       string
 	Audience     string
-	// Group to scope mapping
-	GroupScopes map[string][]string
-	ClusterID   string
-	OpenCHAMIID string
-	mu          sync.RWMutex
-}
-
-// Config holds the configuration for TokenService
-type Config struct {
-	// HydraAdminURL is the URL of the Hydra admin API
-	HydraAdminURL string
-	// Issuer is the issuer identifier for OpenCHAMI tokens
-	Issuer string
-	// Audience is the audience for OpenCHAMI tokens
-	Audience string
-	// GroupScopes maps Hydra group claims to OpenCHAMI scopes
-	GroupScopes map[string][]string
-	// ClusterID is the ID of the cluster
-	ClusterID string
-	// OpenCHAMIID is the ID of the OpenCHAMI instance
-	OpenCHAMIID string
+	GroupScopes  map[string][]string
+	ClusterID    string
+	OpenCHAMIID  string
+	OIDCProvider oidc.Provider
+	mu           sync.RWMutex
 }
 
 // NewTokenService creates a new TokenService instance
-func NewTokenService(keyManager *jwtauth.KeyManager, config Config) *TokenService {
+func NewTokenService(keyManager *jwtauth.KeyManager, config Config) (*TokenService, error) {
+	// Initialize the token manager
+	tokenManager := jwtauth.NewTokenManager(
+		keyManager,
+		config.Issuer,
+		config.ClusterID,
+		config.OpenCHAMIID,
+	)
+
+	// Initialize the appropriate OIDC provider
+	var oidcProvider oidc.Provider
+	switch config.ProviderType {
+	case ProviderTypeHydra:
+		hydraClient := hydra.NewClient(config.HydraAdminURL)
+		oidcProvider = hydraClient
+	case ProviderTypeAuthelia:
+		autheliaClient := authelia.NewClient(config.AutheliaURL)
+		oidcProvider = autheliaClient
+	case ProviderTypeKeycloak:
+		keycloakClient := keycloak.NewClient(
+			config.KeycloakURL,
+			config.KeycloakRealm,
+			config.KeycloakClientID,
+			config.KeycloakClientSecret,
+		)
+		oidcProvider = keycloakClient
+	default:
+		return nil, fmt.Errorf("unsupported provider type: %s", config.ProviderType)
+	}
+
 	return &TokenService{
-		TokenManager: jwtauth.NewTokenManager(keyManager, config.Issuer, config.ClusterID, config.OpenCHAMIID),
+		TokenManager: tokenManager,
 		Config:       config,
-		HydraClient:  jwtauth.NewHydraClient(config.HydraAdminURL),
 		Issuer:       config.Issuer,
 		Audience:     config.Audience,
 		GroupScopes:  config.GroupScopes,
-	}
+		ClusterID:    config.ClusterID,
+		OpenCHAMIID:  config.OpenCHAMIID,
+		OIDCProvider: oidcProvider,
+	}, nil
 }
 
-// ExchangeToken exchanges a Hydra token for an OpenCHAMI token
-func (s *TokenService) ExchangeToken(ctx context.Context, hydraToken string) (string, error) {
-	// Introspect token with Hydra
-	hydraResp, err := s.HydraClient.IntrospectToken(ctx, hydraToken)
+// ExchangeToken exchanges an external token for an internal token
+func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string, error) {
+	if token == "" {
+		return "", errors.New("empty token")
+	}
+
+	// Introspect the token with the OIDC provider
+	introspection, err := s.OIDCProvider.IntrospectToken(ctx, token)
 	if err != nil {
 		return "", fmt.Errorf("token introspection failed: %w", err)
 	}
 
-	if !hydraResp.Active {
-		return "", fmt.Errorf("token is not active")
+	if !introspection.Active {
+		return "", errors.New("token is not active")
 	}
-
-	// Extract groups from Hydra token
-	groups, ok := hydraResp.Ext["groups"].([]interface{})
-	if !ok {
-		return "", fmt.Errorf("no groups found in token")
-	}
-
-	// Collect scopes based on groups
-	var scopes []string
-	s.mu.RLock()
-	for _, group := range groups {
-		if groupStr, ok := group.(string); ok {
-			if groupScopes, exists := s.GroupScopes[groupStr]; exists {
-				scopes = append(scopes, groupScopes...)
-			}
-		}
-	}
-	s.mu.RUnlock()
 
 	// Create OpenCHAMI claims
-	now := time.Now()
 	claims := &jwtauth.Claims{
 		Issuer:         s.Issuer,
-		Subject:        hydraResp.Sub,
+		Subject:        introspection.Username,
 		Audience:       []string{s.Audience},
-		ExpirationTime: now.Add(1 * time.Hour).Unix(),
-		NotBefore:      now.Unix(),
-		IssuedAt:       now.Unix(),
-		Scope:          scopes,
+		ExpirationTime: introspection.ExpiresAt,
+		IssuedAt:       introspection.IssuedAt,
+		ClusterID:      s.ClusterID,
+		OpenCHAMIID:    s.OpenCHAMIID,
 	}
 
-	// Copy user information from Hydra token
-	if name, ok := hydraResp.Ext["name"].(string); ok {
+	// Extract additional claims from introspection
+	if name, ok := introspection.Claims["name"].(string); ok {
 		claims.Name = name
 	}
-	if email, ok := hydraResp.Ext["email"].(string); ok {
+	if email, ok := introspection.Claims["email"].(string); ok {
 		claims.Email = email
 	}
-	if emailVerified, ok := hydraResp.Ext["email_verified"].(bool); ok {
+	if emailVerified, ok := introspection.Claims["email_verified"].(bool); ok {
 		claims.EmailVerified = emailVerified
 	}
 
-	// Generate OpenCHAMI token
+	// Check for groups in claims
+	groups, ok := introspection.Claims["groups"].([]interface{})
+	if !ok || len(groups) == 0 {
+		return "", errors.New("no groups found in token")
+	}
+
+	// Convert groups to string slice
+	groupStrings := make([]string, 0, len(groups))
+	for _, g := range groups {
+		if gs, ok := g.(string); ok {
+			groupStrings = append(groupStrings, gs)
+		}
+	}
+
+	// Get scopes for groups
+	scopes := make([]string, 0)
+	for _, group := range groupStrings {
+		if groupScopes, ok := s.GroupScopes[group]; ok {
+			scopes = append(scopes, groupScopes...)
+		}
+	}
+
+	// Check if we have any valid scopes
+	if len(scopes) == 0 {
+		return "", errors.New("no valid scopes found for groups")
+	}
+
+	// Set scopes in claims
+	claims.Scope = scopes
+
+	// Generate token
+	token, err = s.TokenManager.GenerateToken(claims)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate token: %w", err)
+	}
+
+	return token, nil
+}
+
+// GenerateServiceToken generates a service-to-service token
+func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targetService string, scopes []string) (string, error) {
+	claims := &jwtauth.Claims{
+		Issuer:         s.Issuer,
+		Subject:        serviceID,
+		Audience:       []string{targetService},
+		ExpirationTime: time.Now().Add(time.Hour).Unix(),
+		IssuedAt:       time.Now().Unix(),
+		ClusterID:      s.ClusterID,
+		OpenCHAMIID:    s.OpenCHAMIID,
+		Scope:          scopes,
+	}
+
 	return s.TokenManager.GenerateToken(claims)
 }
 
-// UpdateGroupScopes updates the group to scope mapping
+// ValidateToken validates a token and returns its claims
+func (s *TokenService) ValidateToken(ctx context.Context, token string) (*jwtauth.Claims, error) {
+	claims, _, err := s.TokenManager.ParseToken(token)
+	if err != nil {
+		return nil, fmt.Errorf("token validation failed: %w", err)
+	}
+
+	return claims, nil
+}
+
+// UpdateGroupScopes updates the group-to-scope mapping
 func (s *TokenService) UpdateGroupScopes(groupScopes map[string][]string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -224,11 +317,6 @@ func (s *TokenService) ServiceTokenHandler(w http.ResponseWriter, r *http.Reques
 		"access_token": token,
 		"token_type":   "Bearer",
 	})
-}
-
-// GenerateServiceToken generates a token for service-to-service communication
-func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targetService string, scopes []string) (string, error) {
-	return s.TokenManager.GenerateServiceToken(serviceID, targetService, scopes)
 }
 
 // authenticateService verifies that the request is from an authorized service

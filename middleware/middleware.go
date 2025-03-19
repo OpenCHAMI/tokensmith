@@ -1,7 +1,8 @@
-package jwt
+package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -10,16 +11,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-)
-
-// ContextKey is the key used to store the claims in the context
-type ContextKey string
-
-const (
-	// ClaimsContextKey is the key used to store the claims in the context
-	ClaimsContextKey ContextKey = "jwt_claims"
-	// RawClaimsContextKey is the key used to store raw claims in the context
-	RawClaimsContextKey ContextKey = "jwt_raw_claims"
 )
 
 // MiddlewareOptions contains options for the JWT middleware
@@ -113,11 +104,12 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 				token, err = jwt.ParseString(parts[1], jwt.WithKeySet(keySet.getKeySet()))
 			} else {
 				// Use provided key
-				token, err = jwt.ParseString(parts[1], jwt.WithKey(jwa.RS256, key))
+				token, err = jwt.ParseString(parts[1], jwt.WithKey(jwa.RS256, key), jwt.WithValidate(true))
 			}
 
 			if err != nil {
-				http.Error(w, "invalid token", http.StatusUnauthorized)
+				// Log the specific error for debugging
+				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
 				return
 			}
 
@@ -149,21 +141,45 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 			if emailVerified, ok := token.PrivateClaims()["email_verified"].(bool); ok {
 				claims.EmailVerified = emailVerified
 			}
+			if clusterID, ok := token.PrivateClaims()["cluster_id"].(string); ok {
+				claims.ClusterID = clusterID
+			}
+			if openchamiID, ok := token.PrivateClaims()["openchami_id"].(string); ok {
+				claims.OpenCHAMIID = openchamiID
+			}
 
 			// Validate claims based on options
 			if opts.ValidateExpiration {
 				if err := claims.Validate(); err != nil {
-					http.Error(w, "token validation failed", http.StatusUnauthorized)
+					http.Error(w, "token validation failed: "+err.Error(), http.StatusUnauthorized)
 					return
 				}
 			}
 
 			if opts.RequiredClaims != nil {
-				rawClaims := token.PrivateClaims()
 				for _, claim := range opts.RequiredClaims {
-					if _, ok := rawClaims[claim]; !ok {
-						http.Error(w, "missing required claim", http.StatusUnauthorized)
-						return
+					switch claim {
+					case "sub":
+						if token.Subject() == "" {
+							http.Error(w, "missing required claim: sub", http.StatusUnauthorized)
+							return
+						}
+					case "iss":
+						if token.Issuer() == "" {
+							http.Error(w, "missing required claim: iss", http.StatusUnauthorized)
+							return
+						}
+					case "aud":
+						if len(token.Audience()) == 0 {
+							http.Error(w, "missing required claim: aud", http.StatusUnauthorized)
+							return
+						}
+					default:
+						// Check private claims
+						if _, ok := token.PrivateClaims()[claim]; !ok {
+							http.Error(w, "missing required claim: "+claim, http.StatusUnauthorized)
+							return
+						}
 					}
 				}
 			}
@@ -197,11 +213,20 @@ func (c *keySetCache) getKeySet() jwk.Set {
 	return c.keySet
 }
 
-// GetClaimsFromContext retrieves the claims from the context
+// GetClaimsFromContext retrieves the JWT claims from the request context
 func GetClaimsFromContext(ctx context.Context) (*Claims, error) {
 	claims, ok := ctx.Value(ClaimsContextKey).(*Claims)
 	if !ok {
-		return nil, ErrInvalidToken
+		return nil, errors.New("claims not found in context")
+	}
+	return claims, nil
+}
+
+// GetRawClaimsFromContext retrieves the raw JWT claims from the request context
+func GetRawClaimsFromContext(ctx context.Context) (map[string]interface{}, error) {
+	claims, ok := ctx.Value(RawClaimsContextKey).(map[string]interface{})
+	if !ok {
+		return nil, errors.New("raw claims not found in context")
 	}
 	return claims, nil
 }
@@ -241,7 +266,7 @@ func RequireScopes(requiredScopes []string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims, err := GetClaimsFromContext(r.Context())
 			if err != nil {
-				http.Error(w, "invalid token", http.StatusUnauthorized)
+				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
 				return
 			}
 

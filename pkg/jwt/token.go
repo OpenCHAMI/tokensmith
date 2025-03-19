@@ -110,6 +110,18 @@ func (tm *TokenManager) GenerateToken(claims *Claims) (string, error) {
 		return "", fmt.Errorf("failed to set email_verified: %w", err)
 	}
 
+	// Set cluster_id and openchami_id claims
+	if claims.ClusterID != "" {
+		if err := token.Set("cluster_id", claims.ClusterID); err != nil {
+			return "", fmt.Errorf("failed to set cluster_id: %w", err)
+		}
+	}
+	if claims.OpenCHAMIID != "" {
+		if err := token.Set("openchami_id", claims.OpenCHAMIID); err != nil {
+			return "", fmt.Errorf("failed to set openchami_id: %w", err)
+		}
+	}
+
 	// Marshal token to JSON
 	payload, err := json.Marshal(token)
 	if err != nil {
@@ -205,6 +217,18 @@ func (tm *TokenManager) GenerateTokenWithClaims(claims *Claims, additionalClaims
 		return "", fmt.Errorf("failed to set email_verified: %w", err)
 	}
 
+	// Set cluster_id and openchami_id claims
+	if claims.ClusterID != "" {
+		if err := token.Set("cluster_id", claims.ClusterID); err != nil {
+			return "", fmt.Errorf("failed to set cluster_id: %w", err)
+		}
+	}
+	if claims.OpenCHAMIID != "" {
+		if err := token.Set("openchami_id", claims.OpenCHAMIID); err != nil {
+			return "", fmt.Errorf("failed to set openchami_id: %w", err)
+		}
+	}
+
 	// Set additional claims
 	for key, value := range additionalClaims {
 		if err := token.Set(key, value); err != nil {
@@ -274,8 +298,6 @@ func (tm *TokenManager) ParseToken(tokenString string) (*Claims, map[string]inte
 		NotBefore:      token.NotBefore().Unix(),
 		IssuedAt:       token.IssuedAt().Unix(),
 		JTI:            token.JwtID(),
-		ClusterID:      token.PrivateClaims()["cluster_id"].(string),
-		OpenCHAMIID:    token.PrivateClaims()["openchami_id"].(string),
 	}
 
 	// Extract custom claims
@@ -298,6 +320,14 @@ func (tm *TokenManager) ParseToken(tokenString string) (*Claims, map[string]inte
 	}
 	if nonce, ok := token.PrivateClaims()["nonce"].(string); ok {
 		claims.Nonce = nonce
+	}
+
+	// Extract cluster_id and openchami_id claims if present
+	if clusterID, ok := token.PrivateClaims()["cluster_id"].(string); ok {
+		claims.ClusterID = clusterID
+	}
+	if openchamiID, ok := token.PrivateClaims()["openchami_id"].(string); ok {
+		claims.OpenCHAMIID = openchamiID
 	}
 
 	return claims, token.PrivateClaims(), nil
@@ -331,4 +361,9 @@ func (tm *TokenManager) GenerateServiceToken(serviceID, targetService string, sc
 	}
 
 	return tm.GenerateTokenWithClaims(claims, claimsMap)
+}
+
+// GetIssuer returns the issuer configured for this token manager
+func (tm *TokenManager) GetIssuer() string {
+	return tm.issuer
 }

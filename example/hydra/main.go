@@ -7,7 +7,9 @@ import (
 	"log"
 	"net/http"
 
+	tsmiddleware "github.com/openchami/tokensmith/middleware"
 	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
+	hydraclient "github.com/openchami/tokensmith/pkg/oidc/hydra"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -28,10 +30,10 @@ func main() {
 	tokenManager := jwtauth.NewTokenManager(keyManager, "internal-service", "test-cluster-id", "test-openchami-id")
 
 	// Create Hydra client
-	hydraClient := jwtauth.NewHydraClient("http://hydra:4445") // Replace with your Hydra admin URL
+	hydraClient := hydraclient.NewHydraClient("http://hydra:4445") // Replace with your Hydra admin URL
 
 	// Create middleware options for internal token validation
-	opts := jwtauth.DefaultMiddlewareOptions()
+	opts := tsmiddleware.DefaultMiddlewareOptions()
 	opts.RequiredClaims = []string{"sub", "iss", "aud", "scope"}
 
 	// Create a chi router
@@ -50,10 +52,10 @@ func main() {
 
 	// Routes protected by Hydra (external tokens)
 	r.Group(func(r chi.Router) {
-		r.Use(jwtauth.HydraMiddleware(hydraClient, tokenManager))
+		r.Use(tsmiddleware.HydraMiddleware(hydraClient, tokenManager))
 
 		r.Get("/protected", func(w http.ResponseWriter, r *http.Request) {
-			claims, err := jwtauth.GetClaimsFromContext(r.Context())
+			claims, err := tsmiddleware.GetClaimsFromContext(r.Context())
 			if err != nil {
 				http.Error(w, "Failed to get claims", http.StatusInternalServerError)
 				return
@@ -64,7 +66,7 @@ func main() {
 
 		// Scope-protected routes
 		r.Group(func(r chi.Router) {
-			r.Use(jwtauth.RequireScope("write"))
+			r.Use(tsmiddleware.RequireScope("write"))
 
 			r.Post("/write", func(w http.ResponseWriter, r *http.Request) {
 				w.Write([]byte("Write access granted"))
@@ -74,10 +76,10 @@ func main() {
 
 	// Routes protected by internal tokens (service-to-service)
 	r.Group(func(r chi.Router) {
-		r.Use(jwtauth.JWTMiddleware(&privateKey.PublicKey, opts))
+		r.Use(tsmiddleware.JWTMiddleware(&privateKey.PublicKey, opts))
 
 		r.Get("/internal", func(w http.ResponseWriter, r *http.Request) {
-			claims, err := jwtauth.GetClaimsFromContext(r.Context())
+			claims, err := tsmiddleware.GetClaimsFromContext(r.Context())
 			if err != nil {
 				http.Error(w, "Failed to get claims", http.StatusInternalServerError)
 				return

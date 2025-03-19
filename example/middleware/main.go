@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
+	tsmiddleware "github.com/openchami/tokensmith/middleware"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -42,17 +42,17 @@ func main() {
 	}
 
 	// Create middleware options
-	opts := jwtauth.DefaultMiddlewareOptions()
+	opts := tsmiddleware.DefaultMiddlewareOptions()
 	opts.RequiredClaims = []string{"sub", "iss", "aud", "scope"}
 
 	// Example 1: Using static key
-	staticKeyMiddleware := jwtauth.JWTMiddleware(&privateKey.PublicKey, opts)
+	staticKeyMiddleware := tsmiddleware.JWTMiddleware(&privateKey.PublicKey, opts)
 
 	// Example 2: Using JWKS URL (e.g., from Auth0)
 	optsWithJWKS := *opts
 	optsWithJWKS.JWKSURL = "https://your-tenant.auth0.com/.well-known/jwks.json"
 	optsWithJWKS.JWKSRefreshInterval = 15 * time.Minute
-	jwksMiddleware := jwtauth.JWTMiddleware(nil, &optsWithJWKS)
+	jwksMiddleware := tsmiddleware.JWTMiddleware(nil, &optsWithJWKS)
 
 	// Create a chi router
 	r := chi.NewRouter()
@@ -73,7 +73,7 @@ func main() {
 		r.Use(staticKeyMiddleware)
 
 		r.Get("/protected-static", func(w http.ResponseWriter, r *http.Request) {
-			claims, err := jwtauth.GetClaimsFromContext(r.Context())
+			claims, err := tsmiddleware.GetClaimsFromContext(r.Context())
 			if err != nil {
 				http.Error(w, "Failed to get claims", http.StatusInternalServerError)
 				return
@@ -88,7 +88,7 @@ func main() {
 		r.Use(jwksMiddleware)
 
 		r.Get("/protected-jwks", func(w http.ResponseWriter, r *http.Request) {
-			claims, err := jwtauth.GetClaimsFromContext(r.Context())
+			claims, err := tsmiddleware.GetClaimsFromContext(r.Context())
 			if err != nil {
 				http.Error(w, "Failed to get claims", http.StatusInternalServerError)
 				return
@@ -99,7 +99,7 @@ func main() {
 
 		// Scope-protected routes
 		r.Group(func(r chi.Router) {
-			r.Use(jwtauth.RequireScope("write"))
+			r.Use(tsmiddleware.RequireScope("write"))
 
 			r.Post("/write", func(w http.ResponseWriter, r *http.Request) {
 				w.Write([]byte("Write access granted"))

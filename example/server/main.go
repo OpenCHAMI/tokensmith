@@ -36,7 +36,10 @@ func main() {
 	}
 
 	// Create token service
-	tokenService := tokenservice.NewTokenService(keyManager, config)
+	tokenService, err := tokenservice.NewTokenService(keyManager, config)
+	if err != nil {
+		log.Fatalf("Failed to create token service: %v", err)
+	}
 
 	// Create router
 	r := chi.NewRouter()
