@@ -54,6 +54,67 @@ sequenceDiagram
   - Authelia integration
   - Extensible provider interface
 
+## Container Deployment
+
+TokenSmith can be deployed using Docker. The following environment variables can be used to configure the service:
+
+### Required Environment Variables
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `TOKENSMITH_ISSUER` | The issuer URL for the token service | `https://tokensmith.openchami.dev` |
+| `TOKENSMITH_CLUSTER_ID` | The ID of the cluster | `default-cluster` |
+| `TOKENSMITH_OPENCHAMI_ID` | The ID of the OpenCHAMI instance | `default-openchami` |
+| `TOKENSMITH_CONFIG` | Path to the configuration file | `/tokensmith/config.json` |
+| `TOKENSMITH_KEY_DIR` | Directory for storing JWT keys | `/tokensmith/keys` |
+| `TOKENSMITH_OIDC_PROVIDER` | OIDC provider type (hydra, keycloak, authelia) | `hydra` |
+| `TOKENSMITH_PORT` | HTTP server port | `8080` |
+
+### OIDC Provider Credentials
+
+Depending on your chosen OIDC provider, you'll need to set the following credentials:
+
+#### Hydra
+- `HYDRA_CLIENT_ID` - Client ID for Hydra
+- `HYDRA_CLIENT_SECRET` - Client Secret for Hydra
+
+#### Keycloak
+- `KEYCLOAK_CLIENT_ID` - Client ID for Keycloak
+- `KEYCLOAK_CLIENT_SECRET` - Client Secret for Keycloak
+
+#### Authelia
+- `AUTHELIA_CLIENT_ID` - Client ID for Authelia
+- `AUTHELIA_CLIENT_SECRET` - Client Secret for Authelia
+
+### Example Docker Run Command
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e TOKENSMITH_ISSUER="https://tokensmith.example.com" \
+  -e TOKENSMITH_CLUSTER_ID="my-cluster" \
+  -e TOKENSMITH_OPENCHAMI_ID="my-openchami" \
+  -e TOKENSMITH_OIDC_PROVIDER="hydra" \
+  -e HYDRA_CLIENT_ID="your-client-id" \
+  -e HYDRA_CLIENT_SECRET="your-client-secret" \
+  -v /path/to/config.json:/tokensmith/config.json \
+  -v /path/to/keys:/tokensmith/keys \
+  tokensmith:latest
+```
+
+### Important Notes
+
+1. The `keys` directory is used to store JWT signing keys. Make sure to:
+   - Mount a persistent volume for the keys directory
+   - Set appropriate permissions on the host directory
+   - Back up the keys directory regularly
+
+2. The configuration file should be mounted from the host system and contain your group scope mappings.  Tokensmith can generate a configuration file to start with: `tokensmith generate-config --config=config.json`
+
+3. For security:
+   - Never commit OIDC credentials to version control
+   - Use Docker secrets or a secure secrets management system in production
+
 ## Project Structure
 
 ```
@@ -73,7 +134,7 @@ tokensmith/
     └── middleware/         # Example of middleware usage
 ```
 
-## Installation
+## Local Installation
 
 ### Main Service
 
@@ -225,4 +286,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - OpenCHAMI community
 - OIDC provider maintainers
-- Contributors and maintainers of this project 
+- Contributors and maintainers of this project
+
+
+
