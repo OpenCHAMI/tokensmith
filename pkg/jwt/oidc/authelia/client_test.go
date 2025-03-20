@@ -74,7 +74,7 @@ func TestAutheliaClient_IntrospectToken(t *testing.T) {
 			defer server.Close()
 
 			// Create client
-			client := NewClient(server.URL)
+			client := NewClient(server.URL, "test-client-id", "test-client-secret")
 
 			// Test token introspection
 			result, err := client.IntrospectToken(context.Background(), tt.token)
@@ -137,7 +137,7 @@ func TestAutheliaClient_GetProviderMetadata(t *testing.T) {
 			defer server.Close()
 
 			// Create client
-			client := NewClient(server.URL)
+			client := NewClient(server.URL, "test-client-id", "test-client-secret")
 
 			// Test metadata retrieval
 			result, err := client.GetProviderMetadata(context.Background())

@@ -93,35 +93,68 @@ See the [middleware documentation](middleware/README.md) for detailed usage inst
 
 ### Token Service
 
-The token service can be run as a standalone application:
+The token service can be run as a standalone application. First, generate a default configuration file:
+
+```bash
+tokensmith generate-config --config config.json
+```
+
+Then start the service with the configuration file:
 
 ```bash
 tokensmith serve \
-  --provider=hydra \
+  --provider=keycloak \
   --issuer=http://tokensmith:8080 \
-  --hydra-url=http://hydra:4445 \
   --port=8080 \
   --cluster-id=test-cluster-id \
-  --openchami-id=test-openchami-id
+  --openchami-id=test-openchami-id \
+  --config=config.json
+```
+
+#### Configuration File
+
+The configuration file (JSON format) contains settings that don't change frequently:
+
+```json
+{
+  "groupScopes": {
+    "admin": ["admin", "write", "read"],
+    "operator": ["write", "read"],
+    "viewer": ["read"],
+    "user": ["read"]
+  }
+}
 ```
 
 Configuration options:
 
-| Flag | Environment Variable | Description | Default |
-|------|---------------------|-------------|---------|
-| `--provider` |  | OIDC provider type (keycloak, hydra, authelia) | `hydra` |
-| `--issuer` |  | Token issuer identifier | `http://tokensmith:8080` |
-| `--port` |  | HTTP server port | `8080` |
-| `--cluster-id` |  | Unique identifier for this cluster | `cl-F00F00F00` |
-| `--openchami-id` |  | Unique identifier for this instance of OpenCHAMI | `oc-F00F00F00` |
-| `--hydra-url` |  | Hydra admin API URL | `http://hydra:4445` |
-| `--authelia-url` |  | Authelia admin API URL | `http://authelia:9091` |
-| `--keycloak-url` |  | Keycloak admin API URL | `http://keycloak:8080` |
-| `--keycloak-realm` | | Keycloak realm | `openchami` |
-|  | `HYRDA_CLIENT_ID` | Hydra Client ID | no default |
-|  | `HYDRA_CLIENT_SECRET` | Hydra Client Secret | no default |
-|  | `KEYCLOAK_CLIENT_ID` | Keycloak Client ID | no default |
-|  | `KEYCLOAK_CLIENT_SECRET` | Keycloak Client Secret | no default |
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--provider` | OIDC provider type (keycloak, hydra, authelia) | `hydra` |
+| `--issuer` | Token issuer identifier | `http://tokensmith:8080` |
+| `--port` | HTTP server port | `8080` |
+| `--cluster-id` | Unique identifier for this cluster | `cl-F00F00F00` |
+| `--openchami-id` | Unique identifier for this instance of OpenCHAMI | `oc-F00F00F00` |
+| `--hydra-url` | Hydra admin API URL | `http://hydra:4445` |
+| `--authelia-url` | Authelia admin API URL | `http://authelia:9091` |
+| `--keycloak-url` | Keycloak admin API URL | `http://keycloak:8080` |
+| `--keycloak-realm` | Keycloak realm | `openchami` |
+| `--config` | Path to configuration file | `""` |
+
+| Environment Variable | Description |
+|------|-------------|
+| `HYDRA_CLIENT_ID` | Client ID for hydra |
+| `HYDRA_CLIENT_SECRET` | Client Secret for hydra |
+| `KEYCLOAK_CLIENT_ID` | Client ID for Keycloak |
+| `KEYCLOAK_CLIENT_SECRET` | Client Secret for Keycloak |
+| `AUTHELIA_CLIENT_ID` | Client ID for Authelia |
+| `AUTHELIA_CLIENT_SECRET` | Client Secret for Authelia |
+
+### JWT Middleware
+
+```bash
+go get github.com/openchami/tokensmith/middleware
+```
 
 ## Development
 

@@ -19,7 +19,7 @@ type Provider interface {
 	// Returns:
 	//   - *TokenIntrospection: Contains the token's claims and metadata if successful
 	//   - error: Any error that occurred during introspection
-	IntrospectToken(ctx context.Context, token string) (*TokenIntrospection, error)
+	IntrospectToken(ctx context.Context, token string) (*IntrospectionResponse, error)
 
 	// GetProviderMetadata fetches the OIDC provider's configuration and capabilities.
 	// This method retrieves information about the provider's supported features,
@@ -32,6 +32,12 @@ type Provider interface {
 	//   - *ProviderMetadata: Contains the provider's configuration and capabilities
 	//   - error: Any error that occurred while fetching the metadata
 	GetProviderMetadata(ctx context.Context) (*ProviderMetadata, error)
+
+	// SupportsLocalIntrospection returns true if the provider supports local token introspection
+	SupportsLocalIntrospection() bool
+
+	// GetJWKS returns the JWKS for local token validation
+	GetJWKS(ctx context.Context) (interface{}, error)
 }
 
 // TokenIntrospection represents a standardized token introspection response
@@ -81,4 +87,17 @@ func OIDCMiddleware(provider Provider) func(http.Handler) http.Handler {
 			provider.IntrospectToken(r.Context(), r.Header.Get("Authorization"))
 		})
 	}
+}
+
+// IntrospectionResponse represents the response from token introspection
+type IntrospectionResponse struct {
+	Active    bool                   `json:"active"`
+	Username  string                 `json:"username"`
+	ExpiresAt int64                  `json:"exp"`
+	IssuedAt  int64                  `json:"iat"`
+	Claims    map[string]interface{} `json:"claims"`
+	TokenType string                 `json:"token_type"`
+	Scope     string                 `json:"scope"`
+	ClientID  string                 `json:"client_id"`
+	TokenUse  string                 `json:"token_use"`
 }

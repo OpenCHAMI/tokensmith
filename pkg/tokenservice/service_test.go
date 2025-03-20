@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/openchami/tokensmith/pkg/jwt"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 
@@ -17,11 +18,12 @@ import (
 
 // MockProvider implements the OIDCProvider interface for testing
 type MockProvider struct {
-	introspectResponse *oidc.TokenIntrospection
+	introspectResponse *oidc.IntrospectionResponse
 	metadataResponse   *oidc.ProviderMetadata
+	jwks               jwk.Set
 }
 
-func (p *MockProvider) IntrospectToken(ctx context.Context, token string) (*oidc.TokenIntrospection, error) {
+func (p *MockProvider) IntrospectToken(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
 	if p.introspectResponse == nil {
 		return nil, fmt.Errorf("token introspection failed")
 	}
@@ -38,6 +40,17 @@ func (p *MockProvider) GetProviderMetadata(ctx context.Context) (*oidc.ProviderM
 		}, nil
 	}
 	return p.metadataResponse, nil
+}
+
+func (p *MockProvider) SupportsLocalIntrospection() bool {
+	return true
+}
+
+func (p *MockProvider) GetJWKS(ctx context.Context) (interface{}, error) {
+	if p.jwks == nil {
+		p.jwks = jwk.NewSet()
+	}
+	return p.jwks, nil
 }
 
 func TestTokenService(t *testing.T) {
@@ -78,12 +91,12 @@ func TestTokenService(t *testing.T) {
 
 	t.Run("Token Exchange - Admin User", func(t *testing.T) {
 		// Set up mock response
-		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.TokenIntrospection{
+		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.IntrospectionResponse{
 			Active:    true,
 			Username:  "admin-user",
 			ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			IssuedAt:  time.Now().Unix(),
-			Scope:     "admin",
+			TokenType: "Bearer",
 			Claims: map[string]interface{}{
 				"groups":         []interface{}{"admin"},
 				"name":           "Admin User",
@@ -117,12 +130,12 @@ func TestTokenService(t *testing.T) {
 
 	t.Run("Token Exchange - Operator User", func(t *testing.T) {
 		// Set up mock response
-		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.TokenIntrospection{
+		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.IntrospectionResponse{
 			Active:    true,
 			Username:  "operator-user",
 			ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			IssuedAt:  time.Now().Unix(),
-			Scope:     "operator",
+			TokenType: "Bearer",
 			Claims: map[string]interface{}{
 				"groups":         []interface{}{"operator"},
 				"name":           "Operator User",
@@ -156,12 +169,12 @@ func TestTokenService(t *testing.T) {
 
 	t.Run("Token Exchange - Multiple Groups", func(t *testing.T) {
 		// Set up mock response
-		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.TokenIntrospection{
+		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.IntrospectionResponse{
 			Active:    true,
 			Username:  "multi-group-user",
 			ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			IssuedAt:  time.Now().Unix(),
-			Scope:     "admin operator",
+			TokenType: "Bearer",
 			Claims: map[string]interface{}{
 				"groups":         []interface{}{"admin", "operator"},
 				"name":           "Multi Group User",
@@ -195,11 +208,12 @@ func TestTokenService(t *testing.T) {
 
 	t.Run("Token Exchange - Invalid Token", func(t *testing.T) {
 		// Set up mock response for inactive token
-		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.TokenIntrospection{
+		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.IntrospectionResponse{
 			Active:    false,
 			Username:  "testuser",
 			ExpiresAt: time.Now().Add(-time.Hour).Unix(),
 			IssuedAt:  time.Now().Add(-2 * time.Hour).Unix(),
+			TokenType: "Bearer",
 		}
 
 		// Exchange token
@@ -211,11 +225,12 @@ func TestTokenService(t *testing.T) {
 
 	t.Run("Token Exchange - Missing Groups", func(t *testing.T) {
 		// Set up mock response without groups
-		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.TokenIntrospection{
+		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.IntrospectionResponse{
 			Active:    true,
 			Username:  "no-groups-user",
 			ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			IssuedAt:  time.Now().Unix(),
+			TokenType: "Bearer",
 			Claims: map[string]interface{}{
 				"name":           "No Groups User",
 				"email":          "nogroups@example.com",
@@ -232,11 +247,12 @@ func TestTokenService(t *testing.T) {
 
 	t.Run("Token Exchange - Invalid Group Type", func(t *testing.T) {
 		// Set up mock response with invalid group type
-		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.TokenIntrospection{
+		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.IntrospectionResponse{
 			Active:    true,
 			Username:  "invalid-group-user",
 			ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			IssuedAt:  time.Now().Unix(),
+			TokenType: "Bearer",
 			Claims: map[string]interface{}{
 				"groups":         []interface{}{123}, // Invalid group type
 				"name":           "Invalid Group User",
@@ -261,12 +277,12 @@ func TestTokenService(t *testing.T) {
 		service.UpdateGroupScopes(newScopes)
 
 		// Set up mock response
-		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.TokenIntrospection{
+		service.OIDCProvider.(*MockProvider).introspectResponse = &oidc.IntrospectionResponse{
 			Active:    true,
 			Username:  "admin-user",
 			ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			IssuedAt:  time.Now().Unix(),
-			Scope:     "admin",
+			TokenType: "Bearer",
 			Claims: map[string]interface{}{
 				"groups":         []interface{}{"admin"},
 				"name":           "Admin User",
@@ -327,7 +343,7 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 	tests := []struct {
 		name           string
 		config         Config
-		introspectResp *oidc.TokenIntrospection
+		introspectResp *oidc.IntrospectionResponse
 		expectError    bool
 		validateClaims func(*testing.T, *jwt.Claims)
 	}{
@@ -342,12 +358,12 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 					"admin": {"admin", "write", "read"},
 				},
 			},
-			introspectResp: &oidc.TokenIntrospection{
+			introspectResp: &oidc.IntrospectionResponse{
 				Active:    true,
 				Username:  "testuser",
 				ExpiresAt: time.Now().Add(time.Hour).Unix(),
 				IssuedAt:  time.Now().Unix(),
-				Scope:     "admin",
+				TokenType: "Bearer",
 				Claims: map[string]interface{}{
 					"groups":         []interface{}{"admin"},
 					"name":           "Test User",
@@ -376,11 +392,12 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 				ClusterID:    "test-cluster",
 				OpenCHAMIID:  "test-openchami",
 			},
-			introspectResp: &oidc.TokenIntrospection{
+			introspectResp: &oidc.IntrospectionResponse{
 				Active:    false,
 				Username:  "testuser",
 				ExpiresAt: time.Now().Add(-time.Hour).Unix(),
 				IssuedAt:  time.Now().Add(-2 * time.Hour).Unix(),
+				TokenType: "Bearer",
 			},
 			expectError: true,
 		},
@@ -392,11 +409,12 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 				ClusterID:    "test-cluster",
 				OpenCHAMIID:  "test-openchami",
 			},
-			introspectResp: &oidc.TokenIntrospection{
+			introspectResp: &oidc.IntrospectionResponse{
 				Active:    true,
 				Username:  "testuser",
 				ExpiresAt: time.Now().Add(time.Hour).Unix(),
 				IssuedAt:  time.Now().Unix(),
+				TokenType: "Bearer",
 				Claims: map[string]interface{}{
 					"groups": []interface{}{"admin"},
 				},

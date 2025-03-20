@@ -78,7 +78,7 @@ func TestHydraClient_IntrospectToken(t *testing.T) {
 			defer server.Close()
 
 			// Create client
-			client := NewClient(server.URL)
+			client := NewClient(server.URL, "test-client-id", "test-client-secret")
 
 			// Test token introspection
 			result, err := client.IntrospectToken(context.Background(), tt.token)
@@ -119,7 +119,7 @@ func TestHydraClient_GetProviderMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create client
-			client := NewClient(tt.serverURL)
+			client := NewClient(tt.serverURL, "test-client-id", "test-client-secret")
 
 			// Test metadata retrieval
 			result, err := client.GetProviderMetadata(context.Background())

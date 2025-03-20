@@ -4,79 +4,137 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 )
 
 // Client implements the OIDC provider interface for Keycloak
 type Client struct {
-	baseURL      string
-	realm        string
-	clientID     string
-	clientSecret string
-	httpClient   *http.Client
+	baseURL          string
+	realm            string
+	clientID         string
+	clientSecret     string
+	metadata         *oidc.ProviderMetadata
+	jwks             jwk.Set
+	lastJWKSUpdate   time.Time
+	jwksUpdatePeriod time.Duration
 }
 
-// NewClient creates a new Keycloak OIDC client
+// NewClient creates a new Keycloak client
 func NewClient(baseURL, realm, clientID, clientSecret string) *Client {
 	return &Client{
-		baseURL:      baseURL,
-		realm:        realm,
-		clientID:     clientID,
-		clientSecret: clientSecret,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		baseURL:          baseURL,
+		realm:            realm,
+		clientID:         clientID,
+		clientSecret:     clientSecret,
+		jwksUpdatePeriod: 24 * time.Hour,
 	}
 }
 
-// IntrospectToken validates a token using Keycloak's introspection endpoint
-func (c *Client) IntrospectToken(ctx context.Context, token string) (*oidc.TokenIntrospection, error) {
-	// Keycloak's introspection endpoint is at /realms/{realm}/protocol/openid-connect/token/introspect
-	url := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token/introspect", c.baseURL, c.realm)
+// SupportsLocalIntrospection returns true as Keycloak supports local token validation
+func (c *Client) SupportsLocalIntrospection() bool {
+	return true
+}
 
-	// Create form data for the request
-	formData := fmt.Sprintf("token=%s&client_id=%s&client_secret=%s", token, c.clientID, c.clientSecret)
+// GetJWKS returns the JWKS for local token validation
+func (c *Client) GetJWKS(ctx context.Context) (interface{}, error) {
+	// Check if we need to update the JWKS
+	if c.jwks == nil || time.Since(c.lastJWKSUpdate) > c.jwksUpdatePeriod {
+		if err := c.updateJWKS(ctx); err != nil {
+			return nil, fmt.Errorf("failed to update JWKS: %w", err)
+		}
+	}
+	return c.jwks, nil
+}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(formData))
+// updateJWKS fetches the latest JWKS from Keycloak
+func (c *Client) updateJWKS(ctx context.Context) error {
+	url := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/certs", c.baseURL, c.realm)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		return fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token introspection failed with status: %d", resp.StatusCode)
+		return fmt.Errorf("failed to fetch JWKS: status %d", resp.StatusCode)
 	}
 
-	var result struct {
-		Active    bool   `json:"active"`
-		Username  string `json:"username"`
-		ExpiresAt int64  `json:"exp"`
-		IssuedAt  int64  `json:"iat"`
-		Scope     string `json:"scope"`
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read JWKS response: %w", err)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	jwks, err := jwk.Parse(body)
+	if err != nil {
+		return fmt.Errorf("failed to parse JWKS: %w", err)
 	}
 
-	return &oidc.TokenIntrospection{
-		Active:    result.Active,
-		Username:  result.Username,
-		ExpiresAt: result.ExpiresAt,
-		IssuedAt:  result.IssuedAt,
-		Scope:     result.Scope,
-	}, nil
+	c.jwks = jwks
+	c.lastJWKSUpdate = time.Now()
+	return nil
+}
+
+// IntrospectToken introspects a token using Keycloak's introspection endpoint
+func (c *Client) IntrospectToken(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+	// If we have JWKS, try local validation first
+	if c.jwks != nil {
+		parsedToken, err := jwt.Parse([]byte(token), jwt.WithKeySet(c.jwks))
+		if err == nil {
+			return &oidc.IntrospectionResponse{
+				Active:    true,
+				Username:  parsedToken.Subject(),
+				ExpiresAt: parsedToken.Expiration().Unix(),
+				IssuedAt:  parsedToken.IssuedAt().Unix(),
+				Claims:    parsedToken.PrivateClaims(),
+				TokenType: "Bearer",
+			}, nil
+		}
+	}
+
+	// Fall back to remote introspection
+	url := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token/introspect", c.baseURL, c.realm)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add form data
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(c.clientID, c.clientSecret)
+
+	q := req.URL.Query()
+	q.Add("token", token)
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to introspect token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to introspect token: status %d", resp.StatusCode)
+	}
+
+	var introspection oidc.IntrospectionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&introspection); err != nil {
+		return nil, fmt.Errorf("failed to decode introspection response: %w", err)
+	}
+
+	return &introspection, nil
 }
 
 // GetProviderMetadata returns Keycloak's OIDC provider metadata
@@ -89,7 +147,7 @@ func (c *Client) GetProviderMetadata(ctx context.Context) (*oidc.ProviderMetadat
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}

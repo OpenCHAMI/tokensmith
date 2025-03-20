@@ -4,97 +4,171 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 )
 
-// Client handles communication with Hydra's admin API
+// Client implements the OIDC provider interface for Hydra
 type Client struct {
-	adminURL string
-	client   *http.Client
+	baseURL          string
+	clientID         string
+	clientSecret     string
+	metadata         *oidc.ProviderMetadata
+	jwks             jwk.Set
+	lastJWKSUpdate   time.Time
+	jwksUpdatePeriod time.Duration
 }
 
-// NewClient creates a new Hydra client instance
-func NewClient(adminURL string) *Client {
+// NewClient creates a new Hydra client
+func NewClient(baseURL, clientID, clientSecret string) *Client {
 	return &Client{
-		adminURL: adminURL,
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		baseURL:          baseURL,
+		clientID:         clientID,
+		clientSecret:     clientSecret,
+		jwksUpdatePeriod: 24 * time.Hour,
 	}
 }
 
-// IntrospectToken implements the OIDCProvider interface
-func (c *Client) IntrospectToken(ctx context.Context, token string) (*oidc.TokenIntrospection, error) {
-	// Prepare form data
-	formData := fmt.Sprintf("token=%s", token)
+// SupportsLocalIntrospection returns true as Hydra supports local token validation
+func (c *Client) SupportsLocalIntrospection() bool {
+	return true
+}
 
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, "POST", c.adminURL+"/oauth2/introspect", strings.NewReader(formData))
+// GetJWKS returns the JWKS for local token validation
+func (c *Client) GetJWKS(ctx context.Context) (interface{}, error) {
+	// Check if we need to update the JWKS
+	if c.jwks == nil || time.Since(c.lastJWKSUpdate) > c.jwksUpdatePeriod {
+		if err := c.updateJWKS(ctx); err != nil {
+			return nil, fmt.Errorf("failed to update JWKS: %w", err)
+		}
+	}
+	return c.jwks, nil
+}
+
+// updateJWKS fetches the latest JWKS from Hydra
+func (c *Client) updateJWKS(ctx context.Context) error {
+	url := fmt.Sprintf("%s/.well-known/jwks.json", c.baseURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to fetch JWKS: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to fetch JWKS: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read JWKS response: %w", err)
+	}
+
+	jwks, err := jwk.Parse(body)
+	if err != nil {
+		return fmt.Errorf("failed to parse JWKS: %w", err)
+	}
+
+	c.jwks = jwks
+	c.lastJWKSUpdate = time.Now()
+	return nil
+}
+
+// IntrospectToken introspects a token using Hydra's introspection endpoint
+func (c *Client) IntrospectToken(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+	// If we have JWKS, try local validation first
+	if c.jwks != nil {
+		parsedToken, err := jwt.Parse([]byte(token), jwt.WithKeySet(c.jwks))
+		if err == nil {
+			return &oidc.IntrospectionResponse{
+				Active:    true,
+				Username:  parsedToken.Subject(),
+				ExpiresAt: parsedToken.Expiration().Unix(),
+				IssuedAt:  parsedToken.IssuedAt().Unix(),
+				Claims:    parsedToken.PrivateClaims(),
+				TokenType: "Bearer",
+			}, nil
+		}
+	}
+
+	// Fall back to remote introspection
+	url := fmt.Sprintf("%s/oauth2/introspect", c.baseURL)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set headers
+	// Add form data
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(c.clientID, c.clientSecret)
 
-	// Send request
-	resp, err := c.client.Do(req)
+	q := req.URL.Query()
+	q.Add("token", token)
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to introspect token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to introspect token: status %d", resp.StatusCode)
+	}
+
+	var introspection oidc.IntrospectionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&introspection); err != nil {
+		return nil, fmt.Errorf("failed to decode introspection response: %w", err)
+	}
+
+	return &introspection, nil
+}
+
+// GetProviderMetadata returns Hydra's OIDC provider metadata
+func (c *Client) GetProviderMetadata(ctx context.Context) (*oidc.ProviderMetadata, error) {
+	url := fmt.Sprintf("%s/.well-known/openid-configuration", c.baseURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("failed to get provider metadata with status: %d", resp.StatusCode)
 	}
 
-	// Parse Hydra-specific response
-	var hydraResp struct {
-		Active   bool                   `json:"active"`
-		Scope    string                 `json:"scope,omitempty"`
-		ClientID string                 `json:"client_id,omitempty"`
-		Username string                 `json:"username,omitempty"`
-		Sub      string                 `json:"sub,omitempty"`
-		Exp      int64                  `json:"exp,omitempty"`
-		Iat      int64                  `json:"iat,omitempty"`
-		Nbf      int64                  `json:"nbf,omitempty"`
-		Aud      []string               `json:"aud,omitempty"`
-		Iss      string                 `json:"iss,omitempty"`
-		Ext      map[string]interface{} `json:"ext,omitempty"`
+	var metadata struct {
+		Issuer                string   `json:"issuer"`
+		IntrospectionEndpoint string   `json:"introspection_endpoint"`
+		JWKSURI               string   `json:"jwks_uri"`
+		ScopesSupported       []string `json:"scopes_supported"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&hydraResp); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	// Convert to standard TokenIntrospection
-	return &oidc.TokenIntrospection{
-		Active:    hydraResp.Active,
-		Scope:     hydraResp.Scope,
-		ClientID:  hydraResp.ClientID,
-		Username:  hydraResp.Username,
-		Subject:   hydraResp.Sub,
-		Issuer:    hydraResp.Iss,
-		Audience:  hydraResp.Aud,
-		ExpiresAt: hydraResp.Exp,
-		IssuedAt:  hydraResp.Iat,
-		NotBefore: hydraResp.Nbf,
-		Claims:    hydraResp.Ext,
-	}, nil
-}
-
-// GetProviderMetadata implements the OIDCProvider interface
-func (c *Client) GetProviderMetadata(ctx context.Context) (*oidc.ProviderMetadata, error) {
-	// Hydra doesn't have a metadata endpoint, so we return a static response
 	return &oidc.ProviderMetadata{
-		Issuer:                c.adminURL,
-		IntrospectionEndpoint: c.adminURL + "/oauth2/introspect",
-		JWKSURI:               c.adminURL + "/.well-known/jwks.json",
-		ScopesSupported:       []string{"openid", "profile", "email"},
+		Issuer:                metadata.Issuer,
+		IntrospectionEndpoint: metadata.IntrospectionEndpoint,
+		JWKSURI:               metadata.JWKSURI,
+		ScopesSupported:       metadata.ScopesSupported,
 	}, nil
 }

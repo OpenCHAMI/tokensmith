@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
@@ -39,7 +40,9 @@ type Config struct {
 	HydraClientID     string
 	HydraClientSecret string
 	// Authelia-specific config
-	AutheliaURL string
+	AutheliaURL          string
+	AutheliaClientID     string
+	AutheliaClientSecret string
 	// Keycloak-specific config
 	KeycloakURL          string
 	KeycloakRealm        string
@@ -73,10 +76,10 @@ func NewTokenService(keyManager *jwtauth.KeyManager, config Config) (*TokenServi
 	var oidcProvider oidc.Provider
 	switch config.ProviderType {
 	case ProviderTypeHydra:
-		hydraClient := hydra.NewClient(config.HydraAdminURL)
+		hydraClient := hydra.NewClient(config.HydraAdminURL, config.HydraClientID, config.HydraClientSecret)
 		oidcProvider = hydraClient
 	case ProviderTypeAuthelia:
-		autheliaClient := authelia.NewClient(config.AutheliaURL)
+		autheliaClient := authelia.NewClient(config.AutheliaURL, config.AutheliaClientID, config.AutheliaClientSecret)
 		oidcProvider = autheliaClient
 	case ProviderTypeKeycloak:
 		keycloakClient := keycloak.NewClient(
@@ -387,4 +390,32 @@ func (s *TokenService) getServiceAllowedScopes(serviceID, targetService string) 
 	return map[string]bool{
 		"mock-scope": true,
 	}
+}
+
+// Start starts the HTTP server
+func (s *TokenService) Start(port int) error {
+	r := chi.NewRouter()
+
+	// Register handlers
+	r.Route("/.well-known", func(r chi.Router) {
+		r.Get("/jwks.json", s.JWKSHandler)
+	})
+
+	r.Route("/oauth", func(r chi.Router) {
+		r.Group(func(r chi.Router) {
+			r.Use(oidc.RequireToken)
+			r.Use(oidc.RequireValidToken(s.OIDCProvider))
+			r.Post("/token", s.TokenExchangeHandler)
+		})
+	})
+
+	// Service token routes
+	r.Route("/service", func(r chi.Router) {
+		r.Post("/token", s.ServiceTokenHandler)
+	})
+
+	// Start server
+	addr := fmt.Sprintf(":%d", port)
+	fmt.Printf("Starting server on %s\n", addr)
+	return http.ListenAndServe(addr, r)
 }
