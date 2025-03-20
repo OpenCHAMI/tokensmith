@@ -55,7 +55,6 @@ func TestTokenService(t *testing.T) {
 	config := Config{
 		ProviderType: ProviderTypeHydra,
 		Issuer:       "https://openchami.example.com",
-		Audience:     "smd,bss,cloud-init",
 		GroupScopes: map[string][]string{
 			"admin":    {"admin", "write", "read"},
 			"operator": {"write", "read"},
@@ -71,7 +70,6 @@ func TestTokenService(t *testing.T) {
 		TokenManager: jwt.NewTokenManager(keyManager, config.Issuer, config.ClusterID, config.OpenCHAMIID),
 		Config:       config,
 		Issuer:       config.Issuer,
-		Audience:     config.Audience,
 		GroupScopes:  config.GroupScopes,
 		ClusterID:    config.ClusterID,
 		OpenCHAMIID:  config.OpenCHAMIID,
@@ -108,7 +106,7 @@ func TestTokenService(t *testing.T) {
 		// Verify claims
 		assert.Equal(t, config.Issuer, claims.Issuer)
 		assert.Equal(t, "admin-user", claims.Subject)
-		assert.Equal(t, []string{config.Audience}, claims.Audience)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
 		assert.Equal(t, "Admin User", claims.Name)
 		assert.Equal(t, "admin@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -147,7 +145,7 @@ func TestTokenService(t *testing.T) {
 		// Verify claims
 		assert.Equal(t, config.Issuer, claims.Issuer)
 		assert.Equal(t, "operator-user", claims.Subject)
-		assert.Equal(t, []string{config.Audience}, claims.Audience)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
 		assert.Equal(t, "Operator User", claims.Name)
 		assert.Equal(t, "operator@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -186,7 +184,7 @@ func TestTokenService(t *testing.T) {
 		// Verify claims
 		assert.Equal(t, config.Issuer, claims.Issuer)
 		assert.Equal(t, "multi-group-user", claims.Subject)
-		assert.Equal(t, []string{config.Audience}, claims.Audience)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
 		assert.Equal(t, "Multi Group User", claims.Name)
 		assert.Equal(t, "multi@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -338,7 +336,6 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 			config: Config{
 				ProviderType: ProviderTypeHydra,
 				Issuer:       "test-issuer",
-				Audience:     "test-audience",
 				ClusterID:    "test-cluster",
 				OpenCHAMIID:  "test-openchami",
 				GroupScopes: map[string][]string{
@@ -376,7 +373,6 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 			config: Config{
 				ProviderType: ProviderTypeHydra,
 				Issuer:       "test-issuer",
-				Audience:     "test-audience",
 				ClusterID:    "test-cluster",
 				OpenCHAMIID:  "test-openchami",
 			},
@@ -393,7 +389,6 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 			config: Config{
 				ProviderType: ProviderTypeHydra,
 				Issuer:       "test-issuer",
-				Audience:     "test-audience",
 				ClusterID:    "test-cluster",
 				OpenCHAMIID:  "test-openchami",
 			},
@@ -417,7 +412,6 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 				TokenManager: jwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
 				Config:       tt.config,
 				Issuer:       tt.config.Issuer,
-				Audience:     tt.config.Audience,
 				ClusterID:    tt.config.ClusterID,
 				OpenCHAMIID:  tt.config.OpenCHAMIID,
 				GroupScopes:  tt.config.GroupScopes,
@@ -470,7 +464,6 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			config: Config{
 				ProviderType: ProviderTypeHydra,
 				Issuer:       "test-issuer",
-				Audience:     "test-audience",
 				ClusterID:    "test-cluster",
 				OpenCHAMIID:  "test-openchami",
 			},
@@ -491,7 +484,6 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			config: Config{
 				ProviderType: ProviderTypeHydra,
 				Issuer:       "test-issuer",
-				Audience:     "test-audience",
 				ClusterID:    "test-cluster",
 				OpenCHAMIID:  "test-openchami",
 			},
@@ -514,7 +506,6 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 				TokenManager: jwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
 				Config:       tt.config,
 				Issuer:       tt.config.Issuer,
-				Audience:     tt.config.Audience,
 				ClusterID:    tt.config.ClusterID,
 				OpenCHAMIID:  tt.config.OpenCHAMIID,
 			}
@@ -559,7 +550,6 @@ func TestTokenService_ValidateToken(t *testing.T) {
 			config: Config{
 				ProviderType: ProviderTypeHydra,
 				Issuer:       "test-issuer",
-				Audience:     "test-audience",
 				ClusterID:    "test-cluster",
 				OpenCHAMIID:  "test-openchami",
 			},
@@ -575,7 +565,6 @@ func TestTokenService_ValidateToken(t *testing.T) {
 			config: Config{
 				ProviderType: ProviderTypeHydra,
 				Issuer:       "test-issuer",
-				Audience:     "test-audience",
 				ClusterID:    "test-cluster",
 				OpenCHAMIID:  "test-openchami",
 			},
@@ -591,7 +580,6 @@ func TestTokenService_ValidateToken(t *testing.T) {
 				TokenManager: jwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
 				Config:       tt.config,
 				Issuer:       tt.config.Issuer,
-				Audience:     tt.config.Audience,
 				ClusterID:    tt.config.ClusterID,
 				OpenCHAMIID:  tt.config.OpenCHAMIID,
 			}
@@ -601,7 +589,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 				claims := &jwt.Claims{
 					Issuer:         tt.config.Issuer,
 					Subject:        "testuser",
-					Audience:       []string{tt.config.Audience},
+					Audience:       []string{"smd", "bss", "cloud-init"},
 					ExpirationTime: time.Now().Add(time.Hour).Unix(),
 					IssuedAt:       time.Now().Unix(),
 					ClusterID:      tt.config.ClusterID,

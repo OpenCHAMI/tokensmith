@@ -30,7 +30,6 @@ const (
 // Config holds the configuration for the token service
 type Config struct {
 	Issuer       string
-	Audience     string
 	GroupScopes  map[string][]string
 	ClusterID    string
 	OpenCHAMIID  string
@@ -53,7 +52,6 @@ type TokenService struct {
 	TokenManager *jwtauth.TokenManager
 	Config       Config
 	Issuer       string
-	Audience     string
 	GroupScopes  map[string][]string
 	ClusterID    string
 	OpenCHAMIID  string
@@ -96,7 +94,6 @@ func NewTokenService(keyManager *jwtauth.KeyManager, config Config) (*TokenServi
 		TokenManager: tokenManager,
 		Config:       config,
 		Issuer:       config.Issuer,
-		Audience:     config.Audience,
 		GroupScopes:  config.GroupScopes,
 		ClusterID:    config.ClusterID,
 		OpenCHAMIID:  config.OpenCHAMIID,
@@ -124,7 +121,7 @@ func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string,
 	claims := &jwtauth.Claims{
 		Issuer:         s.Issuer,
 		Subject:        introspection.Username,
-		Audience:       []string{s.Audience},
+		Audience:       []string{"smd", "bss", "cloud-init"},
 		ExpirationTime: introspection.ExpiresAt,
 		IssuedAt:       introspection.IssuedAt,
 		ClusterID:      s.ClusterID,

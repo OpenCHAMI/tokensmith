@@ -1,233 +1,195 @@
-# Tokensmith
+# TokenSmith
 
-Tokensmith is a secure JWT token management service and library for OpenCHAMI, providing token generation, validation, and service-to-service authentication capabilities.
+TokenSmith bridges external OIDC user identity with internal identity and access management using signed JWTs. It provides internal service-to-service identity and access management, along with a standalone chi middleware for JWT verification using PKI.
+
+## Token Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant OIDC
+    participant TokenSmith
+    participant ServiceA
+    participant ServiceB
+
+    %% User Authentication Flow
+    User->>OIDC: Authenticate
+    OIDC-->>User: ID Token
+    User->>TokenSmith: Exchange ID Token
+    TokenSmith-->>User: Internal JWT
+    User->>ServiceA: Request with Internal JWT
+
+    %% Service-to-Service Flow
+    ServiceA->>TokenSmith: Request Service Token
+    TokenSmith-->>ServiceA: Service JWT
+    ServiceA->>ServiceB: Request with Service JWT
+    ServiceB->>ServiceB: Verify JWT (Middleware)
+```
 
 ## Features
 
-- **JWT Token Management**: Generate and validate JWT tokens with RSA-256 signatures
-- **Service-to-Service Authentication**: Secure communication between microservices
-- **Hydra Integration**: Seamless integration with Ory Hydra for OAuth2/OpenID Connect
-- **Group-based Scope Management**: Automatically assign scopes based on user groups
-- **Key Management**: Secure RSA key pair generation and storage
-- **Middleware Support**: Easy-to-use middleware for token validation
+- **Identity Bridging**
+  - Exchange external OIDC tokens for internal JWTs
+  - Map external identities to internal service identities
+  - Group-based authorization and scope management
+  - Support for multiple OIDC providers (Keycloak, Hydra, Authelia)
 
-## Components
+- **Service-to-Service Authentication**
+  - Secure internal service communication
+  - PKI-based JWT signing and verification
+  - Service-specific claims and scopes
+  - Automatic token validation
 
-### Core Library (`pkg/jwt`)
+- **JWT Middleware**
+  - Standalone chi middleware for JWT verification
+  - PKI-based signature validation
+  - Support for RSA key pairs and JWKS
+  - Scope-based authorization
+  - Service-to-service authentication
+  - Extensible claims handling
 
-The core JWT library provides:
+- **OIDC Provider Support**
+  - Keycloak integration
+  - Hydra integration
+  - Authelia integration
+  - Extensible provider interface
 
-- `TokenManager`: Handles JWT token operations (generation, parsing, validation)
-- `KeyManager`: Manages RSA key pairs and JWK conversion
-- `Claims`: Structured JWT claims with validation
-- `Middleware`: HTTP middleware for token validation
+## Project Structure
 
-### Token Service (`pkg/tokenservice`)
-
-A service layer that provides:
-
-- Token exchange with Hydra integration
-- Service token generation
-- Group-based scope management
-- JWKS endpoint for public key distribution
-
-### Command Line Interface (`cmd/tokenservice`)
-
-A standalone service that exposes the token service functionality via HTTP endpoints:
-
-```bash
-tokenservice serve \
-  --hydra-url=http://hydra:4445 \
-  --issuer=http://tokensmith:8080 \
-  --audience=api \
-  --port=8080 \
-  --key-dir=/etc/tokensmith/keys \
-  --cluster-id=test-cluster-id \
-  --openchami-id=test-openchami-id
+```
+tokensmith/
+├── cmd/
+│   └── tokensmith/          # Main application entry point
+├── pkg/
+│   ├── jwt/                 # JWT package (shared)
+│   │   ├── oidc/           # OIDC provider implementations
+│   │   │   ├── authelia/   # Authelia provider
+│   │   │   ├── hydra/      # Hydra provider
+│   │   │   └── keycloak/   # Keycloak provider
+│   │   └── provider.go     # Provider interface
+│   ├── tokenservice/       # Token exchange service
+│   └── middleware/         # JWT middleware (standalone)
+└── example/                # Example applications
+    └── middleware/         # Example of middleware usage
 ```
 
 ## Installation
+
+### Main Service
 
 ```bash
 go get github.com/openchami/tokensmith
 ```
 
+### JWT Middleware
+
+```bash
+go get github.com/openchami/tokensmith/middleware
+```
+
+See the [middleware documentation](middleware/README.md) for detailed usage instructions.
+
 ## Usage
 
-### Middleware Usage
+### Token Service
 
-Tokensmith provides several middleware components for securing your HTTP endpoints:
+The token service can be run as a standalone application:
 
-```go
-import (
-    "github.com/go-chi/chi/v5"
-    "github.com/openchami/tokensmith/pkg/jwt"
-)
-
-func main() {
-    r := chi.NewRouter()
-
-    // Create managers
-    km := jwt.NewKeyManager()
-    err := km.LoadPrivateKey("path/to/private.pem")
-    if err != nil {
-        log.Fatal(err)
-    }
-    tm := jwt.NewTokenManager(km, "your-issuer")
-
-    // Protect routes with token validation
-    r.Group(func(r chi.Router) {
-        // Validate JWT tokens
-        r.Use(jwt.Middleware(tm))
-        
-        // Optional: Require specific scopes
-        r.With(jwt.RequireScope("admin")).Get("/admin", adminHandler)
-        r.With(jwt.RequireScope("read")).Get("/items", listItems)
-        
-        // Optional: Service-to-service authentication
-        r.With(jwt.RequireServiceToken("inventory-service")).Post("/inventory", updateInventory)
-    })
-}
-```
-
-### Complete Example
-
-See the [example](example/) directory for a complete working example, which includes:
-
-1. Token Service Setup (`example/server/main.go`):
-```go
-
-...
-
-    // Create key manager
-    km := jwt.NewKeyManager()
-    if err := km.GenerateKeyPair(2048); err != nil {
-        log.Fatalf("Failed to generate key pair: %v", err)
-    }
-
-    // Configure token service
-    config := tokenservice.Config{
-        HydraAdminURL: "http://hydra:4445",
-        Issuer:        "https://openchami.example.com",
-        Audience:      "openchami-api",
-        GroupScopes: map[string][]string{
-            "admin":    {"admin", "write", "read"},
-            "operator": {"write", "read"},
-            "viewer":   {"read"},
-            "user":     {"read"},
-        },
-        ClusterID:   "test-cluster-id",
-		OpenCHAMIID: "test-openchami-id",
-    }
-
-    // Create token service
-    ts := tokenservice.NewTokenService(km, config,)
-
-    // Set up routes
-    r := chi.NewRouter()
-    r.Use(middleware.Logger)
-    r.Use(middleware.Recoverer)
-
-...
-
-    // Protected API endpoints
-    r.Group(func(r chi.Router) {
-        // Create token manager for validation
-        tm := jwt.NewTokenManager(km, config.Issuer)
-        r.Use(jwt.Middleware(tm))
-        
-        // Admin-only endpoints
-        r.Group(func(r chi.Router) {
-            r.Use(jwt.RequireScope("admin"))
-            r.Post("/users", createUser)
-            r.Delete("/users/{id}", deleteUser)
-        })
-
-...
-```
-
-2. Running the Example:
 ```bash
-# Start Hydra (see example/hydra/README.md for setup)
-cd example/hydra
-docker-compose up -d
-
-# Start the token service
-cd example/server
-go run main.go
-```
-
-3. Testing the Service:
-```bash
-# Get a token from Hydra
-TOKEN=$(curl -X POST http://localhost:4444/oauth2/token \
-    -u "client:secret" \
-    -d "grant_type=client_credentials")
-
-# Exchange for a service token
-curl -X POST http://localhost:8080/token/service \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"service_id": "inventory", "target_service": "api"}'
-```
-
-### As a Service
-
-1. Start the token service:
-```bash
-tokenservice serve \
-  --hydra-url=http://hydra:4445 \
+tokensmith serve \
+  --provider=hydra \
   --issuer=http://tokensmith:8080 \
-  --audience=api \
+  --hydra-url=http://hydra:4445 \
   --port=8080 \
-  --key-dir=/etc/tokensmith/keys
+  --cluster-id=test-cluster-id \
+  --openchami-id=test-openchami-id
 ```
 
-2. Exchange a Hydra token for an OpenCHAMI token:
-```bash
-curl -X POST http://localhost:8080/token \
-  -H "Authorization: Bearer <hydra-token>" \
-  -H "Content-Type: application/json"
-```
-
-3. Generate a service token:
-```bash
-curl -X POST http://localhost:8080/token/service \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"service_id": "service1", "target_service": "service2"}'
-```
-
-## Security Features
-
-- RSA-256 signatures for all tokens
-- Automatic key rotation support
-- Secure key storage
-- Token validation:
-  - Signature verification
-  - Expiration and validity period checks
-  - Issuer and audience validation
-  - Scope validation
-  - Service-specific claims validation
-
-## Configuration
-
-The token service supports the following configuration options:
+Configuration options:
 
 | Flag | Environment Variable | Description | Default |
 |------|---------------------|-------------|---------|
-| `--hydra-url` | `HYDRA_ADMIN_URL` | Hydra Admin API URL | `http://hydra:4445` |
-| `--issuer` | `ISSUER` | Token issuer identifier | `http://tokensmith:8080` |
-| `--audience` | `AUDIENCE` | Default token audience | `api` |
-| `--port` | `PORT` | HTTP server port | `8080` |
-| `--key-dir` | `KEY_DIR` | Directory for key storage | `/etc/tokensmith/keys` |
-| `--cluster-id` | `CLUSTER_ID` | Unique identifier for this cluster | `cl-F00F00F00` |
-| `--openchami-id` | `OPENCHAMI_ID` | Unique identifier for this instance of OpenCHAMI | `oc-F00F00F00` |
+| `--provider` |  | OIDC provider type (keycloak, hydra, authelia) | `hydra` |
+| `--issuer` |  | Token issuer identifier | `http://tokensmith:8080` |
+| `--port` |  | HTTP server port | `8080` |
+| `--cluster-id` |  | Unique identifier for this cluster | `cl-F00F00F00` |
+| `--openchami-id` |  | Unique identifier for this instance of OpenCHAMI | `oc-F00F00F00` |
+| `--hydra-url` |  | Hydra admin API URL | `http://hydra:4445` |
+| `--authelia-url` |  | Authelia admin API URL | `http://authelia:9091` |
+| `--keycloak-url` |  | Keycloak admin API URL | `http://keycloak:8080` |
+| `--keycloak-realm` | | Keycloak realm | `openchami` |
+|  | `HYRDA_CLIENT_ID` | Hydra Client ID | no default |
+|  | `HYDRA_CLIENT_SECRET` | Hydra Client Secret | no default |
+|  | `KEYCLOAK_CLIENT_ID` | Keycloak Client ID | no default |
+|  | `KEYCLOAK_CLIENT_SECRET` | Keycloak Client Secret | no default |
+
+## Development
+
+### Prerequisites
+
+- Go 1.21 or later
+- Access to an OIDC provider (Keycloak, Hydra, or Authelia)
+
+### Build & Install
+This project uses [GoReleaser](https://goreleaser.com/) to automate releases and embed additional build metadata (commit info, build time, versioning, etc.).
+
+#### 1. Environment Variables
+Before building, make sure to set the following environment variables to include detailed build metadata:
+
+- **GIT_STATE**: Indicates whether there are uncommitted changes. (`clean` if no changes, `dirty` if there are.)
+- **BUILD_HOST**: Hostname of the machine performing the build.
+- **GO_VERSION**: The version of Go used.
+- **BUILD_USER**: The username of the person or system performing the build.
+
+Example:
+```bash
+export GIT_STATE=$(if git diff-index --quiet HEAD --; then echo 'clean'; else echo 'dirty'; fi)
+export BUILD_HOST=$(hostname)
+export GO_VERSION=$(go version | awk '{print $3}')
+export BUILD_USER=$(whoami)
+```
+
+#### 2. Installing GoReleaser
+Follow the official [GoReleaser installation instructions](https://goreleaser.com/install/) to set up GoReleaser locally.
+
+#### 3. Building Locally with GoReleaser
+Use snapshot mode to build locally without releasing:
+
+```bash
+goreleaser release --snapshot --clean
+```
+
+- The build artifacts (including embedded metadata) will be placed in the `dist/` directory.
+- Inspect the resulting binaries to ensure the metadata was correctly embedded.
+
+
+### Testing
+
+```bash
+# Run all tests
+go test ./...
+
+# Run specific package tests
+go test ./pkg/tokenservice
+go test ./pkg/middleware
+```
 
 ## Contributing
 
-Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+See the [OpenCHAMI Contributors Guide](https://github.com/OpenCHAMI/.github/blob/main/CONTRIBUTING.md) for more information.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- OpenCHAMI community
+- OIDC provider maintainers
+- Contributors and maintainers of this project 

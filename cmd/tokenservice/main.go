@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
@@ -21,15 +22,18 @@ func main() {
 
 var (
 	// Flags
-	hydraURL    string
-	issuer      string
-	audience    string
-	port        int
-	keyFile     string
-	keyDir      string
-	groupScopes map[string][]string
-	clusterID   string
-	openchamiID string
+	hydraURL      string
+	autheliaURL   string
+	keycloakURL   string
+	keycloakRealm string
+	oidcProvider  string
+	issuer        string
+	port          int
+	keyFile       string
+	keyDir        string
+	groupScopes   map[string][]string
+	clusterID     string
+	openchamiID   string
 
 	rootCmd = &cobra.Command{
 		Use:   "tokenservice",
@@ -42,9 +46,12 @@ It allows users authenticated through Hydra to obtain OpenCHAMI-specific tokens 
 
 func init() {
 	// Initialize flags
+	rootCmd.Flags().StringVar(&oidcProvider, "oidc-provider", "hydra", "OIDC provider (hydra, authelia, keycloak)")
 	rootCmd.Flags().StringVar(&hydraURL, "hydra-url", "http://hydra:4445", "Hydra admin API URL")
+	rootCmd.Flags().StringVar(&autheliaURL, "authelia-url", "http://authelia:9091", "Authelia admin API URL")
+	rootCmd.Flags().StringVar(&keycloakURL, "keycloak-url", "http://keycloak:8080", "Keycloak admin API URL")
+	rootCmd.Flags().StringVar(&keycloakRealm, "keycloak-realm", "openchami", "Keycloak realm")
 	rootCmd.Flags().StringVar(&issuer, "issuer", "https://openchami.example.com", "Token issuer")
-	rootCmd.Flags().StringVar(&audience, "audience", "openchami-api", "Token audience")
 	rootCmd.Flags().IntVar(&port, "port", 8080, "Server port")
 	rootCmd.Flags().StringVar(&keyFile, "key-file", "", "RSA private key file (if not provided, generates a new key)")
 	rootCmd.Flags().StringVar(&keyDir, "key-dir", "keys", "Directory for storing key files")
@@ -94,12 +101,28 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Configure token service
 	config := tokenservice.Config{
-		HydraAdminURL: hydraURL,
-		Issuer:        issuer,
-		Audience:      audience,
-		GroupScopes:   groupScopes,
-		ClusterID:     clusterID,
-		OpenCHAMIID:   openchamiID,
+		Issuer:      issuer,
+		GroupScopes: groupScopes,
+		ClusterID:   clusterID,
+		OpenCHAMIID: openchamiID,
+	}
+
+	// Read oidc provider type from flag and read environment variables for Client Key and Secret
+	oidcProviderType := tokenservice.ProviderType(oidcProvider)
+	switch oidcProviderType {
+	case tokenservice.ProviderTypeHydra:
+		config.HydraAdminURL = hydraURL
+		config.HydraClientID = os.Getenv("HYDRA_CLIENT_ID")
+		config.HydraClientSecret = os.Getenv("HYDRA_CLIENT_SECRET")
+	case tokenservice.ProviderTypeAuthelia:
+		config.AutheliaURL = autheliaURL
+	case tokenservice.ProviderTypeKeycloak:
+		config.KeycloakURL = keycloakURL
+		config.KeycloakRealm = keycloakRealm
+		config.KeycloakClientID = os.Getenv("KEYCLOAK_CLIENT_ID")
+		config.KeycloakClientSecret = os.Getenv("KEYCLOAK_CLIENT_SECRET")
+	default:
+		return fmt.Errorf("invalid OIDC provider type: %s", oidcProvider)
 	}
 
 	// Create token service
