@@ -1,0 +1,11 @@
+{
+  "group_scopes": {
+    "admin": ["admin", "read", "write"],
+    "operator": ["read", "write"],
+    "viewer": ["read"]
+  },
+  "service_token": {
+    "allowed_scopes": ["admin", "read", "write"],
+    "expiration": "1h"
+  }
+} 

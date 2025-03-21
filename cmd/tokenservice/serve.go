@@ -20,6 +20,8 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 
+		fmt.Printf("Provider type from flag: %q\n", providerType)
+
 		// Create token service configuration
 		serviceConfig := tokenservice.Config{
 			ProviderType: tokenservice.ProviderType(providerType),
@@ -28,6 +30,9 @@ var serveCmd = &cobra.Command{
 			ClusterID:    clusterID,
 			OpenCHAMIID:  openCHAMIID,
 		}
+
+		fmt.Printf("Provider type after conversion: %q (len=%d)\n", serviceConfig.ProviderType, len(serviceConfig.ProviderType))
+		fmt.Printf("Expected constant value: %q (len=%d)\n", tokenservice.ProviderTypeAuthelia, len(tokenservice.ProviderTypeAuthelia))
 
 		// Set provider-specific configuration
 		switch serviceConfig.ProviderType {

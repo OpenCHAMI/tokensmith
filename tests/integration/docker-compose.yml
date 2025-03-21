@@ -1,0 +1,23 @@
+services:
+  tokensmith:
+    image: ghcr.io/openchami/tokensmith:0.0-arm64
+    ports:
+      - "8080:8080"
+    environment:
+      - TOKENSMITH_CONFIG=/tokensmith/config/config.json
+      - TOKENSMITH_ISSUER=https://tokensmith.example.com 
+      - TOKENSMITH_CLUSTER_ID=my-cluster 
+      - TOKENSMITH_OPENCHAMI_ID=my-openchami 
+      - TOKENSMITH_OIDC_PROVIDER=authelia
+      - AUTHELIA_CLIENT_ID=your-client-id 
+      - AUTHELIA_CLIENT_SECRET=your-client-secret 
+    volumes:
+      - ./tokensmith/config:/tokensmith/config
+      - ./tokensmith/keys:/tokensmith/keys
+
+  authelia:
+    image: authelia/authelia:latest
+    ports:
+      - "9091:9091"
+    volumes:
+      - ./authelia/config:/config

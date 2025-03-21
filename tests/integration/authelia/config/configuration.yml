@@ -1,0 +1,49 @@
+server:
+  address: 0.0.0.0:9091
+
+log:
+  level: debug
+
+identity_validation:
+  reset_password:
+    jwt_secret: a_very_long_secret_key_for_testing_purposes
+
+authentication_backend:
+  file:
+    path: /config/users_database.yml
+    password:
+      algorithm: argon2id
+      iterations: 1
+      salt_length: 16
+      parallelism: 8
+      memory: 64
+
+access_control:
+  default_policy: one_factor
+  rules:
+    - domain: "*"
+      policy: one_factor
+      methods: ["GET", "POST", "HEAD", "PUT", "OPTIONS", "DELETE"]
+      resources:
+        - "/*"
+      subject: ["group:admins"]
+
+session:
+  name: authelia_session
+  secret: a_very_long_secret_key_for_testing_purposes
+  expiration: 3600  # 1 hour
+  inactivity: 300   # 5 minutes
+
+  cookies:
+    - name: authelia_session
+      domain: openchami.demo
+      authelia_url: https://authelia.openchami.demo:9091
+
+storage:
+  local:
+    path: /config/db.sqlite3
+  encryption_key: a_very_long_secret_key_for_testing_purposes
+
+notifier:
+  filesystem:
+    filename: /config/notification.txt
