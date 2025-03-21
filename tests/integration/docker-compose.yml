@@ -1,23 +1,84 @@
 services:
+  step-ca:
+    image: smallstep/step-ca:latest
+    environment:
+      - STEPDEBUG=1
+      - DOCKER_STEP_CA_NO_TTY=true
+      - DOCKER_STEPCA_INIT_NAME=OpenCHAMI Test CA
+      - DOCKER_STEPCA_INIT_DNS_NAMES=step-ca.openchami.demo
+      - DOCKER_STEPCA_INIT_PASSWORD=password123
+      - DOCKER_STEPCA_INIT_ACME=true
+      - DOCKER_STEPCA_INIT_ACME_EMAIL=test@openchami.demo
+      - DOCKER_STEPCA_INIT_NON_INTERACTIVE=true
+      
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./step-ca/data:/home/step
+    command: sh -c "step-ca /home/step/config/config.json --password-file=/home/step/config/password.txt"
+    networks:
+      - tokensmith-network
+
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.stepca.acme.email=test@openchami.demo"
+      - "--certificatesresolvers.stepca.acme.storage=/certificates/acme.json"
+      - "--certificatesresolvers.stepca.acme.httpchallenge=true"
+      - "--certificatesresolvers.stepca.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.stepca.acme.caserver=http://step-ca:9001/acme/acme/directory"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./certificates:/certificates
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - tokensmith-network
+
   tokensmith:
     image: ghcr.io/openchami/tokensmith:0.0-arm64
-    ports:
-      - "8080:8080"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tokensmith.rule=Host(`tokensmith.openchami.demo`)"
+      - "traefik.http.routers.tokensmith.entrypoints=websecure"
+      - "traefik.http.routers.tokensmith.tls.certresolver=stepca"
     environment:
+      - TOKENSMITH_ISSUER=https://tokensmith.openchami.demo 
       - TOKENSMITH_CONFIG=/tokensmith/config/config.json
-      - TOKENSMITH_ISSUER=https://tokensmith.example.com 
       - TOKENSMITH_CLUSTER_ID=my-cluster 
       - TOKENSMITH_OPENCHAMI_ID=my-openchami 
       - TOKENSMITH_OIDC_PROVIDER=authelia
-      - AUTHELIA_CLIENT_ID=your-client-id 
-      - AUTHELIA_CLIENT_SECRET=your-client-secret 
+      - AUTHELIA_URL=https://authelia.openchami.demo:9091
+    
+ 
     volumes:
       - ./tokensmith/config:/tokensmith/config
       - ./tokensmith/keys:/tokensmith/keys
+    networks:
+      - tokensmith-network
 
   authelia:
     image: authelia/authelia:latest
-    ports:
-      - "9091:9091"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.authelia.rule=Host(`auth.openchami.demo`)"
+      - "traefik.http.routers.authelia.entrypoints=websecure"
+      - "traefik.http.routers.authelia.tls.certresolver=stepca"
     volumes:
       - ./authelia/config:/config
+    networks:
+      - tokensmith-network
+
+networks:
+  tokensmith-network:
+    driver: bridge
+
+volumes:
+  step-ca-data:

@@ -26,3 +26,18 @@ go.work.sum
 
 # goreleaser
 dist/
+
+# integration tests
+tests/integration/step-ca/data/certs/
+tests/integration/step-ca/data/secrets/
+tests/integration/step-ca/data/keys/
+tests/integration/step-ca/data/db/
+tests/integration/step-ca/data/templates/
+tests/integration/step-ca/data/config/ca.json
+tests/integration/step-ca/data/config/defaults.json
+tests/integration/authelia/config/db.sqlite3
+tests/integration/authelia/config/notification.txt
+
+# certs
+
+*.pem
