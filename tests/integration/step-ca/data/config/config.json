@@ -4,7 +4,6 @@
   "crt": "/home/step/certs/intermediate_ca.crt",
   "key": "/home/step/secrets/intermediate_ca_key",
   "address": ":9000",
-  "insecureAddress": ":9001",
   "dnsNames": ["step-ca.openchami.demo"],
   "logger": {
     "format": "text"
@@ -21,7 +20,15 @@
         "type": "acme",
         "forceCN": true,
         "challenges": ["http-01"],
-        "requireEAB": false
+        "requireEAB": false,
+        "claims": {
+          "minTLSCertDuration": "1h",
+          "maxTLSCertDuration": "24h",
+          "defaultTLSCertDuration": "24h"
+        },
+        "options": {
+          "webroot": "/home/step/acme"
+        }
       }
     ]
   },

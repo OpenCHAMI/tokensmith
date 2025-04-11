@@ -1,0 +1,21 @@
+http:
+  serversTransports:
+    default:
+      tls:
+        rootCAs:
+          - /certs/root_ca.crt
+        insecureSkipVerify: false
+
+tls:
+  certificatesResolvers:
+    stepca:
+      acme:
+        transport:
+          rootCAs:
+            - /certs/root_ca.crt
+          insecureSkipVerify: false
+        caServer: https://step-ca:9000/acme/directory
+        email: test@openchami.demo
+        storage: /certificates/acme.json
+        httpChallenge:
+          entryPoint: web 

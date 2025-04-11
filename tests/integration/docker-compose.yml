@@ -1,66 +1,115 @@
 services:
+  step-ca-volume-init:
+    image: alpine:latest
+    volumes:
+      - step-ca-data:/home/step
+    command: sh -c "mkdir -p /home/step/certs /home/step/secrets /home/step/config /home/step/acme && chown -R 1000:1000 /home/step"
+
+  step-ca-cert-copy:
+    image: alpine:latest
+    depends_on:
+      step-ca:
+        condition: service_healthy
+    volumes:
+      - step-ca-data:/home/step:ro
+      - ./step-ca/certs:/certs
+    command: sh -c "cp /home/step/certs/root_ca.crt /certs/root_ca.crt"
+
   step-ca:
     image: smallstep/step-ca:latest
+    depends_on:
+      step-ca-volume-init:
+        condition: service_completed_successfully
     environment:
-      - STEPDEBUG=1
-      - DOCKER_STEP_CA_NO_TTY=true
+      - DOCKER_STEPCA_INIT_NON_INTERACTIVE=true
       - DOCKER_STEPCA_INIT_NAME=OpenCHAMI Test CA
       - DOCKER_STEPCA_INIT_DNS_NAMES=step-ca.openchami.demo
-      - DOCKER_STEPCA_INIT_PASSWORD=password123
+      - DOCKER_STEPCA_INIT_ADDRESS=:9000
+      - DOCKER_STEPCA_INIT_PROVISIONER=admin
+      - DOCKER_STEPCA_INIT_PASSWORD_FILE=/opt/password.txt
       - DOCKER_STEPCA_INIT_ACME=true
-      - DOCKER_STEPCA_INIT_ACME_EMAIL=test@openchami.demo
-      - DOCKER_STEPCA_INIT_NON_INTERACTIVE=true
-      
+      - DOCKER_STEPCA_INIT_CA_URL=https://step-ca:9000
+    volumes:
+      - step-ca-data:/home/step
+      - ./step-ca/config/config.json:/opt/config.json:ro
+      - ./step-ca/config/password.txt:/opt/password.txt:ro
+      - ./step-ca/certs:/certs
+    user: "1000:1000"
+    command: sh -c "step-ca /opt/config.json --password-file=/opt/password.txt"
     ports:
       - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - ./step-ca/data:/home/step
-    command: sh -c "step-ca /home/step/config/config.json --password-file=/home/step/config/password.txt"
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - tokensmith-network
 
   traefik:
-    image: traefik:v2.10
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      - "--certificatesresolvers.stepca.acme.email=test@openchami.demo"
-      - "--certificatesresolvers.stepca.acme.storage=/certificates/acme.json"
-      - "--certificatesresolvers.stepca.acme.httpchallenge=true"
-      - "--certificatesresolvers.stepca.acme.httpchallenge.entrypoint=web"
-      - "--certificatesresolvers.stepca.acme.caserver=http://step-ca:9001/acme/acme/directory"
+    image: traefik:v3
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./certificates:/certificates
+      - ./step-ca/certs:/certs
+      - step-ca-data:/home/step
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
-      - tokensmith-network
-
+      tokensmith-network:
+        aliases:
+          - auth.openchami.demo
+          - tokensmith.openchami.demo
+    depends_on:
+      step-ca-cert-copy:
+        condition: service_completed_successfully
+    command:
+      - sh
+      - -c
+      - |
+        echo 'Starting Traefik initialization...'
+        ls -l /certs/root_ca.crt
+        mkdir -p /usr/local/share/ca-certificates
+        cp /certs/root_ca.crt /usr/local/share/ca-certificates/step-ca.crt
+        echo 'Certificate copied, updating CA certificates...'
+        update-ca-certificates --verbose
+        echo 'CA certificates updated, starting Traefik...'
+        exec traefik --api.insecure=true \
+          --providers.docker=true \
+          --providers.docker.exposedbydefault=false \
+          --providers.file.directory=/etc/traefik \
+          --providers.file.watch=true \
+          --entrypoints.web.address=:80 \
+          --entrypoints.websecure.address=:443 \
+          --certificatesresolvers.stepca.acme.email=test@openchami.demo \
+          --certificatesresolvers.stepca.acme.storage=/certificates/acme.json \
+          --certificatesresolvers.stepca.acme.httpchallenge=true \
+          --certificatesresolvers.stepca.acme.httpchallenge.entrypoint=web \
+          --certificatesresolvers.stepca.acme.caserver=https://step-ca:9000/acme/acme/directory
   tokensmith:
-    image: ghcr.io/openchami/tokensmith:0.0-arm64
+    image: ghcr.io/openchami/tokensmith:0.0-amd64
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.tokensmith.rule=Host(`tokensmith.openchami.demo`)"
       - "traefik.http.routers.tokensmith.entrypoints=websecure"
       - "traefik.http.routers.tokensmith.tls.certresolver=stepca"
+    ports:
+      - "8080:8080"
     environment:
-      - TOKENSMITH_ISSUER=https://tokensmith.openchami.demo 
+      - TOKENSMITH_ISSUER=https://tokensmith.openchami.demo
       - TOKENSMITH_CONFIG=/tokensmith/config/config.json
-      - TOKENSMITH_CLUSTER_ID=my-cluster 
-      - TOKENSMITH_OPENCHAMI_ID=my-openchami 
+      - TOKENSMITH_CLUSTER_ID=my-cluster
+      - TOKENSMITH_OPENCHAMI_ID=my-openchami
       - TOKENSMITH_OIDC_PROVIDER=authelia
       - AUTHELIA_URL=https://authelia.openchami.demo:9091
-    
- 
+      - SSL_CERT_FILE=/certs/root_ca.crt
     volumes:
       - ./tokensmith/config:/tokensmith/config
       - ./tokensmith/keys:/tokensmith/keys
+      - ./step-ca/certs:/certs:ro
     networks:
       - tokensmith-network
 
@@ -71,8 +120,11 @@ services:
       - "traefik.http.routers.authelia.rule=Host(`auth.openchami.demo`)"
       - "traefik.http.routers.authelia.entrypoints=websecure"
       - "traefik.http.routers.authelia.tls.certresolver=stepca"
+    environment:
+      - SSL_CERT_FILE=/certs/root_ca.crt
     volumes:
       - ./authelia/config:/config
+      - ./step-ca/certs:/certs:ro
     networks:
       - tokensmith-network
 
@@ -82,3 +134,4 @@ networks:
 
 volumes:
   step-ca-data:
+    name: step-ca-data
