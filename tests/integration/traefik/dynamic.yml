@@ -1,0 +1,14 @@
+http:
+  routers:
+    acme-challenge:
+      rule: "PathPrefix(`/.well-known/acme-challenge/`)"
+      entryPoints:
+        - web
+      service: acme-challenge-service
+      priority: 1000
+
+  services:
+    acme-challenge-service:
+      loadBalancer:
+        servers:
+          - url: "file:///home/step/acme" 
