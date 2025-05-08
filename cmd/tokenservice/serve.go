@@ -64,7 +64,7 @@ var serveCmd = &cobra.Command{
 			}
 		} else {
 			// Generate new key pair
-			if err := keyManager.GenerateKeyPair(2048); err != nil {
+			if err := keyManager.GenerateKeyPair(); err != nil {
 				return fmt.Errorf("failed to generate key pair: %w", err)
 			}
 

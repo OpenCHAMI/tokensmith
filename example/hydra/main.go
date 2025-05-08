@@ -30,7 +30,7 @@ func main() {
 	tokenManager := jwtauth.NewTokenManager(keyManager, "internal-service", "test-cluster-id", "test-openchami-id")
 
 	// Create Hydra client
-	hydraClient := hydraclient.NewClient("http://hydra:4445") // Replace with your Hydra admin URL
+	hydraClient := hydraclient.NewClient("http://hydra:4445", "test-client-id", "test-client-secret")
 
 	// Create middleware options for internal token validation
 	opts := tsmiddleware.DefaultMiddlewareOptions()

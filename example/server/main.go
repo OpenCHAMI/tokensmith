@@ -15,7 +15,7 @@ func main() {
 
 	// Create key manager
 	keyManager := jwtauth.NewKeyManager()
-	err := keyManager.GenerateKeyPair(2048)
+	err := keyManager.GenerateKeyPair()
 	if err != nil {
 		log.Fatalf("Failed to generate RSA key: %v", err)
 	}
@@ -24,7 +24,6 @@ func main() {
 	config := tokenservice.Config{
 		HydraAdminURL: "http://hydra:4445", // Hydra admin API URL
 		Issuer:        "https://openchami.example.com",
-		Audience:      "openchami-api",
 		GroupScopes: map[string][]string{
 			"admin":    {"admin", "write", "read"},
 			"operator": {"write", "read"},
