@@ -10,25 +10,29 @@ import (
 
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHydraClient_IntrospectToken(t *testing.T) {
 	tests := []struct {
 		name           string
 		token          string
-		mockResponse   *oidc.TokenIntrospection
+		mockResponse   *oidc.IntrospectionResponse
 		mockStatusCode int
 		expectError    bool
 	}{
 		{
 			name:  "valid token",
 			token: "valid-token",
-			mockResponse: &oidc.TokenIntrospection{
+			mockResponse: &oidc.IntrospectionResponse{
 				Active:    true,
 				Username:  "testuser",
 				ExpiresAt: time.Now().Add(time.Hour).Unix(),
 				IssuedAt:  time.Now().Unix(),
-				Scope:     "openid profile email",
+				Claims: map[string]interface{}{
+					"scope": "openid profile email",
+				},
+				TokenType: "Bearer",
 			},
 			mockStatusCode: http.StatusOK,
 			expectError:    false,
@@ -36,12 +40,15 @@ func TestHydraClient_IntrospectToken(t *testing.T) {
 		{
 			name:  "expired token",
 			token: "expired-token",
-			mockResponse: &oidc.TokenIntrospection{
+			mockResponse: &oidc.IntrospectionResponse{
 				Active:    false,
 				Username:  "testuser",
 				ExpiresAt: time.Now().Add(-time.Hour).Unix(),
 				IssuedAt:  time.Now().Add(-2 * time.Hour).Unix(),
-				Scope:     "openid profile email",
+				Claims: map[string]interface{}{
+					"scope": "openid profile email",
+				},
+				TokenType: "Bearer",
 			},
 			mockStatusCode: http.StatusOK,
 			expectError:    false,
@@ -64,10 +71,16 @@ func TestHydraClient_IntrospectToken(t *testing.T) {
 				assert.Equal(t, "/oauth2/introspect", r.URL.Path)
 				assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
 
-				// Parse form data
+				// Verify basic auth
+				username, password, ok := r.BasicAuth()
+				assert.True(t, ok)
+				assert.Equal(t, "test-client-id", username)
+				assert.Equal(t, "test-client-secret", password)
+
+				// Verify form data
 				err := r.ParseForm()
-				assert.NoError(t, err)
-				assert.Equal(t, tt.token, r.FormValue("token"))
+				require.NoError(t, err)
+				assert.Equal(t, tt.token, r.PostForm.Get("token"))
 
 				// Set response
 				w.WriteHeader(tt.mockStatusCode)
@@ -93,41 +106,82 @@ func TestHydraClient_IntrospectToken(t *testing.T) {
 			assert.Equal(t, tt.mockResponse.Username, result.Username)
 			assert.Equal(t, tt.mockResponse.ExpiresAt, result.ExpiresAt)
 			assert.Equal(t, tt.mockResponse.IssuedAt, result.IssuedAt)
-			assert.Equal(t, tt.mockResponse.Scope, result.Scope)
+			assert.Equal(t, tt.mockResponse.TokenType, result.TokenType)
+			if tt.mockResponse.Claims != nil {
+				assert.Equal(t, tt.mockResponse.Claims["scope"], result.Claims["scope"])
+			}
 		})
 	}
 }
 
 func TestHydraClient_GetProviderMetadata(t *testing.T) {
 	tests := []struct {
-		name      string
-		serverURL string
-		validate  func(*testing.T, *oidc.ProviderMetadata)
+		name           string
+		mockResponse   *oidc.ProviderMetadata
+		mockStatusCode int
+		expectError    bool
 	}{
 		{
-			name:      "valid metadata",
-			serverURL: "https://hydra.example.com",
-			validate: func(t *testing.T, result *oidc.ProviderMetadata) {
-				assert.Equal(t, "https://hydra.example.com", result.Issuer)
-				assert.Equal(t, "https://hydra.example.com/oauth2/introspect", result.IntrospectionEndpoint)
-				assert.Equal(t, "https://hydra.example.com/.well-known/jwks.json", result.JWKSURI)
-				assert.Equal(t, []string{"openid", "profile", "email"}, result.ScopesSupported)
+			name: "valid metadata",
+			mockResponse: &oidc.ProviderMetadata{
+				Issuer:                "https://hydra.example.com",
+				IntrospectionEndpoint: "https://hydra.example.com/oauth2/introspect",
+				JWKSURI:               "https://hydra.example.com/.well-known/jwks.json",
+				ScopesSupported:       []string{"openid", "profile", "email"},
 			},
+			mockStatusCode: http.StatusOK,
+			expectError:    false,
+		},
+		{
+			name:           "server error",
+			mockResponse:   nil,
+			mockStatusCode: http.StatusInternalServerError,
+			expectError:    true,
+		},
+		{
+			name: "missing required fields",
+			mockResponse: &oidc.ProviderMetadata{
+				Issuer: "https://hydra.example.com",
+				// Missing IntrospectionEndpoint and JWKSURI
+				ScopesSupported: []string{"openid", "profile", "email"},
+			},
+			mockStatusCode: http.StatusOK,
+			expectError:    true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create test server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Verify request
+				assert.Equal(t, "GET", r.Method)
+				assert.Equal(t, "/.well-known/openid-configuration", r.URL.Path)
+
+				// Set response
+				w.WriteHeader(tt.mockStatusCode)
+				if tt.mockResponse != nil {
+					json.NewEncoder(w).Encode(tt.mockResponse)
+				}
+			}))
+			defer server.Close()
+
 			// Create client
-			client := NewClient(tt.serverURL, "test-client-id", "test-client-secret")
+			client := NewClient(server.URL, "test-client-id", "test-client-secret")
 
 			// Test metadata retrieval
 			result, err := client.GetProviderMetadata(context.Background())
 
 			// Verify results
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
 			assert.NoError(t, err)
-			assert.NotNil(t, result)
-			tt.validate(t, result)
+			assert.Equal(t, tt.mockResponse.Issuer, result.Issuer)
+			assert.Equal(t, tt.mockResponse.IntrospectionEndpoint, result.IntrospectionEndpoint)
+			assert.Equal(t, tt.mockResponse.JWKSURI, result.JWKSURI)
+			assert.Equal(t, tt.mockResponse.ScopesSupported, result.ScopesSupported)
 		})
 	}
 }

@@ -102,6 +102,12 @@ func TestTokenService(t *testing.T) {
 				"name":           "Admin User",
 				"email":          "admin@example.com",
 				"email_verified": true,
+				"auth_level":     "IAL2",
+				"auth_factors":   float64(2),
+				"auth_methods":   []interface{}{"password", "mfa"},
+				"session_id":     "test-session-123",
+				"session_exp":    float64(time.Now().Add(24 * time.Hour).Unix()),
+				"auth_events":    []interface{}{"login", "mfa"},
 			},
 		}
 
@@ -126,6 +132,13 @@ func TestTokenService(t *testing.T) {
 		assert.Contains(t, claims.Scope, "admin")
 		assert.Contains(t, claims.Scope, "write")
 		assert.Contains(t, claims.Scope, "read")
+		// Verify NIST-compliant claims
+		assert.Equal(t, "IAL2", claims.AuthLevel)
+		assert.Equal(t, 2, claims.AuthFactors)
+		assert.Equal(t, []string{"password", "mfa"}, claims.AuthMethods)
+		assert.Equal(t, "test-session-123", claims.SessionID)
+		assert.Equal(t, time.Now().Add(24*time.Hour).Unix(), claims.SessionExp)
+		assert.Equal(t, []string{"login", "mfa"}, claims.AuthEvents)
 	})
 
 	t.Run("Token Exchange - Operator User", func(t *testing.T) {
@@ -141,6 +154,12 @@ func TestTokenService(t *testing.T) {
 				"name":           "Operator User",
 				"email":          "operator@example.com",
 				"email_verified": true,
+				"auth_level":     "IAL2",
+				"auth_factors":   float64(2),
+				"auth_methods":   []interface{}{"password", "mfa"},
+				"session_id":     "test-session-456",
+				"session_exp":    float64(time.Now().Add(24 * time.Hour).Unix()),
+				"auth_events":    []interface{}{"login", "mfa"},
 			},
 		}
 
@@ -165,6 +184,13 @@ func TestTokenService(t *testing.T) {
 		assert.Contains(t, claims.Scope, "write")
 		assert.Contains(t, claims.Scope, "read")
 		assert.NotContains(t, claims.Scope, "admin")
+		// Verify NIST-compliant claims
+		assert.Equal(t, "IAL2", claims.AuthLevel)
+		assert.Equal(t, 2, claims.AuthFactors)
+		assert.Equal(t, []string{"password", "mfa"}, claims.AuthMethods)
+		assert.Equal(t, "test-session-456", claims.SessionID)
+		assert.Equal(t, time.Now().Add(24*time.Hour).Unix(), claims.SessionExp)
+		assert.Equal(t, []string{"login", "mfa"}, claims.AuthEvents)
 	})
 
 	t.Run("Token Exchange - Multiple Groups", func(t *testing.T) {
@@ -180,6 +206,12 @@ func TestTokenService(t *testing.T) {
 				"name":           "Multi Group User",
 				"email":          "multi@example.com",
 				"email_verified": true,
+				"auth_level":     "IAL2",
+				"auth_factors":   float64(2),
+				"auth_methods":   []interface{}{"password", "mfa"},
+				"session_id":     "test-session-789",
+				"session_exp":    float64(time.Now().Add(24 * time.Hour).Unix()),
+				"auth_events":    []interface{}{"login", "mfa"},
 			},
 		}
 
@@ -204,6 +236,13 @@ func TestTokenService(t *testing.T) {
 		assert.Contains(t, claims.Scope, "admin")
 		assert.Contains(t, claims.Scope, "write")
 		assert.Contains(t, claims.Scope, "read")
+		// Verify NIST-compliant claims
+		assert.Equal(t, "IAL2", claims.AuthLevel)
+		assert.Equal(t, 2, claims.AuthFactors)
+		assert.Equal(t, []string{"password", "mfa"}, claims.AuthMethods)
+		assert.Equal(t, "test-session-789", claims.SessionID)
+		assert.Equal(t, time.Now().Add(24*time.Hour).Unix(), claims.SessionExp)
+		assert.Equal(t, []string{"login", "mfa"}, claims.AuthEvents)
 	})
 
 	t.Run("Token Exchange - Invalid Token", func(t *testing.T) {
@@ -235,6 +274,12 @@ func TestTokenService(t *testing.T) {
 				"name":           "No Groups User",
 				"email":          "nogroups@example.com",
 				"email_verified": true,
+				"auth_level":     "IAL2",
+				"auth_factors":   float64(2),
+				"auth_methods":   []interface{}{"password", "mfa"},
+				"session_id":     "test-session-123",
+				"session_exp":    float64(time.Now().Add(24 * time.Hour).Unix()),
+				"auth_events":    []interface{}{"login", "mfa"},
 			},
 		}
 
@@ -258,6 +303,12 @@ func TestTokenService(t *testing.T) {
 				"name":           "Invalid Group User",
 				"email":          "invalid@example.com",
 				"email_verified": true,
+				"auth_level":     "IAL2",
+				"auth_factors":   float64(2),
+				"auth_methods":   []interface{}{"password", "mfa"},
+				"session_id":     "test-session-123",
+				"session_exp":    float64(time.Now().Add(24 * time.Hour).Unix()),
+				"auth_events":    []interface{}{"login", "mfa"},
 			},
 		}
 
@@ -288,6 +339,12 @@ func TestTokenService(t *testing.T) {
 				"name":           "Admin User",
 				"email":          "admin@example.com",
 				"email_verified": true,
+				"auth_level":     "IAL2",
+				"auth_factors":   float64(2),
+				"auth_methods":   []interface{}{"password", "mfa"},
+				"session_id":     "test-session-123",
+				"session_exp":    float64(time.Now().Add(24 * time.Hour).Unix()),
+				"auth_events":    []interface{}{"login", "mfa"},
 			},
 		}
 
@@ -369,6 +426,12 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 					"name":           "Test User",
 					"email":          "test@example.com",
 					"email_verified": true,
+					"auth_level":     "IAL2",
+					"auth_factors":   float64(2),
+					"auth_methods":   []interface{}{"password", "mfa"},
+					"session_id":     "test-session-123",
+					"session_exp":    float64(time.Now().Add(24 * time.Hour).Unix()),
+					"auth_events":    []interface{}{"login", "mfa"},
 				},
 			},
 			expectError: false,
@@ -382,6 +445,13 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 				assert.Contains(t, claims.Scope, "admin")
 				assert.Contains(t, claims.Scope, "write")
 				assert.Contains(t, claims.Scope, "read")
+				// Verify NIST-compliant claims
+				assert.Equal(t, "IAL2", claims.AuthLevel)
+				assert.Equal(t, 2, claims.AuthFactors)
+				assert.Equal(t, []string{"password", "mfa"}, claims.AuthMethods)
+				assert.Equal(t, "test-session-123", claims.SessionID)
+				assert.Equal(t, time.Now().Add(24*time.Hour).Unix(), claims.SessionExp)
+				assert.Equal(t, []string{"login", "mfa"}, claims.AuthEvents)
 			},
 		},
 		{
@@ -420,6 +490,43 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 				},
 			},
 			expectError: true,
+		},
+		{
+			name: "token without NIST-compliant claims",
+			config: Config{
+				ProviderType: ProviderTypeHydra,
+				Issuer:       "test-issuer",
+				ClusterID:    "test-cluster",
+				OpenCHAMIID:  "test-openchami",
+				GroupScopes: map[string][]string{
+					"admin": {"admin", "write", "read"},
+				},
+			},
+			introspectResp: &oidc.IntrospectionResponse{
+				Active:    true,
+				Username:  "testuser",
+				ExpiresAt: time.Now().Add(time.Hour).Unix(),
+				IssuedAt:  time.Now().Unix(),
+				TokenType: "Bearer",
+				Claims: map[string]interface{}{
+					"groups":         []interface{}{"admin"},
+					"name":           "Test User",
+					"email":          "test@example.com",
+					"email_verified": true,
+					// Missing NIST-compliant claims:
+					// - auth_level
+					// - auth_factors
+					// - auth_methods
+					// - session_id
+					// - session_exp
+					// - auth_events
+				},
+			},
+			expectError: true,
+			validateClaims: func(t *testing.T, claims *jwt.Claims) {
+				// This should not be called since the token should fail validation
+				t.Fatal("validateClaims should not be called for invalid token")
+			},
 		},
 	}
 
@@ -495,6 +602,16 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 				assert.Equal(t, []string{"read", "write"}, claims.Scope)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
+				assert.Equal(t, "test-issuer", claims.Issuer)
+				assert.NotEmpty(t, claims.ExpirationTime)
+				assert.NotEmpty(t, claims.IssuedAt)
+				// Verify NIST-compliant claims for service tokens
+				assert.Equal(t, "IAL2", claims.AuthLevel)
+				assert.Equal(t, 2, claims.AuthFactors)
+				assert.Equal(t, []string{"service", "certificate"}, claims.AuthMethods)
+				assert.NotEmpty(t, claims.SessionID)
+				assert.NotEmpty(t, claims.SessionExp)
+				assert.Equal(t, []string{"service_auth"}, claims.AuthEvents)
 			},
 		},
 		{
@@ -513,6 +630,74 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 				assert.Equal(t, "service1", claims.Subject)
 				assert.Equal(t, "service2", claims.Audience[0])
 				assert.Empty(t, claims.Scope)
+				assert.Equal(t, "test-cluster", claims.ClusterID)
+				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
+				assert.Equal(t, "test-issuer", claims.Issuer)
+				assert.NotEmpty(t, claims.ExpirationTime)
+				assert.NotEmpty(t, claims.IssuedAt)
+				// Verify NIST-compliant claims for service tokens
+				assert.Equal(t, "IAL2", claims.AuthLevel)
+				assert.Equal(t, 2, claims.AuthFactors)
+				assert.Equal(t, []string{"service", "certificate"}, claims.AuthMethods)
+				assert.NotEmpty(t, claims.SessionID)
+				assert.NotEmpty(t, claims.SessionExp)
+				assert.Equal(t, []string{"service_auth"}, claims.AuthEvents)
+			},
+		},
+		{
+			name: "empty service ID",
+			config: Config{
+				ProviderType: ProviderTypeHydra,
+				Issuer:       "test-issuer",
+				ClusterID:    "test-cluster",
+				OpenCHAMIID:  "test-openchami",
+			},
+			serviceID:     "",
+			targetService: "service2",
+			scopes:        []string{"read", "write"},
+			expectError:   true,
+		},
+		{
+			name: "empty target service",
+			config: Config{
+				ProviderType: ProviderTypeHydra,
+				Issuer:       "test-issuer",
+				ClusterID:    "test-cluster",
+				OpenCHAMIID:  "test-openchami",
+			},
+			serviceID:     "service1",
+			targetService: "",
+			scopes:        []string{"read", "write"},
+			expectError:   true,
+		},
+		{
+			name: "nil scopes",
+			config: Config{
+				ProviderType: ProviderTypeHydra,
+				Issuer:       "test-issuer",
+				ClusterID:    "test-cluster",
+				OpenCHAMIID:  "test-openchami",
+			},
+			serviceID:     "service1",
+			targetService: "service2",
+			scopes:        nil,
+			expectError:   false,
+			validateClaims: func(t *testing.T, claims *jwt.Claims) {
+				assert.Equal(t, "service1", claims.Subject)
+				assert.Equal(t, "service2", claims.Audience[0])
+				assert.Nil(t, claims.Scope)
+				assert.Equal(t, "test-cluster", claims.ClusterID)
+				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
+				assert.Equal(t, "test-issuer", claims.Issuer)
+				assert.NotEmpty(t, claims.ExpirationTime)
+				assert.NotEmpty(t, claims.IssuedAt)
+				// Verify NIST-compliant claims for service tokens
+				assert.Equal(t, "IAL2", claims.AuthLevel)
+				assert.Equal(t, 2, claims.AuthFactors)
+				assert.Equal(t, []string{"service", "certificate"}, claims.AuthMethods)
+				assert.NotEmpty(t, claims.SessionID)
+				assert.NotEmpty(t, claims.SessionExp)
+				assert.Equal(t, []string{"service_auth"}, claims.AuthEvents)
 			},
 		},
 	}
@@ -576,6 +761,13 @@ func TestTokenService_ValidateToken(t *testing.T) {
 				assert.Equal(t, "testuser", claims.Subject)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
+				// Verify NIST-compliant claims
+				assert.Equal(t, "IAL2", claims.AuthLevel)
+				assert.Equal(t, 2, claims.AuthFactors)
+				assert.Equal(t, []string{"password", "mfa"}, claims.AuthMethods)
+				assert.NotEmpty(t, claims.SessionID)
+				assert.NotEmpty(t, claims.SessionExp)
+				assert.Equal(t, []string{"login", "mfa"}, claims.AuthEvents)
 			},
 		},
 		{
@@ -612,6 +804,13 @@ func TestTokenService_ValidateToken(t *testing.T) {
 					IssuedAt:       time.Now().Unix(),
 					ClusterID:      tt.config.ClusterID,
 					OpenCHAMIID:    tt.config.OpenCHAMIID,
+					// Add NIST-compliant claims
+					AuthLevel:   "IAL2",
+					AuthFactors: 2,
+					AuthMethods: []string{"password", "mfa"},
+					SessionID:   "test-session-123",
+					SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+					AuthEvents:  []string{"login", "mfa"},
 				}
 				var err error
 				tt.token, err = service.TokenManager.GenerateToken(claims)

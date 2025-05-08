@@ -1,0 +1,81 @@
+{
+  "standard_claims": {
+    "sub": {
+      "required": true,
+      "description": "Subject identifier - unique identifier for the user",
+      "nist_requirement": "SP 800-63B Section 4.1 - Unique identifier for the subscriber"
+    },
+    "name": {
+      "required": true,
+      "description": "Full name of the user",
+      "nist_requirement": "SP 800-63B Section 4.2 - Identity proofing"
+    },
+    "email": {
+      "required": true,
+      "description": "Email address of the user",
+      "nist_requirement": "SP 800-63B Section 4.2 - Identity proofing"
+    },
+    "email_verified": {
+      "required": true,
+      "description": "Whether the email has been verified",
+      "nist_requirement": "SP 800-63B Section 4.2 - Identity verification"
+    },
+    "auth_time": {
+      "required": true,
+      "description": "Time when the authentication occurred",
+      "nist_requirement": "SP 800-63B Section 4.3 - Authentication event logging"
+    },
+    "amr": {
+      "required": true,
+      "description": "Authentication Methods References",
+      "nist_requirement": "SP 800-63B Section 4.3 - Authentication method tracking"
+    },
+    "acr": {
+      "required": true,
+      "description": "Authentication Context Class Reference",
+      "nist_requirement": "SP 800-63B Section 4.3 - Authentication assurance level"
+    }
+  },
+  "custom_claims": {
+    "auth_level": {
+      "required": true,
+      "description": "Authentication assurance level (IAL1, IAL2, IAL3)",
+      "nist_requirement": "SP 800-63B Section 4.3 - Identity Assurance Levels"
+    },
+    "auth_factors": {
+      "required": true,
+      "description": "Number of authentication factors used",
+      "nist_requirement": "SP 800-63B Section 4.3 - Multi-factor authentication"
+    },
+    "auth_methods": {
+      "required": true,
+      "description": "List of authentication methods used",
+      "nist_requirement": "SP 800-63B Section 4.3 - Authentication methods"
+    },
+    "session_id": {
+      "required": true,
+      "description": "Unique session identifier",
+      "nist_requirement": "SP 800-63B Section 4.4 - Session management"
+    },
+    "session_exp": {
+      "required": true,
+      "description": "Session expiration time",
+      "nist_requirement": "SP 800-63B Section 4.4 - Session timeout"
+    },
+    "auth_events": {
+      "required": true,
+      "description": "Authentication event history",
+      "nist_requirement": "SP 800-63B Section 4.3 - Authentication event logging"
+    }
+  },
+  "claim_validation": {
+    "max_session_duration": 86400,
+    "min_auth_level": "IAL2",
+    "required_auth_factors": 2,
+    "allowed_auth_methods": [
+      "password",
+      "webauthn",
+      "totp"
+    ]
+  }
+} 

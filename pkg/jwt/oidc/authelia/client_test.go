@@ -10,25 +10,29 @@ import (
 
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAutheliaClient_IntrospectToken(t *testing.T) {
 	tests := []struct {
 		name           string
 		token          string
-		mockResponse   *oidc.TokenIntrospection
+		mockResponse   *oidc.IntrospectionResponse
 		mockStatusCode int
 		expectError    bool
 	}{
 		{
 			name:  "valid token",
 			token: "valid-token",
-			mockResponse: &oidc.TokenIntrospection{
+			mockResponse: &oidc.IntrospectionResponse{
 				Active:    true,
 				Username:  "testuser",
 				ExpiresAt: time.Now().Add(time.Hour).Unix(),
 				IssuedAt:  time.Now().Unix(),
-				Scope:     "openid profile email",
+				Claims: map[string]interface{}{
+					"scope": "openid profile email",
+				},
+				TokenType: "Bearer",
 			},
 			mockStatusCode: http.StatusOK,
 			expectError:    false,
@@ -36,12 +40,15 @@ func TestAutheliaClient_IntrospectToken(t *testing.T) {
 		{
 			name:  "expired token",
 			token: "expired-token",
-			mockResponse: &oidc.TokenIntrospection{
+			mockResponse: &oidc.IntrospectionResponse{
 				Active:    false,
 				Username:  "testuser",
 				ExpiresAt: time.Now().Add(-time.Hour).Unix(),
 				IssuedAt:  time.Now().Add(-2 * time.Hour).Unix(),
-				Scope:     "openid profile email",
+				Claims: map[string]interface{}{
+					"scope": "openid profile email",
+				},
+				TokenType: "Bearer",
 			},
 			mockStatusCode: http.StatusOK,
 			expectError:    false,
@@ -61,9 +68,19 @@ func TestAutheliaClient_IntrospectToken(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				// Verify request
 				assert.Equal(t, "POST", r.Method)
-				assert.Equal(t, "/api/verify", r.URL.Path)
-				assert.Equal(t, "Bearer "+tt.token, r.Header.Get("Authorization"))
-				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+				assert.Equal(t, "/api/oauth2/introspect", r.URL.Path)
+				assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
+
+				// Verify basic auth
+				username, password, ok := r.BasicAuth()
+				assert.True(t, ok)
+				assert.Equal(t, "test-client-id", username)
+				assert.Equal(t, "test-client-secret", password)
+
+				// Verify form data
+				err := r.ParseForm()
+				require.NoError(t, err)
+				assert.Equal(t, tt.token, r.PostForm.Get("token"))
 
 				// Set response
 				w.WriteHeader(tt.mockStatusCode)
@@ -89,7 +106,10 @@ func TestAutheliaClient_IntrospectToken(t *testing.T) {
 			assert.Equal(t, tt.mockResponse.Username, result.Username)
 			assert.Equal(t, tt.mockResponse.ExpiresAt, result.ExpiresAt)
 			assert.Equal(t, tt.mockResponse.IssuedAt, result.IssuedAt)
-			assert.Equal(t, tt.mockResponse.Scope, result.Scope)
+			assert.Equal(t, tt.mockResponse.TokenType, result.TokenType)
+			if tt.mockResponse.Claims != nil {
+				assert.Equal(t, tt.mockResponse.Claims["scope"], result.Claims["scope"])
+			}
 		})
 	}
 }
@@ -105,7 +125,7 @@ func TestAutheliaClient_GetProviderMetadata(t *testing.T) {
 			name: "valid metadata",
 			mockResponse: &oidc.ProviderMetadata{
 				Issuer:                "https://authelia.example.com",
-				IntrospectionEndpoint: "https://authelia.example.com/api/verify",
+				IntrospectionEndpoint: "https://authelia.example.com/api/oauth2/introspect",
 				JWKSURI:               "https://authelia.example.com/.well-known/jwks.json",
 				ScopesSupported:       []string{"openid", "profile", "email"},
 			},
@@ -116,6 +136,16 @@ func TestAutheliaClient_GetProviderMetadata(t *testing.T) {
 			name:           "server error",
 			mockResponse:   nil,
 			mockStatusCode: http.StatusInternalServerError,
+			expectError:    true,
+		},
+		{
+			name: "missing required fields",
+			mockResponse: &oidc.ProviderMetadata{
+				Issuer: "https://authelia.example.com",
+				// Missing IntrospectionEndpoint and JWKSURI
+				ScopesSupported: []string{"openid", "profile", "email"},
+			},
+			mockStatusCode: http.StatusOK,
 			expectError:    true,
 		},
 	}

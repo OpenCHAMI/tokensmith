@@ -1,6 +1,8 @@
 package jwt
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -8,17 +10,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 )
 
-// KeyManager handles RSA key pair management
+// FIPS-compliant key sizes
+const (
+	// RSA key sizes (FIPS 186-4)
+	MinRSAKeySize = 2048
+)
+
+// KeyManager manages cryptographic keys for JWT operations
 type KeyManager struct {
-	privateKey *rsa.PrivateKey
-	publicKey  *rsa.PublicKey
-	privateJwk jwk.Key
-	publicJwk  jwk.Key
+	privateKey interface{}
+	publicKey  interface{}
 }
 
 // NewKeyManager creates a new KeyManager instance
@@ -46,36 +49,8 @@ func (km *KeyManager) LoadPrivateKey(keyPath string) error {
 		return fmt.Errorf("failed to parse private key: %w", err)
 	}
 
-	// Convert to JWK
-	privateJwk, err := jwk.FromRaw(privateKey)
-	if err != nil {
-		return fmt.Errorf("failed to create private JWK: %w", err)
-	}
-
-	publicJwk, err := jwk.PublicKeyOf(privateJwk)
-	if err != nil {
-		return fmt.Errorf("failed to create public JWK: %w", err)
-	}
-
-	// Set key metadata
-	if err := privateJwk.Set(jwk.KeyTypeKey, jwa.RSA); err != nil {
-		return fmt.Errorf("failed to set private key type: %w", err)
-	}
-	if err := privateJwk.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return fmt.Errorf("failed to set private key algorithm: %w", err)
-	}
-
-	if err := publicJwk.Set(jwk.KeyTypeKey, jwa.RSA); err != nil {
-		return fmt.Errorf("failed to set public key type: %w", err)
-	}
-	if err := publicJwk.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return fmt.Errorf("failed to set public key algorithm: %w", err)
-	}
-
 	km.privateKey = privateKey
 	km.publicKey = &privateKey.PublicKey
-	km.privateJwk = privateJwk
-	km.publicJwk = publicJwk
 	return nil
 }
 
@@ -99,62 +74,33 @@ func (km *KeyManager) LoadPublicKey(keyPath string) error {
 		return fmt.Errorf("failed to parse public key: %w", err)
 	}
 
-	// Convert to JWK
-	publicJwk, err := jwk.FromRaw(publicKey)
-	if err != nil {
-		return fmt.Errorf("failed to create public JWK: %w", err)
-	}
-
-	// Set key metadata
-	if err := publicJwk.Set(jwk.KeyTypeKey, jwa.RSA); err != nil {
-		return fmt.Errorf("failed to set public key type: %w", err)
-	}
-	if err := publicJwk.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return fmt.Errorf("failed to set public key algorithm: %w", err)
-	}
-
 	km.publicKey = publicKey
-	km.publicJwk = publicJwk
 	return nil
 }
 
-// GenerateKeyPair generates a new RSA key pair
-func (km *KeyManager) GenerateKeyPair(bits int) error {
-	privateKey, err := rsa.GenerateKey(rand.Reader, bits)
+// GenerateKeyPair generates a new RSA key pair with FIPS-compliant key size
+func (km *KeyManager) GenerateKeyPair() error {
+	// Generate RSA key pair with minimum 2048 bits (FIPS 186-4)
+	privateKey, err := rsa.GenerateKey(rand.Reader, MinRSAKeySize)
 	if err != nil {
 		return fmt.Errorf("failed to generate RSA key pair: %w", err)
 	}
 
-	// Convert to JWK
-	privateJwk, err := jwk.FromRaw(privateKey)
+	km.privateKey = privateKey
+	km.publicKey = &privateKey.PublicKey
+	return nil
+}
+
+// GenerateECKeyPair generates a new ECDSA key pair using a FIPS-compliant curve
+func (km *KeyManager) GenerateECKeyPair() error {
+	// Generate ECDSA key pair using P-256 curve (FIPS 186-4)
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return fmt.Errorf("failed to create private JWK: %w", err)
-	}
-
-	publicJwk, err := jwk.PublicKeyOf(privateJwk)
-	if err != nil {
-		return fmt.Errorf("failed to create public JWK: %w", err)
-	}
-
-	// Set key metadata
-	if err := privateJwk.Set(jwk.KeyTypeKey, jwa.RSA); err != nil {
-		return fmt.Errorf("failed to set private key type: %w", err)
-	}
-	if err := privateJwk.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return fmt.Errorf("failed to set private key algorithm: %w", err)
-	}
-
-	if err := publicJwk.Set(jwk.KeyTypeKey, jwa.RSA); err != nil {
-		return fmt.Errorf("failed to set public key type: %w", err)
-	}
-	if err := publicJwk.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return fmt.Errorf("failed to set public key algorithm: %w", err)
+		return fmt.Errorf("failed to generate ECDSA key pair: %w", err)
 	}
 
 	km.privateKey = privateKey
 	km.publicKey = &privateKey.PublicKey
-	km.privateJwk = privateJwk
-	km.publicJwk = publicJwk
 	return nil
 }
 
@@ -169,10 +115,16 @@ func (km *KeyManager) SavePrivateKey(keyPath string) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	// Get RSA private key
+	privateKey, ok := km.privateKey.(*rsa.PrivateKey)
+	if !ok {
+		return fmt.Errorf("private key is not an RSA key")
+	}
+
 	// Encode private key to PEM
 	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(km.privateKey),
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
 	})
 
 	// Write to file
@@ -194,10 +146,16 @@ func (km *KeyManager) SavePublicKey(keyPath string) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	// Get RSA public key
+	publicKey, ok := km.publicKey.(*rsa.PublicKey)
+	if !ok {
+		return fmt.Errorf("public key is not an RSA key")
+	}
+
 	// Encode public key to PEM
 	publicKeyPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PUBLIC KEY",
-		Bytes: x509.MarshalPKCS1PublicKey(km.publicKey),
+		Bytes: x509.MarshalPKCS1PublicKey(publicKey),
 	})
 
 	// Write to file
@@ -209,74 +167,69 @@ func (km *KeyManager) SavePublicKey(keyPath string) error {
 }
 
 // GetPrivateKey returns the private key
-func (km *KeyManager) GetPrivateKey() (*rsa.PrivateKey, error) {
+func (km *KeyManager) GetPrivateKey() (interface{}, error) {
 	if km.privateKey == nil {
-		return nil, fmt.Errorf("no private key available")
+		return nil, fmt.Errorf("private key not set")
 	}
 	return km.privateKey, nil
 }
 
 // GetPublicKey returns the public key
-func (km *KeyManager) GetPublicKey() (*rsa.PublicKey, error) {
+func (km *KeyManager) GetPublicKey() (interface{}, error) {
 	if km.publicKey == nil {
-		return nil, fmt.Errorf("no public key available")
+		return nil, fmt.Errorf("public key not set")
 	}
 	return km.publicKey, nil
 }
 
-// GetPrivateJWK returns the private key as a JWK
-func (km *KeyManager) GetPrivateJWK() (jwk.Key, error) {
-	if km.privateJwk == nil {
-		return nil, fmt.Errorf("no private key available")
-	}
-	return km.privateJwk, nil
-}
-
-// GetPublicJWK returns the public key as a JWK
-func (km *KeyManager) GetPublicJWK() (jwk.Key, error) {
-	if km.publicJwk == nil {
-		return nil, fmt.Errorf("no public key available")
-	}
-	return km.publicJwk, nil
-}
-
-// SetKeyPair sets the RSA key pair for the KeyManager
+// SetKeyPair sets the RSA key pair
 func (km *KeyManager) SetKeyPair(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) error {
-	if privateKey == nil || publicKey == nil {
-		return fmt.Errorf("both private and public keys must be provided")
-	}
-
-	// Convert private key to JWK
-	privateJwk, err := jwk.FromRaw(privateKey)
-	if err != nil {
-		return fmt.Errorf("failed to convert private key to JWK: %w", err)
-	}
-
-	// Convert public key to JWK
-	publicJwk, err := jwk.FromRaw(publicKey)
-	if err != nil {
-		return fmt.Errorf("failed to convert public key to JWK: %w", err)
-	}
-
-	// Set key type and algorithm
-	if err := privateJwk.Set(jwk.KeyTypeKey, jwa.RSA); err != nil {
-		return fmt.Errorf("failed to set private key type: %w", err)
-	}
-	if err := privateJwk.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return fmt.Errorf("failed to set private key algorithm: %w", err)
-	}
-
-	if err := publicJwk.Set(jwk.KeyTypeKey, jwa.RSA); err != nil {
-		return fmt.Errorf("failed to set public key type: %w", err)
-	}
-	if err := publicJwk.Set(jwk.AlgorithmKey, jwa.RS256); err != nil {
-		return fmt.Errorf("failed to set public key algorithm: %w", err)
+	// Validate key size
+	if privateKey.N.BitLen() < MinRSAKeySize {
+		return fmt.Errorf("RSA key size %d is below minimum required %d bits", privateKey.N.BitLen(), MinRSAKeySize)
 	}
 
 	km.privateKey = privateKey
 	km.publicKey = publicKey
-	km.privateJwk = privateJwk
-	km.publicJwk = publicJwk
-
 	return nil
+}
+
+// SetECKeyPair sets the ECDSA key pair
+func (km *KeyManager) SetECKeyPair(privateKey *ecdsa.PrivateKey, publicKey *ecdsa.PublicKey) error {
+	// Validate curve
+	if privateKey.Curve.Params().BitSize < elliptic.P256().Params().BitSize {
+		return fmt.Errorf("ECDSA curve %s is below minimum required P-256", privateKey.Curve.Params().Name)
+	}
+
+	km.privateKey = privateKey
+	km.publicKey = publicKey
+	return nil
+}
+
+// GetRSAPrivateKey returns the RSA private key
+func (km *KeyManager) GetRSAPrivateKey() (*rsa.PrivateKey, error) {
+	if km.privateKey == nil {
+		return nil, fmt.Errorf("private key not set")
+	}
+
+	privateKey, ok := km.privateKey.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("private key is not an RSA key")
+	}
+
+	return privateKey, nil
+}
+
+// GetRSAPublicKey returns the RSA public key
+func (km *KeyManager) GetRSAPublicKey() (*rsa.PublicKey, error) {
+	if km.publicKey == nil {
+		return nil, fmt.Errorf("public key not set")
+	}
+
+	publicKey, ok := km.publicKey.(*rsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("public key is not an RSA key")
+	}
+
+	return publicKey, nil
 }

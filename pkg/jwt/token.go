@@ -3,13 +3,18 @@ package jwt
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jws"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/golang-jwt/jwt/v5"
+)
+
+// FIPS-approved algorithms for JWT signing
+const (
+	// RSASSA-PSS with SHA-256 (FIPS 186-4)
+	DefaultSigningAlgorithm = "PS256"
+	// RSASSA-PKCS1-v1_5 with SHA-256 (FIPS 186-4)
+	LegacySigningAlgorithm = "RS256"
 )
 
 // TokenManager handles JWT token operations
@@ -18,6 +23,7 @@ type TokenManager struct {
 	issuer      string
 	clusterID   string
 	openchamiID string
+	algorithm   string
 }
 
 // NewTokenManager creates a new TokenManager instance
@@ -27,7 +33,27 @@ func NewTokenManager(keyManager *KeyManager, issuer string, clusterID string, op
 		issuer:      issuer,
 		clusterID:   clusterID,
 		openchamiID: openchamiID,
+		algorithm:   DefaultSigningAlgorithm, // Use PS256 by default
 	}
+}
+
+// SetSigningAlgorithm sets the signing algorithm to use
+func (tm *TokenManager) SetSigningAlgorithm(algorithm string) error {
+	// Only allow FIPS-approved algorithms
+	switch algorithm {
+	case "PS256", "PS384", "PS512", // RSASSA-PSS
+		"RS256", "RS384", "RS512", // RSASSA-PKCS1-v1_5
+		"ES256", "ES384", "ES512": // ECDSA
+		tm.algorithm = algorithm
+		return nil
+	default:
+		return fmt.Errorf("algorithm %s is not FIPS-approved", algorithm)
+	}
+}
+
+// GetSigningAlgorithm returns the current signing algorithm
+func (tm *TokenManager) GetSigningAlgorithm() string {
+	return tm.algorithm
 }
 
 // GenerateToken generates a new JWT token with the given claims
@@ -49,92 +75,75 @@ func (tm *TokenManager) GenerateToken(claims *Claims) (string, error) {
 		return "", fmt.Errorf("failed to get private key: %w", err)
 	}
 
-	// Create token
-	token := jwt.New()
-
-	// Set standard claims
-	if err := token.Set(jwt.IssuerKey, claims.Issuer); err != nil {
-		return "", fmt.Errorf("failed to set issuer: %w", err)
-	}
-	if err := token.Set(jwt.SubjectKey, claims.Subject); err != nil {
-		return "", fmt.Errorf("failed to set subject: %w", err)
-	}
-	if err := token.Set(jwt.AudienceKey, claims.Audience); err != nil {
-		return "", fmt.Errorf("failed to set audience: %w", err)
-	}
-	if err := token.Set(jwt.ExpirationKey, claims.ExpirationTime); err != nil {
-		return "", fmt.Errorf("failed to set expiration: %w", err)
-	}
-	if err := token.Set(jwt.NotBeforeKey, claims.NotBefore); err != nil {
-		return "", fmt.Errorf("failed to set not before: %w", err)
-	}
-	if err := token.Set(jwt.IssuedAtKey, claims.IssuedAt); err != nil {
-		return "", fmt.Errorf("failed to set issued at: %w", err)
-	}
-
-	// Add JTI (JWT ID) to prevent replay attacks
+	// Generate JTI and nonce
 	jti, err := generateUUID()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate JTI: %w", err)
 	}
-	if err := token.Set(jwt.JwtIDKey, jti); err != nil {
-		return "", fmt.Errorf("failed to set JTI: %w", err)
-	}
-
-	// Add nonce for additional replay protection
 	nonce, err := generateNonce()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
-	if err := token.Set("nonce", nonce); err != nil {
-		return "", fmt.Errorf("failed to set nonce: %w", err)
+
+	// Create token claims
+	tokenClaims := jwt.MapClaims{
+		"iss":   claims.Issuer,
+		"sub":   claims.Subject,
+		"aud":   claims.Audience,
+		"exp":   claims.ExpirationTime,
+		"nbf":   claims.NotBefore,
+		"iat":   claims.IssuedAt,
+		"jti":   jti,
+		"nonce": nonce,
 	}
 
-	// Set custom claims
-	if claims.Scope != nil {
-		if err := token.Set("scope", claims.Scope); err != nil {
-			return "", fmt.Errorf("failed to set scope: %w", err)
-		}
-	}
+	// Add OpenID Connect claims
 	if claims.Name != "" {
-		if err := token.Set("name", claims.Name); err != nil {
-			return "", fmt.Errorf("failed to set name: %w", err)
-		}
+		tokenClaims["name"] = claims.Name
 	}
 	if claims.Email != "" {
-		if err := token.Set("email", claims.Email); err != nil {
-			return "", fmt.Errorf("failed to set email: %w", err)
-		}
+		tokenClaims["email"] = claims.Email
 	}
-	if err := token.Set("email_verified", claims.EmailVerified); err != nil {
-		return "", fmt.Errorf("failed to set email_verified: %w", err)
+	tokenClaims["email_verified"] = claims.EmailVerified
+	if claims.AuthTime != 0 {
+		tokenClaims["auth_time"] = claims.AuthTime
+	}
+	if len(claims.AMR) > 0 {
+		tokenClaims["amr"] = claims.AMR
+	}
+	if claims.ACR != "" {
+		tokenClaims["acr"] = claims.ACR
 	}
 
-	// Set cluster_id and openchami_id claims
+	// Add NIST-compliant claims
+	tokenClaims["auth_level"] = claims.AuthLevel
+	tokenClaims["auth_factors"] = claims.AuthFactors
+	tokenClaims["auth_methods"] = claims.AuthMethods
+	tokenClaims["session_id"] = claims.SessionID
+	tokenClaims["session_exp"] = claims.SessionExp
+	if len(claims.AuthEvents) > 0 {
+		tokenClaims["auth_events"] = claims.AuthEvents
+	}
+
+	// Add OpenCHAMI specific claims
+	if claims.Scope != nil {
+		tokenClaims["scope"] = claims.Scope
+	}
 	if claims.ClusterID != "" {
-		if err := token.Set("cluster_id", claims.ClusterID); err != nil {
-			return "", fmt.Errorf("failed to set cluster_id: %w", err)
-		}
+		tokenClaims["cluster_id"] = claims.ClusterID
 	}
 	if claims.OpenCHAMIID != "" {
-		if err := token.Set("openchami_id", claims.OpenCHAMIID); err != nil {
-			return "", fmt.Errorf("failed to set openchami_id: %w", err)
-		}
+		tokenClaims["openchami_id"] = claims.OpenCHAMIID
 	}
 
-	// Marshal token to JSON
-	payload, err := json.Marshal(token)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal token: %w", err)
-	}
-
-	// Sign token
-	signed, err := jws.Sign(payload, jws.WithKey(jwa.RS256, privateKey))
+	// Create and sign token
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, tokenClaims)
+	signed, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
 
-	return string(signed), nil
+	return signed, nil
 }
 
 // GenerateTokenWithClaims generates a new JWT token with the given claims and additional claims
@@ -156,99 +165,80 @@ func (tm *TokenManager) GenerateTokenWithClaims(claims *Claims, additionalClaims
 		return "", fmt.Errorf("failed to get private key: %w", err)
 	}
 
-	// Create token
-	token := jwt.New()
-
-	// Set standard claims
-	if err := token.Set(jwt.IssuerKey, claims.Issuer); err != nil {
-		return "", fmt.Errorf("failed to set issuer: %w", err)
-	}
-	if err := token.Set(jwt.SubjectKey, claims.Subject); err != nil {
-		return "", fmt.Errorf("failed to set subject: %w", err)
-	}
-	if err := token.Set(jwt.AudienceKey, claims.Audience); err != nil {
-		return "", fmt.Errorf("failed to set audience: %w", err)
-	}
-	if err := token.Set(jwt.ExpirationKey, claims.ExpirationTime); err != nil {
-		return "", fmt.Errorf("failed to set expiration: %w", err)
-	}
-	if err := token.Set(jwt.NotBeforeKey, claims.NotBefore); err != nil {
-		return "", fmt.Errorf("failed to set not before: %w", err)
-	}
-	if err := token.Set(jwt.IssuedAtKey, claims.IssuedAt); err != nil {
-		return "", fmt.Errorf("failed to set issued at: %w", err)
-	}
-
-	// Add JTI (JWT ID) to prevent replay attacks
+	// Generate JTI and nonce
 	jti, err := generateUUID()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate JTI: %w", err)
 	}
-	if err := token.Set(jwt.JwtIDKey, jti); err != nil {
-		return "", fmt.Errorf("failed to set JTI: %w", err)
-	}
-
-	// Add nonce for additional replay protection
 	nonce, err := generateNonce()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
-	if err := token.Set("nonce", nonce); err != nil {
-		return "", fmt.Errorf("failed to set nonce: %w", err)
+
+	// Create token claims
+	tokenClaims := jwt.MapClaims{
+		"iss":   claims.Issuer,
+		"sub":   claims.Subject,
+		"aud":   claims.Audience,
+		"exp":   claims.ExpirationTime,
+		"nbf":   claims.NotBefore,
+		"iat":   claims.IssuedAt,
+		"jti":   jti,
+		"nonce": nonce,
 	}
 
-	// Set custom claims
-	if claims.Scope != nil {
-		if err := token.Set("scope", claims.Scope); err != nil {
-			return "", fmt.Errorf("failed to set scope: %w", err)
-		}
-	}
+	// Add OpenID Connect claims
 	if claims.Name != "" {
-		if err := token.Set("name", claims.Name); err != nil {
-			return "", fmt.Errorf("failed to set name: %w", err)
-		}
+		tokenClaims["name"] = claims.Name
 	}
 	if claims.Email != "" {
-		if err := token.Set("email", claims.Email); err != nil {
-			return "", fmt.Errorf("failed to set email: %w", err)
-		}
+		tokenClaims["email"] = claims.Email
 	}
-	if err := token.Set("email_verified", claims.EmailVerified); err != nil {
-		return "", fmt.Errorf("failed to set email_verified: %w", err)
+	tokenClaims["email_verified"] = claims.EmailVerified
+	if claims.AuthTime != 0 {
+		tokenClaims["auth_time"] = claims.AuthTime
+	}
+	if len(claims.AMR) > 0 {
+		tokenClaims["amr"] = claims.AMR
+	}
+	if claims.ACR != "" {
+		tokenClaims["acr"] = claims.ACR
 	}
 
-	// Set cluster_id and openchami_id claims
+	// Add NIST-compliant claims
+	tokenClaims["auth_level"] = claims.AuthLevel
+	tokenClaims["auth_factors"] = claims.AuthFactors
+	tokenClaims["auth_methods"] = claims.AuthMethods
+	tokenClaims["session_id"] = claims.SessionID
+	tokenClaims["session_exp"] = claims.SessionExp
+	if len(claims.AuthEvents) > 0 {
+		tokenClaims["auth_events"] = claims.AuthEvents
+	}
+
+	// Add OpenCHAMI specific claims
+	if claims.Scope != nil {
+		tokenClaims["scope"] = claims.Scope
+	}
 	if claims.ClusterID != "" {
-		if err := token.Set("cluster_id", claims.ClusterID); err != nil {
-			return "", fmt.Errorf("failed to set cluster_id: %w", err)
-		}
+		tokenClaims["cluster_id"] = claims.ClusterID
 	}
 	if claims.OpenCHAMIID != "" {
-		if err := token.Set("openchami_id", claims.OpenCHAMIID); err != nil {
-			return "", fmt.Errorf("failed to set openchami_id: %w", err)
-		}
+		tokenClaims["openchami_id"] = claims.OpenCHAMIID
 	}
 
-	// Set additional claims
+	// Add additional claims
 	for key, value := range additionalClaims {
-		if err := token.Set(key, value); err != nil {
-			return "", fmt.Errorf("failed to set additional claim %s: %w", key, err)
-		}
+		tokenClaims[key] = value
 	}
 
-	// Marshal token to JSON
-	payload, err := json.Marshal(token)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal token: %w", err)
-	}
-
-	// Sign token
-	signed, err := jws.Sign(payload, jws.WithKey(jwa.RS256, privateKey))
+	// Create and sign token
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, tokenClaims)
+	signed, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
 
-	return string(signed), nil
+	return signed, nil
 }
 
 // generateUUID generates a UUID v4
@@ -284,24 +274,105 @@ func (tm *TokenManager) ParseToken(tokenString string) (*Claims, map[string]inte
 	}
 
 	// Parse and verify token
-	token, err := jwt.ParseString(tokenString, jwt.WithKey(jwa.RS256, publicKey))
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return publicKey, nil
+	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse token: %w", err)
 	}
 
 	// Extract claims
-	claims := &Claims{
-		Issuer:         token.Issuer(),
-		Subject:        token.Subject(),
-		Audience:       token.Audience(),
-		ExpirationTime: token.Expiration().Unix(),
-		NotBefore:      token.NotBefore().Unix(),
-		IssuedAt:       token.IssuedAt().Unix(),
-		JTI:            token.JwtID(),
+	claims := &Claims{}
+	mapClaims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, nil, fmt.Errorf("invalid token claims format")
 	}
 
-	// Extract custom claims
-	if scope, ok := token.PrivateClaims()["scope"].([]interface{}); ok {
+	// Extract standard claims
+	if iss, ok := mapClaims["iss"].(string); ok {
+		claims.Issuer = iss
+	}
+	if sub, ok := mapClaims["sub"].(string); ok {
+		claims.Subject = sub
+	}
+	if aud, ok := mapClaims["aud"].([]interface{}); ok {
+		claims.Audience = make([]string, len(aud))
+		for i, v := range aud {
+			if s, ok := v.(string); ok {
+				claims.Audience[i] = s
+			}
+		}
+	}
+	if exp, ok := mapClaims["exp"].(float64); ok {
+		claims.ExpirationTime = int64(exp)
+	}
+	if nbf, ok := mapClaims["nbf"].(float64); ok {
+		claims.NotBefore = int64(nbf)
+	}
+	if iat, ok := mapClaims["iat"].(float64); ok {
+		claims.IssuedAt = int64(iat)
+	}
+	if jti, ok := mapClaims["jti"].(string); ok {
+		claims.JTI = jti
+	}
+
+	// Extract OpenID Connect claims
+	if name, ok := mapClaims["name"].(string); ok {
+		claims.Name = name
+	}
+	if email, ok := mapClaims["email"].(string); ok {
+		claims.Email = email
+	}
+	if emailVerified, ok := mapClaims["email_verified"].(bool); ok {
+		claims.EmailVerified = emailVerified
+	}
+	if authTime, ok := mapClaims["auth_time"].(float64); ok {
+		claims.AuthTime = int64(authTime)
+	}
+	if amr, ok := mapClaims["amr"].([]interface{}); ok {
+		claims.AMR = make([]string, len(amr))
+		for i, v := range amr {
+			if s, ok := v.(string); ok {
+				claims.AMR[i] = s
+			}
+		}
+	}
+	if acr, ok := mapClaims["acr"].(string); ok {
+		claims.ACR = acr
+	}
+
+	// Extract NIST-compliant claims
+	if authLevel, ok := mapClaims["auth_level"].(string); ok {
+		claims.AuthLevel = authLevel
+	}
+	if authFactors, ok := mapClaims["auth_factors"].(float64); ok {
+		claims.AuthFactors = int(authFactors)
+	}
+	if authMethods, ok := mapClaims["auth_methods"].([]interface{}); ok {
+		claims.AuthMethods = make([]string, len(authMethods))
+		for i, v := range authMethods {
+			if s, ok := v.(string); ok {
+				claims.AuthMethods[i] = s
+			}
+		}
+	}
+	if sessionID, ok := mapClaims["session_id"].(string); ok {
+		claims.SessionID = sessionID
+	}
+	if sessionExp, ok := mapClaims["session_exp"].(float64); ok {
+		claims.SessionExp = int64(sessionExp)
+	}
+	if authEvents, ok := mapClaims["auth_events"].([]interface{}); ok {
+		claims.AuthEvents = make([]string, len(authEvents))
+		for i, v := range authEvents {
+			if s, ok := v.(string); ok {
+				claims.AuthEvents[i] = s
+			}
+		}
+	}
+
+	// Extract OpenCHAMI specific claims
+	if scope, ok := mapClaims["scope"].([]interface{}); ok {
 		claims.Scope = make([]string, len(scope))
 		for i, v := range scope {
 			if s, ok := v.(string); ok {
@@ -309,28 +380,14 @@ func (tm *TokenManager) ParseToken(tokenString string) (*Claims, map[string]inte
 			}
 		}
 	}
-	if name, ok := token.PrivateClaims()["name"].(string); ok {
-		claims.Name = name
-	}
-	if email, ok := token.PrivateClaims()["email"].(string); ok {
-		claims.Email = email
-	}
-	if emailVerified, ok := token.PrivateClaims()["email_verified"].(bool); ok {
-		claims.EmailVerified = emailVerified
-	}
-	if nonce, ok := token.PrivateClaims()["nonce"].(string); ok {
-		claims.Nonce = nonce
-	}
-
-	// Extract cluster_id and openchami_id claims if present
-	if clusterID, ok := token.PrivateClaims()["cluster_id"].(string); ok {
+	if clusterID, ok := mapClaims["cluster_id"].(string); ok {
 		claims.ClusterID = clusterID
 	}
-	if openchamiID, ok := token.PrivateClaims()["openchami_id"].(string); ok {
+	if openchamiID, ok := mapClaims["openchami_id"].(string); ok {
 		claims.OpenCHAMIID = openchamiID
 	}
 
-	return claims, token.PrivateClaims(), nil
+	return claims, mapClaims, nil
 }
 
 // GetKeyManager returns the underlying KeyManager instance

@@ -142,6 +142,52 @@ func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string,
 		claims.EmailVerified = emailVerified
 	}
 
+	// Extract NIST-compliant claims
+	if authLevel, ok := introspection.Claims["auth_level"].(string); ok {
+		claims.AuthLevel = authLevel
+	} else {
+		return "", fmt.Errorf("missing required claim: auth_level")
+	}
+	if authFactors, ok := introspection.Claims["auth_factors"].(float64); ok {
+		claims.AuthFactors = int(authFactors)
+	} else if _, exists := introspection.Claims["auth_factors"]; !exists {
+		return "", fmt.Errorf("missing required claim: auth_factors")
+	} else {
+		return "", fmt.Errorf("invalid type for claim auth_factors: expected number")
+	}
+	if authMethods, ok := introspection.Claims["auth_methods"].([]interface{}); ok {
+		claims.AuthMethods = make([]string, len(authMethods))
+		for i, v := range authMethods {
+			if s, ok := v.(string); ok {
+				claims.AuthMethods[i] = s
+			}
+		}
+	} else {
+		return "", fmt.Errorf("missing required claim: auth_methods")
+	}
+	if sessionID, ok := introspection.Claims["session_id"].(string); ok {
+		claims.SessionID = sessionID
+	} else {
+		return "", fmt.Errorf("missing required claim: session_id")
+	}
+	if sessionExp, ok := introspection.Claims["session_exp"].(float64); ok {
+		claims.SessionExp = int64(sessionExp)
+	} else if _, exists := introspection.Claims["session_exp"]; !exists {
+		return "", fmt.Errorf("missing required claim: session_exp")
+	} else {
+		return "", fmt.Errorf("invalid type for claim session_exp: expected number")
+	}
+	if authEvents, ok := introspection.Claims["auth_events"].([]interface{}); ok {
+		claims.AuthEvents = make([]string, len(authEvents))
+		for i, v := range authEvents {
+			if s, ok := v.(string); ok {
+				claims.AuthEvents[i] = s
+			}
+		}
+	} else {
+		return "", fmt.Errorf("missing required claim: auth_events")
+	}
+
 	// Check for groups in claims
 	groups, ok := introspection.Claims["groups"].([]interface{})
 	if !ok || len(groups) == 0 {
@@ -183,6 +229,13 @@ func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string,
 
 // GenerateServiceToken generates a service-to-service token
 func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targetService string, scopes []string) (string, error) {
+	if serviceID == "" {
+		return "", errors.New("service ID cannot be empty")
+	}
+	if targetService == "" {
+		return "", errors.New("target service cannot be empty")
+	}
+
 	claims := &jwtauth.Claims{
 		Issuer:         s.Issuer,
 		Subject:        serviceID,
@@ -192,6 +245,13 @@ func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targ
 		ClusterID:      s.ClusterID,
 		OpenCHAMIID:    s.OpenCHAMIID,
 		Scope:          scopes,
+		// Add NIST-compliant claims for service tokens
+		AuthLevel:   "IAL2",
+		AuthFactors: 2,
+		AuthMethods: []string{"service", "certificate"},
+		SessionID:   fmt.Sprintf("service-%s-%d", serviceID, time.Now().UnixNano()),
+		SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+		AuthEvents:  []string{"service_auth"},
 	}
 
 	return s.TokenManager.GenerateToken(claims)
@@ -217,15 +277,22 @@ func (s *TokenService) UpdateGroupScopes(groupScopes map[string][]string) {
 // JWKSHandler handles JWKS requests
 func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 	// Get public key as JWK
-	publicKey, err := s.TokenManager.GetKeyManager().GetPublicJWK()
+	publicKey, err := s.TokenManager.GetKeyManager().GetPublicKey()
 	if err != nil {
 		http.Error(w, "Failed to get public key", http.StatusInternalServerError)
 		return
 	}
 
+	// Convert public key to JWK
+	jwkKey, err := jwk.FromRaw(publicKey)
+	if err != nil {
+		http.Error(w, "Failed to convert key to JWK", http.StatusInternalServerError)
+		return
+	}
+
 	// Create JWKS
 	keySet := jwk.NewSet()
-	if err := keySet.AddKey(publicKey); err != nil {
+	if err := keySet.AddKey(jwkKey); err != nil {
 		http.Error(w, "Failed to add key to set", http.StatusInternalServerError)
 		return
 	}

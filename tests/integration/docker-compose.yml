@@ -29,6 +29,8 @@ services:
       - DOCKER_STEPCA_INIT_PASSWORD_FILE=/opt/password.txt
       - DOCKER_STEPCA_INIT_ACME=true
       - DOCKER_STEPCA_INIT_CA_URL=https://step-ca:9000
+      - DOCKER_STEPCA_INIT_SSH=false
+      - DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT=false
     volumes:
       - step-ca-data:/home/step
       - ./step-ca/config/config.json:/opt/config.json:ro
@@ -84,11 +86,17 @@ services:
           --providers.file.watch=true \
           --entrypoints.web.address=:80 \
           --entrypoints.websecure.address=:443 \
+          --entrypoints.websecure.http.tls.minVersion=VersionTLS13 \
+          --entrypoints.websecure.http.tls.cipherSuites=TLS_AES_128_GCM_SHA256,TLS_AES_256_GCM_SHA384,TLS_CHACHA20_POLY1305_SHA256 \
           --certificatesresolvers.stepca.acme.email=test@openchami.demo \
           --certificatesresolvers.stepca.acme.storage=/certificates/acme.json \
           --certificatesresolvers.stepca.acme.httpchallenge=true \
           --certificatesresolvers.stepca.acme.httpchallenge.entrypoint=web \
-          --certificatesresolvers.stepca.acme.caserver=https://step-ca:9000/acme/acme/directory
+          --certificatesresolvers.stepca.acme.caserver=https://step-ca:9000/acme/acme/directory \
+          --accesslog=true \
+          --accesslog.format=json \
+          --log.level=DEBUG
+
   tokensmith:
     image: ghcr.io/openchami/tokensmith:0.0-amd64
     labels:
@@ -96,6 +104,9 @@ services:
       - "traefik.http.routers.tokensmith.rule=Host(`tokensmith.openchami.demo`)"
       - "traefik.http.routers.tokensmith.entrypoints=websecure"
       - "traefik.http.routers.tokensmith.tls.certresolver=stepca"
+      - "traefik.http.middlewares.tokensmith-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.tokensmith-ratelimit.ratelimit.burst=50"
+      - "traefik.http.routers.tokensmith.middlewares=tokensmith-ratelimit"
     ports:
       - "8080:8080"
     environment:
@@ -106,6 +117,9 @@ services:
       - TOKENSMITH_OIDC_PROVIDER=authelia
       - AUTHELIA_URL=https://authelia.openchami.demo:9091
       - SSL_CERT_FILE=/certs/root_ca.crt
+      - TOKENSMITH_SESSION_SECURE=true
+      - TOKENSMITH_SESSION_HTTPONLY=true
+      - TOKENSMITH_SESSION_SAMESITE=Strict
     volumes:
       - ./tokensmith/config:/tokensmith/config
       - ./tokensmith/keys:/tokensmith/keys
@@ -120,8 +134,16 @@ services:
       - "traefik.http.routers.authelia.rule=Host(`auth.openchami.demo`)"
       - "traefik.http.routers.authelia.entrypoints=websecure"
       - "traefik.http.routers.authelia.tls.certresolver=stepca"
+      - "traefik.http.middlewares.authelia-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.authelia-ratelimit.ratelimit.burst=50"
+      - "traefik.http.routers.authelia.middlewares=authelia-ratelimit"
     environment:
       - SSL_CERT_FILE=/certs/root_ca.crt
+      - AUTHELIA_SESSION_SECURE=true
+      - AUTHELIA_SESSION_HTTPONLY=true
+      - AUTHELIA_SESSION_SAMESITE=Strict
+      - AUTHELIA_SERVER_TLS_MIN_VERSION=1.3
+      - AUTHELIA_SERVER_TLS_CIPHER_SUITES=TLS_AES_128_GCM_SHA256,TLS_AES_256_GCM_SHA384,TLS_CHACHA20_POLY1305_SHA256
     volumes:
       - ./authelia/config:/config
       - ./step-ca/certs:/certs:ro

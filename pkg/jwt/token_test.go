@@ -14,12 +14,44 @@ func TestTokenOperations(t *testing.T) {
 	require.NotNil(t, km)
 
 	// Generate a new key pair for testing
-	err := km.GenerateKeyPair(2048)
+	err := km.GenerateKeyPair()
 	require.NoError(t, err)
 
 	// Create token manager
 	tm := NewTokenManager(km, "test-issuer", "test-cluster-id", "test-openchami-id")
 	require.NotNil(t, tm)
+
+	// Get the RSA private key to verify it's the correct type
+	privateKey, err := km.GetRSAPrivateKey()
+	require.NoError(t, err)
+	require.NotNil(t, privateKey)
+
+	// Set the signing algorithm to RS256 since we're using RSA keys
+	err = tm.SetSigningAlgorithm("RS256")
+	require.NoError(t, err)
+
+	// Verify default algorithm is FIPS-compliant
+	assert.Equal(t, "RS256", tm.GetSigningAlgorithm())
+
+	t.Run("SetSigningAlgorithm with FIPS-approved algorithms", func(t *testing.T) {
+		// Test all FIPS-approved algorithms
+		algorithms := []string{
+			"PS256", "PS384", "PS512", // RSASSA-PSS
+			"RS256", "RS384", "RS512", // RSASSA-PKCS1-v1_5
+			"ES256", "ES384", "ES512", // ECDSA
+		}
+
+		for _, alg := range algorithms {
+			err := tm.SetSigningAlgorithm(alg)
+			assert.NoError(t, err)
+			assert.Equal(t, alg, tm.GetSigningAlgorithm())
+		}
+
+		// Test non-FIPS algorithm
+		err := tm.SetSigningAlgorithm("HS256")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not FIPS-approved")
+	})
 
 	t.Run("GenerateToken with standard claims", func(t *testing.T) {
 		claims := &Claims{
@@ -33,6 +65,13 @@ func TestTokenOperations(t *testing.T) {
 			Name:           "Test User",
 			Email:          "test@example.com",
 			EmailVerified:  true,
+			// Add NIST-compliant claims
+			AuthLevel:   "IAL2",
+			AuthFactors: 2,
+			AuthMethods: []string{"password", "mfa"},
+			SessionID:   "test-session",
+			SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+			AuthEvents:  []string{"login", "mfa"},
 		}
 
 		token, err := tm.GenerateToken(claims)
@@ -53,6 +92,18 @@ func TestTokenOperations(t *testing.T) {
 		assert.Equal(t, claims.Name, parsedClaims.Name)
 		assert.Equal(t, claims.Email, parsedClaims.Email)
 		assert.Equal(t, claims.EmailVerified, parsedClaims.EmailVerified)
+
+		// Verify NIST-compliant claims
+		assert.Equal(t, claims.AuthLevel, parsedClaims.AuthLevel)
+		assert.Equal(t, claims.AuthFactors, parsedClaims.AuthFactors)
+		assert.Equal(t, claims.AuthMethods, parsedClaims.AuthMethods)
+		assert.Equal(t, claims.SessionID, parsedClaims.SessionID)
+		assert.Equal(t, claims.SessionExp, parsedClaims.SessionExp)
+		assert.Equal(t, claims.AuthEvents, parsedClaims.AuthEvents)
+
+		// Verify JTI and nonce are present
+		assert.NotEmpty(t, rawClaims["jti"])
+		assert.NotEmpty(t, rawClaims["nonce"])
 	})
 
 	t.Run("GenerateTokenWithClaims with additional claims", func(t *testing.T) {
@@ -63,6 +114,13 @@ func TestTokenOperations(t *testing.T) {
 			ExpirationTime: time.Now().Add(time.Hour).Unix(),
 			NotBefore:      time.Now().Unix(),
 			IssuedAt:       time.Now().Unix(),
+			// Add required NIST claims
+			AuthLevel:   "IAL2",
+			AuthFactors: 2,
+			AuthMethods: []string{"password", "mfa"},
+			SessionID:   "test-session",
+			SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+			AuthEvents:  []string{"login", "mfa"},
 		}
 
 		additionalClaims := map[string]interface{}{
@@ -161,6 +219,13 @@ func TestTokenOperations(t *testing.T) {
 			ExpirationTime: time.Now().Add(time.Hour).Unix(),
 			NotBefore:      time.Now().Unix(),
 			IssuedAt:       time.Now().Unix(),
+			// Add required NIST claims
+			AuthLevel:   "IAL2",
+			AuthFactors: 2,
+			AuthMethods: []string{"password", "mfa"},
+			SessionID:   "test-session",
+			SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+			AuthEvents:  []string{"login", "mfa"},
 		}
 
 		token, err = tm.GenerateTokenWithClaims(claims, additionalClaims)
