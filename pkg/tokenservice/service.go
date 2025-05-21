@@ -122,13 +122,13 @@ func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string,
 
 	// Create OpenCHAMI claims
 	claims := &jwtauth.Claims{
-		Issuer:         s.Issuer,
-		Subject:        introspection.Username,
-		Audience:       []string{"smd", "bss", "cloud-init"},
-		ExpirationTime: introspection.ExpiresAt,
-		IssuedAt:       introspection.IssuedAt,
-		ClusterID:      s.ClusterID,
-		OpenCHAMIID:    s.OpenCHAMIID,
+		Iss:         s.Issuer,
+		Sub:         introspection.Username,
+		Aud:         []string{"smd", "bss", "cloud-init"},
+		Exp:         introspection.ExpiresAt,
+		Iat:         introspection.IssuedAt,
+		ClusterID:   s.ClusterID,
+		OpenCHAMIID: s.OpenCHAMIID,
 	}
 
 	// Extract additional claims from introspection
@@ -237,14 +237,14 @@ func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targ
 	}
 
 	claims := &jwtauth.Claims{
-		Issuer:         s.Issuer,
-		Subject:        serviceID,
-		Audience:       []string{targetService},
-		ExpirationTime: time.Now().Add(time.Hour).Unix(),
-		IssuedAt:       time.Now().Unix(),
-		ClusterID:      s.ClusterID,
-		OpenCHAMIID:    s.OpenCHAMIID,
-		Scope:          scopes,
+		Iss:         s.Issuer,
+		Sub:         serviceID,
+		Aud:         []string{targetService},
+		Exp:         time.Now().Add(time.Hour).Unix(),
+		Iat:         time.Now().Unix(),
+		ClusterID:   s.ClusterID,
+		OpenCHAMIID: s.OpenCHAMIID,
+		Scope:       scopes,
 		// Add NIST-compliant claims for service tokens
 		AuthLevel:   "IAL2",
 		AuthFactors: 2,

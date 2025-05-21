@@ -87,12 +87,12 @@ func (tm *TokenManager) GenerateToken(claims *Claims) (string, error) {
 
 	// Create token claims
 	tokenClaims := jwt.MapClaims{
-		"iss":   claims.Issuer,
-		"sub":   claims.Subject,
-		"aud":   claims.Audience,
-		"exp":   claims.ExpirationTime,
-		"nbf":   claims.NotBefore,
-		"iat":   claims.IssuedAt,
+		"iss":   claims.Iss,
+		"sub":   claims.Sub,
+		"aud":   claims.Aud,
+		"exp":   claims.Exp,
+		"nbf":   claims.Nbf,
+		"iat":   claims.Iat,
 		"jti":   jti,
 		"nonce": nonce,
 	}
@@ -177,12 +177,12 @@ func (tm *TokenManager) GenerateTokenWithClaims(claims *Claims, additionalClaims
 
 	// Create token claims
 	tokenClaims := jwt.MapClaims{
-		"iss":   claims.Issuer,
-		"sub":   claims.Subject,
-		"aud":   claims.Audience,
-		"exp":   claims.ExpirationTime,
-		"nbf":   claims.NotBefore,
-		"iat":   claims.IssuedAt,
+		"iss":   claims.Iss,
+		"sub":   claims.Sub,
+		"aud":   claims.Aud,
+		"exp":   claims.Exp,
+		"nbf":   claims.Nbf,
+		"iat":   claims.Iat,
 		"jti":   jti,
 		"nonce": nonce,
 	}
@@ -290,30 +290,30 @@ func (tm *TokenManager) ParseToken(tokenString string) (*Claims, map[string]inte
 
 	// Extract standard claims
 	if iss, ok := mapClaims["iss"].(string); ok {
-		claims.Issuer = iss
+		claims.Iss = iss
 	}
 	if sub, ok := mapClaims["sub"].(string); ok {
-		claims.Subject = sub
+		claims.Sub = sub
 	}
 	if aud, ok := mapClaims["aud"].([]interface{}); ok {
-		claims.Audience = make([]string, len(aud))
+		claims.Aud = make([]string, len(aud))
 		for i, v := range aud {
 			if s, ok := v.(string); ok {
-				claims.Audience[i] = s
+				claims.Aud[i] = s
 			}
 		}
 	}
 	if exp, ok := mapClaims["exp"].(float64); ok {
-		claims.ExpirationTime = int64(exp)
+		claims.Exp = int64(exp)
 	}
 	if nbf, ok := mapClaims["nbf"].(float64); ok {
-		claims.NotBefore = int64(nbf)
+		claims.Nbf = int64(nbf)
 	}
 	if iat, ok := mapClaims["iat"].(float64); ok {
-		claims.IssuedAt = int64(iat)
+		claims.Iat = int64(iat)
 	}
 	if jti, ok := mapClaims["jti"].(string); ok {
-		claims.JTI = jti
+		claims.Jti = jti
 	}
 
 	// Extract OpenID Connect claims
@@ -399,15 +399,15 @@ func (tm *TokenManager) GetKeyManager() *KeyManager {
 func (tm *TokenManager) GenerateServiceToken(serviceID, targetService string, scopes []string) (string, error) {
 	now := time.Now()
 	claims := &Claims{
-		Issuer:         tm.issuer,
-		Subject:        serviceID,
-		Audience:       []string{targetService},
-		ExpirationTime: now.Add(5 * time.Minute).Unix(), // Short-lived tokens for services
-		NotBefore:      now.Unix(),
-		IssuedAt:       now.Unix(),
-		Scope:          scopes,
-		ClusterID:      tm.clusterID,
-		OpenCHAMIID:    tm.openchamiID,
+		Iss:         tm.issuer,
+		Sub:         serviceID,
+		Aud:         []string{targetService},
+		Exp:         now.Add(5 * time.Minute).Unix(), // Short-lived tokens for services
+		Nbf:         now.Unix(),
+		Iat:         now.Unix(),
+		Scope:       scopes,
+		ClusterID:   tm.clusterID,
+		OpenCHAMIID: tm.openchamiID,
 	}
 
 	// Add service-specific claims

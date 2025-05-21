@@ -11,6 +11,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
 )
 
 // MiddlewareOptions contains options for the JWT middleware
@@ -114,13 +115,13 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 			}
 
 			// Extract claims
-			claims := &Claims{
-				Issuer:         token.Issuer(),
-				Subject:        token.Subject(),
-				Audience:       token.Audience(),
-				ExpirationTime: token.Expiration().Unix(),
-				NotBefore:      token.NotBefore().Unix(),
-				IssuedAt:       token.IssuedAt().Unix(),
+			claims := &tsjwt.Claims{
+				Iss: token.Issuer(),
+				Sub: token.Subject(),
+				Aud: token.Audience(),
+				Exp: token.Expiration().Unix(),
+				Nbf: token.NotBefore().Unix(),
+				Iat: token.IssuedAt().Unix(),
 			}
 
 			// Extract custom claims
@@ -214,8 +215,8 @@ func (c *keySetCache) getKeySet() jwk.Set {
 }
 
 // GetClaimsFromContext retrieves the JWT claims from the request context
-func GetClaimsFromContext(ctx context.Context) (*Claims, error) {
-	claims, ok := ctx.Value(ClaimsContextKey).(*Claims)
+func GetClaimsFromContext(ctx context.Context) (*tsjwt.Claims, error) {
+	claims, ok := ctx.Value(ClaimsContextKey).(*tsjwt.Claims)
 	if !ok {
 		return nil, errors.New("claims not found in context")
 	}

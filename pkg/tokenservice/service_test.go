@@ -123,9 +123,9 @@ func TestTokenService(t *testing.T) {
 		require.NotNil(t, rawClaims)
 
 		// Verify claims
-		assert.Equal(t, config.Issuer, claims.Issuer)
-		assert.Equal(t, "admin-user", claims.Subject)
-		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
+		assert.Equal(t, config.Issuer, claims.Iss)
+		assert.Equal(t, "admin-user", claims.Sub)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Aud)
 		assert.Equal(t, "Admin User", claims.Name)
 		assert.Equal(t, "admin@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -175,9 +175,9 @@ func TestTokenService(t *testing.T) {
 		require.NotNil(t, rawClaims)
 
 		// Verify claims
-		assert.Equal(t, config.Issuer, claims.Issuer)
-		assert.Equal(t, "operator-user", claims.Subject)
-		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
+		assert.Equal(t, config.Issuer, claims.Iss)
+		assert.Equal(t, "operator-user", claims.Sub)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Aud)
 		assert.Equal(t, "Operator User", claims.Name)
 		assert.Equal(t, "operator@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -227,9 +227,9 @@ func TestTokenService(t *testing.T) {
 		require.NotNil(t, rawClaims)
 
 		// Verify claims
-		assert.Equal(t, config.Issuer, claims.Issuer)
-		assert.Equal(t, "multi-group-user", claims.Subject)
-		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
+		assert.Equal(t, config.Issuer, claims.Iss)
+		assert.Equal(t, "multi-group-user", claims.Sub)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Aud)
 		assert.Equal(t, "Multi Group User", claims.Name)
 		assert.Equal(t, "multi@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -436,7 +436,7 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 			},
 			expectError: false,
 			validateClaims: func(t *testing.T, claims *jwt.Claims) {
-				assert.Equal(t, "testuser", claims.Subject)
+				assert.Equal(t, "testuser", claims.Sub)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
 				assert.Equal(t, "Test User", claims.Name)
@@ -597,14 +597,14 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			scopes:        []string{"read", "write"},
 			expectError:   false,
 			validateClaims: func(t *testing.T, claims *jwt.Claims) {
-				assert.Equal(t, "service1", claims.Subject)
-				assert.Equal(t, "service2", claims.Audience[0])
+				assert.Equal(t, "service1", claims.Sub)
+				assert.Equal(t, "service2", claims.Aud[0])
 				assert.Equal(t, []string{"read", "write"}, claims.Scope)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
-				assert.Equal(t, "test-issuer", claims.Issuer)
-				assert.NotEmpty(t, claims.ExpirationTime)
-				assert.NotEmpty(t, claims.IssuedAt)
+				assert.Equal(t, "test-issuer", claims.Iss)
+				assert.NotEmpty(t, claims.Exp)
+				assert.NotEmpty(t, claims.Iat)
 				// Verify NIST-compliant claims for service tokens
 				assert.Equal(t, "IAL2", claims.AuthLevel)
 				assert.Equal(t, 2, claims.AuthFactors)
@@ -627,14 +627,14 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			scopes:        []string{},
 			expectError:   false,
 			validateClaims: func(t *testing.T, claims *jwt.Claims) {
-				assert.Equal(t, "service1", claims.Subject)
-				assert.Equal(t, "service2", claims.Audience[0])
+				assert.Equal(t, "service1", claims.Sub)
+				assert.Equal(t, "service2", claims.Aud[0])
 				assert.Empty(t, claims.Scope)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
-				assert.Equal(t, "test-issuer", claims.Issuer)
-				assert.NotEmpty(t, claims.ExpirationTime)
-				assert.NotEmpty(t, claims.IssuedAt)
+				assert.Equal(t, "test-issuer", claims.Iss)
+				assert.NotEmpty(t, claims.Exp)
+				assert.NotEmpty(t, claims.Iat)
 				// Verify NIST-compliant claims for service tokens
 				assert.Equal(t, "IAL2", claims.AuthLevel)
 				assert.Equal(t, 2, claims.AuthFactors)
@@ -683,14 +683,14 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			scopes:        nil,
 			expectError:   false,
 			validateClaims: func(t *testing.T, claims *jwt.Claims) {
-				assert.Equal(t, "service1", claims.Subject)
-				assert.Equal(t, "service2", claims.Audience[0])
+				assert.Equal(t, "service1", claims.Sub)
+				assert.Equal(t, "service2", claims.Aud[0])
 				assert.Nil(t, claims.Scope)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
-				assert.Equal(t, "test-issuer", claims.Issuer)
-				assert.NotEmpty(t, claims.ExpirationTime)
-				assert.NotEmpty(t, claims.IssuedAt)
+				assert.Equal(t, "test-issuer", claims.Iss)
+				assert.NotEmpty(t, claims.Exp)
+				assert.NotEmpty(t, claims.Iat)
 				// Verify NIST-compliant claims for service tokens
 				assert.Equal(t, "IAL2", claims.AuthLevel)
 				assert.Equal(t, 2, claims.AuthFactors)
@@ -758,7 +758,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 			},
 			expectError: false,
 			validateClaims: func(t *testing.T, claims *jwt.Claims) {
-				assert.Equal(t, "testuser", claims.Subject)
+				assert.Equal(t, "testuser", claims.Sub)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
 				// Verify NIST-compliant claims
@@ -797,13 +797,13 @@ func TestTokenService_ValidateToken(t *testing.T) {
 			// Generate a valid token for the valid token test case
 			if !tt.expectError {
 				claims := &jwt.Claims{
-					Issuer:         tt.config.Issuer,
-					Subject:        "testuser",
-					Audience:       []string{"smd", "bss", "cloud-init"},
-					ExpirationTime: time.Now().Add(time.Hour).Unix(),
-					IssuedAt:       time.Now().Unix(),
-					ClusterID:      tt.config.ClusterID,
-					OpenCHAMIID:    tt.config.OpenCHAMIID,
+					Iss:         tt.config.Issuer,
+					Sub:         "testuser",
+					Aud:         []string{"smd", "bss", "cloud-init"},
+					Exp:         time.Now().Add(time.Hour).Unix(),
+					Iat:         time.Now().Unix(),
+					ClusterID:   tt.config.ClusterID,
+					OpenCHAMIID: tt.config.OpenCHAMIID,
 					// Add NIST-compliant claims
 					AuthLevel:   "IAL2",
 					AuthFactors: 2,

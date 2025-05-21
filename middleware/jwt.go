@@ -2,13 +2,12 @@ package middleware
 
 import (
 	"crypto/rsa"
-	"errors"
 	"fmt"
-	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
 )
 
 // ContextKey is the key used to store the claims in the context
@@ -20,35 +19,6 @@ const (
 	// RawClaimsContextKey is the key used to store raw claims in the context
 	RawClaimsContextKey ContextKey = "jwt_raw_claims"
 )
-
-// Claims represents the JWT claims
-type Claims struct {
-	Issuer         string   `json:"iss,omitempty"`
-	Subject        string   `json:"sub,omitempty"`
-	Audience       []string `json:"aud,omitempty"`
-	ExpirationTime int64    `json:"exp,omitempty"`
-	NotBefore      int64    `json:"nbf,omitempty"`
-	IssuedAt       int64    `json:"iat,omitempty"`
-	Scope          []string `json:"scope,omitempty"`
-	Name           string   `json:"name,omitempty"`
-	Email          string   `json:"email,omitempty"`
-	EmailVerified  bool     `json:"email_verified,omitempty"`
-	ClusterID      string   `json:"cluster_id,omitempty"`
-	OpenCHAMIID    string   `json:"openchami_id,omitempty"`
-	Groups         []string `json:"groups,omitempty"`
-	RawClaims      map[string]interface{}
-}
-
-// Validate validates the claims
-func (c *Claims) Validate() error {
-	if c.ExpirationTime > 0 && time.Unix(c.ExpirationTime, 0).Before(time.Now()) {
-		return errors.New("token has expired")
-	}
-	if c.NotBefore > 0 && time.Unix(c.NotBefore, 0).After(time.Now()) {
-		return errors.New("token not yet valid")
-	}
-	return nil
-}
 
 // KeyManager manages JWT keys
 type KeyManager struct {
@@ -76,7 +46,7 @@ func (km *KeyManager) SetJWKS(keySet jwk.Set) error {
 }
 
 // GenerateToken generates a new JWT token
-func (km *KeyManager) GenerateToken(claims *Claims) (string, error) {
+func (km *KeyManager) GenerateToken(claims *tsjwt.Claims) (string, error) {
 	if km.privateKey == nil {
 		return "", fmt.Errorf("private key not set")
 	}
@@ -97,7 +67,7 @@ func (km *KeyManager) GenerateToken(claims *Claims) (string, error) {
 }
 
 // ParseToken parses and validates a JWT token
-func (km *KeyManager) ParseToken(tokenString string) (*Claims, map[string]interface{}, error) {
+func (km *KeyManager) ParseToken(tokenString string) (*tsjwt.Claims, map[string]interface{}, error) {
 	var key interface{}
 	if km.keySet != nil {
 		// Use JWKS for validation
@@ -118,14 +88,14 @@ func (km *KeyManager) ParseToken(tokenString string) (*Claims, map[string]interf
 		return nil, nil, fmt.Errorf("failed to parse token: %w", err)
 	}
 
-	claims := &Claims{
-		Issuer:         token.Issuer(),
-		Subject:        token.Subject(),
-		Audience:       token.Audience(),
-		ExpirationTime: token.Expiration().Unix(),
-		NotBefore:      token.NotBefore().Unix(),
-		IssuedAt:       token.IssuedAt().Unix(),
-		RawClaims:      token.PrivateClaims(),
+	claims := &tsjwt.Claims{
+		Iss:       token.Issuer(),
+		Sub:       token.Subject(),
+		Aud:       token.Audience(),
+		Exp:       token.Expiration().Unix(),
+		Nbf:       token.NotBefore().Unix(),
+		Iat:       token.IssuedAt().Unix(),
+		RawClaims: token.PrivateClaims(),
 	}
 
 	// Extract custom claims
