@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/openchami/tokensmith/pkg/jwt"
+	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 
 	"github.com/stretchr/testify/assert"
@@ -60,7 +61,7 @@ func TestTokenService(t *testing.T) {
 	require.NotNil(t, privateKey)
 
 	// Create key manager
-	keyManager := jwt.NewKeyManager()
+	keyManager := tsjwt.NewKeyManager()
 	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
 	require.NoError(t, err)
 
@@ -80,7 +81,7 @@ func TestTokenService(t *testing.T) {
 
 	// Create service with mock provider
 	service := &TokenService{
-		TokenManager: jwt.NewTokenManager(keyManager, config.Issuer, config.ClusterID, config.OpenCHAMIID),
+		TokenManager: tsjwt.NewTokenManager(keyManager, config.Issuer, config.ClusterID, config.OpenCHAMIID),
 		Config:       config,
 		Issuer:       config.Issuer,
 		GroupScopes:  config.GroupScopes,
@@ -123,9 +124,9 @@ func TestTokenService(t *testing.T) {
 		require.NotNil(t, rawClaims)
 
 		// Verify claims
-		assert.Equal(t, config.Issuer, claims.Iss)
-		assert.Equal(t, "admin-user", claims.Sub)
-		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Aud)
+		assert.Equal(t, config.Issuer, claims.Issuer)
+		assert.Equal(t, "admin-user", claims.Subject)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
 		assert.Equal(t, "Admin User", claims.Name)
 		assert.Equal(t, "admin@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -175,9 +176,9 @@ func TestTokenService(t *testing.T) {
 		require.NotNil(t, rawClaims)
 
 		// Verify claims
-		assert.Equal(t, config.Issuer, claims.Iss)
-		assert.Equal(t, "operator-user", claims.Sub)
-		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Aud)
+		assert.Equal(t, config.Issuer, claims.Issuer)
+		assert.Equal(t, "operator-user", claims.Subject)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
 		assert.Equal(t, "Operator User", claims.Name)
 		assert.Equal(t, "operator@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -227,9 +228,9 @@ func TestTokenService(t *testing.T) {
 		require.NotNil(t, rawClaims)
 
 		// Verify claims
-		assert.Equal(t, config.Issuer, claims.Iss)
-		assert.Equal(t, "multi-group-user", claims.Sub)
-		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Aud)
+		assert.Equal(t, config.Issuer, claims.Issuer)
+		assert.Equal(t, "multi-group-user", claims.Subject)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
 		assert.Equal(t, "Multi Group User", claims.Name)
 		assert.Equal(t, "multi@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -392,7 +393,7 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 	require.NotNil(t, privateKey)
 
 	// Create key manager
-	keyManager := jwt.NewKeyManager()
+	keyManager := tsjwt.NewKeyManager()
 	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
 	require.NoError(t, err)
 
@@ -402,7 +403,7 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 		config         Config
 		introspectResp *oidc.IntrospectionResponse
 		expectError    bool
-		validateClaims func(*testing.T, *jwt.Claims)
+		validateClaims func(*testing.T, *tsjwt.TSClaims)
 	}{
 		{
 			name: "valid token",
@@ -435,8 +436,8 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 				},
 			},
 			expectError: false,
-			validateClaims: func(t *testing.T, claims *jwt.Claims) {
-				assert.Equal(t, "testuser", claims.Sub)
+			validateClaims: func(t *testing.T, claims *tsjwt.TSClaims) {
+				assert.Equal(t, "testuser", claims.Subject)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
 				assert.Equal(t, "Test User", claims.Name)
@@ -523,7 +524,7 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 				},
 			},
 			expectError: true,
-			validateClaims: func(t *testing.T, claims *jwt.Claims) {
+			validateClaims: func(t *testing.T, claims *tsjwt.TSClaims) {
 				// This should not be called since the token should fail validation
 				t.Fatal("validateClaims should not be called for invalid token")
 			},
@@ -534,7 +535,7 @@ func TestTokenService_ExchangeToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create token service with mock provider
 			service := &TokenService{
-				TokenManager: jwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
+				TokenManager: tsjwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
 				Config:       tt.config,
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,
@@ -570,7 +571,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 	require.NotNil(t, privateKey)
 
 	// Create key manager
-	keyManager := jwt.NewKeyManager()
+	keyManager := tsjwt.NewKeyManager()
 	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
 	require.NoError(t, err)
 
@@ -582,7 +583,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		targetService  string
 		scopes         []string
 		expectError    bool
-		validateClaims func(*testing.T, *jwt.Claims)
+		validateClaims func(*testing.T, *tsjwt.TSClaims)
 	}{
 		{
 			name: "valid service token",
@@ -596,15 +597,15 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			targetService: "service2",
 			scopes:        []string{"read", "write"},
 			expectError:   false,
-			validateClaims: func(t *testing.T, claims *jwt.Claims) {
-				assert.Equal(t, "service1", claims.Sub)
-				assert.Equal(t, "service2", claims.Aud[0])
+			validateClaims: func(t *testing.T, claims *tsjwt.TSClaims) {
+				assert.Equal(t, "service1", claims.Subject)
+				assert.Equal(t, "service2", claims.Audience[0])
 				assert.Equal(t, []string{"read", "write"}, claims.Scope)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
-				assert.Equal(t, "test-issuer", claims.Iss)
-				assert.NotEmpty(t, claims.Exp)
-				assert.NotEmpty(t, claims.Iat)
+				assert.Equal(t, "test-issuer", claims.Issuer)
+				assert.NotEmpty(t, claims.ExpiresAt)
+				assert.NotEmpty(t, claims.IssuedAt)
 				// Verify NIST-compliant claims for service tokens
 				assert.Equal(t, "IAL2", claims.AuthLevel)
 				assert.Equal(t, 2, claims.AuthFactors)
@@ -626,15 +627,15 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			targetService: "service2",
 			scopes:        []string{},
 			expectError:   false,
-			validateClaims: func(t *testing.T, claims *jwt.Claims) {
-				assert.Equal(t, "service1", claims.Sub)
-				assert.Equal(t, "service2", claims.Aud[0])
+			validateClaims: func(t *testing.T, claims *tsjwt.TSClaims) {
+				assert.Equal(t, "service1", claims.Subject)
+				assert.Equal(t, "service2", claims.Audience[0])
 				assert.Empty(t, claims.Scope)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
-				assert.Equal(t, "test-issuer", claims.Iss)
-				assert.NotEmpty(t, claims.Exp)
-				assert.NotEmpty(t, claims.Iat)
+				assert.Equal(t, "test-issuer", claims.Issuer)
+				assert.NotEmpty(t, claims.ExpiresAt)
+				assert.NotEmpty(t, claims.IssuedAt)
 				// Verify NIST-compliant claims for service tokens
 				assert.Equal(t, "IAL2", claims.AuthLevel)
 				assert.Equal(t, 2, claims.AuthFactors)
@@ -682,15 +683,15 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			targetService: "service2",
 			scopes:        nil,
 			expectError:   false,
-			validateClaims: func(t *testing.T, claims *jwt.Claims) {
-				assert.Equal(t, "service1", claims.Sub)
-				assert.Equal(t, "service2", claims.Aud[0])
+			validateClaims: func(t *testing.T, claims *tsjwt.TSClaims) {
+				assert.Equal(t, "service1", claims.Subject)
+				assert.Equal(t, "service2", claims.Audience[0])
 				assert.Nil(t, claims.Scope)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
-				assert.Equal(t, "test-issuer", claims.Iss)
-				assert.NotEmpty(t, claims.Exp)
-				assert.NotEmpty(t, claims.Iat)
+				assert.Equal(t, "test-issuer", claims.Issuer)
+				assert.NotEmpty(t, claims.ExpiresAt)
+				assert.NotEmpty(t, claims.IssuedAt)
 				// Verify NIST-compliant claims for service tokens
 				assert.Equal(t, "IAL2", claims.AuthLevel)
 				assert.Equal(t, 2, claims.AuthFactors)
@@ -706,7 +707,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create token service
 			service := &TokenService{
-				TokenManager: jwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
+				TokenManager: tsjwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
 				Config:       tt.config,
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,
@@ -736,7 +737,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 	require.NotNil(t, privateKey)
 
 	// Create key manager
-	keyManager := jwt.NewKeyManager()
+	keyManager := tsjwt.NewKeyManager()
 	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
 	require.NoError(t, err)
 
@@ -746,7 +747,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 		config         Config
 		token          string
 		expectError    bool
-		validateClaims func(*testing.T, *jwt.Claims)
+		validateClaims func(*testing.T, *tsjwt.TSClaims)
 	}{
 		{
 			name: "valid token",
@@ -757,8 +758,8 @@ func TestTokenService_ValidateToken(t *testing.T) {
 				OpenCHAMIID:  "test-openchami",
 			},
 			expectError: false,
-			validateClaims: func(t *testing.T, claims *jwt.Claims) {
-				assert.Equal(t, "testuser", claims.Sub)
+			validateClaims: func(t *testing.T, claims *tsjwt.TSClaims) {
+				assert.Equal(t, "testuser", claims.Subject)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
 				// Verify NIST-compliant claims
@@ -787,7 +788,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create token service
 			service := &TokenService{
-				TokenManager: jwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
+				TokenManager: tsjwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
 				Config:       tt.config,
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,
@@ -796,12 +797,14 @@ func TestTokenService_ValidateToken(t *testing.T) {
 
 			// Generate a valid token for the valid token test case
 			if !tt.expectError {
-				claims := &jwt.Claims{
-					Iss:         tt.config.Issuer,
-					Sub:         "testuser",
-					Aud:         []string{"smd", "bss", "cloud-init"},
-					Exp:         time.Now().Add(time.Hour).Unix(),
-					Iat:         time.Now().Unix(),
+				claims := &tsjwt.TSClaims{
+					RegisteredClaims: jwt.RegisteredClaims{
+						Issuer:    tt.config.Issuer,
+						Subject:   "testuser",
+						Audience:  []string{"smd", "bss", "cloud-init"},
+						ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+						IssuedAt:  jwt.NewNumericDate(time.Now()),
+					},
 					ClusterID:   tt.config.ClusterID,
 					OpenCHAMIID: tt.config.OpenCHAMIID,
 					// Add NIST-compliant claims

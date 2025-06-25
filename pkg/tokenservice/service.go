@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
+	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc/authelia"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc/hydra"
@@ -52,7 +53,7 @@ type Config struct {
 
 // TokenService handles token operations and provider interactions
 type TokenService struct {
-	TokenManager *jwtauth.TokenManager
+	TokenManager *tsjwt.TokenManager
 	Config       Config
 	Issuer       string
 	GroupScopes  map[string][]string
@@ -63,9 +64,9 @@ type TokenService struct {
 }
 
 // NewTokenService creates a new TokenService instance
-func NewTokenService(keyManager *jwtauth.KeyManager, config Config) (*TokenService, error) {
+func NewTokenService(keyManager *tsjwt.KeyManager, config Config) (*TokenService, error) {
 	// Initialize the token manager
-	tokenManager := jwtauth.NewTokenManager(
+	tokenManager := tsjwt.NewTokenManager(
 		keyManager,
 		config.Issuer,
 		config.ClusterID,
@@ -121,12 +122,14 @@ func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string,
 	}
 
 	// Create OpenCHAMI claims
-	claims := &jwtauth.Claims{
-		Iss:         s.Issuer,
-		Sub:         introspection.Username,
-		Aud:         []string{"smd", "bss", "cloud-init"},
-		Exp:         introspection.ExpiresAt,
-		Iat:         introspection.IssuedAt,
+	claims := &tsjwt.TSClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    s.Issuer,
+			Subject:   introspection.Username,
+			Audience:  []string{"smd", "bss", "cloud-init"},
+			ExpiresAt: jwt.NewNumericDate(time.Unix(introspection.ExpiresAt, 0)),
+			IssuedAt:  jwt.NewNumericDate(time.Unix(introspection.IssuedAt, 0)),
+		},
 		ClusterID:   s.ClusterID,
 		OpenCHAMIID: s.OpenCHAMIID,
 	}
@@ -236,12 +239,14 @@ func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targ
 		return "", errors.New("target service cannot be empty")
 	}
 
-	claims := &jwtauth.Claims{
-		Iss:         s.Issuer,
-		Sub:         serviceID,
-		Aud:         []string{targetService},
-		Exp:         time.Now().Add(time.Hour).Unix(),
-		Iat:         time.Now().Unix(),
+	claims := &tsjwt.TSClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    s.Issuer,
+			Subject:   serviceID,
+			Audience:  []string{targetService},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
 		ClusterID:   s.ClusterID,
 		OpenCHAMIID: s.OpenCHAMIID,
 		Scope:       scopes,
@@ -258,7 +263,7 @@ func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targ
 }
 
 // ValidateToken validates a token and returns its claims
-func (s *TokenService) ValidateToken(ctx context.Context, token string) (*jwtauth.Claims, error) {
+func (s *TokenService) ValidateToken(ctx context.Context, token string) (*tsjwt.TSClaims, error) {
 	claims, _, err := s.TokenManager.ParseToken(token)
 	if err != nil {
 		return nil, fmt.Errorf("token validation failed: %w", err)

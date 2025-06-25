@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -54,13 +55,15 @@ func TestTokenOperations(t *testing.T) {
 	})
 
 	t.Run("GenerateToken with standard claims", func(t *testing.T) {
-		claims := &Claims{
-			Iss:           "test-issuer",
-			Sub:           "test-subject",
-			Aud:           []string{"test-audience"},
-			Exp:           time.Now().Add(time.Hour).Unix(),
-			Nbf:           time.Now().Unix(),
-			Iat:           time.Now().Unix(),
+		claims := &TSClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Subject:   "test-subject",
+				Audience:  []string{"test-audience"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				NotBefore: jwt.NewNumericDate(time.Now()),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
 			Scope:         []string{"read", "write"},
 			Name:          "Test User",
 			Email:         "test@example.com",
@@ -85,9 +88,9 @@ func TestTokenOperations(t *testing.T) {
 		require.NotNil(t, rawClaims)
 
 		// Verify standard claims
-		assert.Equal(t, claims.Iss, parsedClaims.Iss)
-		assert.Equal(t, claims.Sub, parsedClaims.Sub)
-		assert.Equal(t, claims.Aud, parsedClaims.Aud)
+		assert.Equal(t, claims.Issuer, parsedClaims.Issuer)
+		assert.Equal(t, claims.Subject, parsedClaims.Subject)
+		assert.Equal(t, claims.Audience, parsedClaims.Audience)
 		assert.Equal(t, claims.Scope, parsedClaims.Scope)
 		assert.Equal(t, claims.Name, parsedClaims.Name)
 		assert.Equal(t, claims.Email, parsedClaims.Email)
@@ -107,14 +110,15 @@ func TestTokenOperations(t *testing.T) {
 	})
 
 	t.Run("GenerateTokenWithClaims with additional claims", func(t *testing.T) {
-		claims := &Claims{
-			Iss: "test-issuer",
-			Sub: "test-subject",
-			Aud: []string{"test-audience"},
-			Exp: time.Now().Add(time.Hour).Unix(),
-			Nbf: time.Now().Unix(),
-			Iat: time.Now().Unix(),
-			// Add required NIST claims
+		claims := &TSClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Subject:   "test-subject",
+				Audience:  []string{"test-audience"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				NotBefore: jwt.NewNumericDate(time.Now()),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
 			AuthLevel:   "IAL2",
 			AuthFactors: 2,
 			AuthMethods: []string{"password", "mfa"},
@@ -141,9 +145,9 @@ func TestTokenOperations(t *testing.T) {
 		require.NotNil(t, rawClaims)
 
 		// Verify standard claims
-		assert.Equal(t, claims.Iss, parsedClaims.Iss)
-		assert.Equal(t, claims.Sub, parsedClaims.Sub)
-		assert.Equal(t, claims.Aud, parsedClaims.Aud)
+		assert.Equal(t, claims.Issuer, parsedClaims.Issuer)
+		assert.Equal(t, claims.Subject, parsedClaims.Subject)
+		assert.Equal(t, claims.Audience, parsedClaims.Audience)
 
 		// Verify additional claims
 		assert.Equal(t, "custom_value", rawClaims["custom_claim"])
@@ -169,13 +173,22 @@ func TestTokenOperations(t *testing.T) {
 	})
 
 	t.Run("GenerateToken with expired token", func(t *testing.T) {
-		claims := &Claims{
-			Iss: "test-issuer",
-			Sub: "test-subject",
-			Aud: []string{"test-audience"},
-			Exp: time.Now().Add(-time.Hour).Unix(), // Expired
-			Nbf: time.Now().Add(-2 * time.Hour).Unix(),
-			Iat: time.Now().Add(-2 * time.Hour).Unix(),
+		claims := &TSClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Subject:   "test-subject",
+				Audience:  []string{"test-audience"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour)), // Expired
+				NotBefore: jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
+				IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
+			},
+			// Add required NIST claims to avoid missing field errors
+			AuthLevel:   "IAL2",
+			AuthFactors: 2,
+			AuthMethods: []string{"password", "mfa"},
+			SessionID:   "test-session",
+			SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+			AuthEvents:  []string{"login", "mfa"},
 		}
 
 		token, err := tm.GenerateToken(claims)
@@ -185,13 +198,22 @@ func TestTokenOperations(t *testing.T) {
 	})
 
 	t.Run("GenerateToken with future token", func(t *testing.T) {
-		claims := &Claims{
-			Iss: "test-issuer",
-			Sub: "test-subject",
-			Aud: []string{"test-audience"},
-			Exp: time.Now().Add(2 * time.Hour).Unix(),
-			Nbf: time.Now().Add(time.Hour).Unix(), // Not valid yet
-			Iat: time.Now().Unix(),
+		claims := &TSClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Subject:   "test-subject",
+				Audience:  []string{"test-audience"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(2 * time.Hour)),
+				NotBefore: jwt.NewNumericDate(time.Now().Add(time.Hour)), // Not valid yet
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
+			// Add required NIST claims
+			AuthLevel:   "IAL2",
+			AuthFactors: 2,
+			AuthMethods: []string{"password", "mfa"},
+			SessionID:   "test-session",
+			SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+			AuthEvents:  []string{"login", "mfa"},
 		}
 
 		token, err := tm.GenerateToken(claims)
@@ -212,13 +234,15 @@ func TestTokenOperations(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid claims")
 
 		// Now try with minimal valid claims
-		claims := &Claims{
-			Iss: "test-issuer",
-			Sub: "test-subject",
-			Aud: []string{"test-audience"},
-			Exp: time.Now().Add(time.Hour).Unix(),
-			Nbf: time.Now().Unix(),
-			Iat: time.Now().Unix(),
+		claims := &TSClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Subject:   "test-subject",
+				Audience:  []string{"test-audience"},
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				NotBefore: jwt.NewNumericDate(time.Now()),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
 			// Add required NIST claims
 			AuthLevel:   "IAL2",
 			AuthFactors: 2,
@@ -239,9 +263,9 @@ func TestTokenOperations(t *testing.T) {
 		require.NotNil(t, rawClaims)
 
 		// Verify standard claims
-		assert.Equal(t, claims.Iss, parsedClaims.Iss)
-		assert.Equal(t, claims.Sub, parsedClaims.Sub)
-		assert.Equal(t, claims.Aud, parsedClaims.Aud)
+		assert.Equal(t, claims.Issuer, parsedClaims.Issuer)
+		assert.Equal(t, claims.Subject, parsedClaims.Subject)
+		assert.Equal(t, claims.Audience, parsedClaims.Audience)
 
 		// Verify additional claims
 		assert.Equal(t, "custom_value", rawClaims["custom_claim"])

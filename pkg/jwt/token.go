@@ -57,7 +57,7 @@ func (tm *TokenManager) GetSigningAlgorithm() string {
 }
 
 // GenerateToken generates a new JWT token with the given claims
-func (tm *TokenManager) GenerateToken(claims *Claims) (string, error) {
+func (tm *TokenManager) GenerateToken(claims *TSClaims) (string, error) {
 	if claims == nil {
 		claims = NewClaims()
 		claims.ClusterID = tm.clusterID
@@ -87,12 +87,12 @@ func (tm *TokenManager) GenerateToken(claims *Claims) (string, error) {
 
 	// Create token claims
 	tokenClaims := jwt.MapClaims{
-		"iss":   claims.Iss,
-		"sub":   claims.Sub,
-		"aud":   claims.Aud,
-		"exp":   claims.Exp,
-		"nbf":   claims.Nbf,
-		"iat":   claims.Iat,
+		"iss":   claims.Issuer,
+		"sub":   claims.Subject,
+		"aud":   claims.Audience,
+		"exp":   claims.ExpiresAt,
+		"nbf":   claims.NotBefore,
+		"iat":   claims.IssuedAt,
 		"jti":   jti,
 		"nonce": nonce,
 	}
@@ -147,7 +147,7 @@ func (tm *TokenManager) GenerateToken(claims *Claims) (string, error) {
 }
 
 // GenerateTokenWithClaims generates a new JWT token with the given claims and additional claims
-func (tm *TokenManager) GenerateTokenWithClaims(claims *Claims, additionalClaims map[string]interface{}) (string, error) {
+func (tm *TokenManager) GenerateTokenWithClaims(claims *TSClaims, additionalClaims map[string]interface{}) (string, error) {
 	if claims == nil {
 		claims = NewClaims()
 		claims.ClusterID = tm.clusterID
@@ -177,12 +177,12 @@ func (tm *TokenManager) GenerateTokenWithClaims(claims *Claims, additionalClaims
 
 	// Create token claims
 	tokenClaims := jwt.MapClaims{
-		"iss":   claims.Iss,
-		"sub":   claims.Sub,
-		"aud":   claims.Aud,
-		"exp":   claims.Exp,
-		"nbf":   claims.Nbf,
-		"iat":   claims.Iat,
+		"iss":   claims.Issuer,
+		"sub":   claims.Subject,
+		"aud":   claims.Audience,
+		"exp":   claims.ExpiresAt,
+		"nbf":   claims.NotBefore,
+		"iat":   claims.IssuedAt,
 		"jti":   jti,
 		"nonce": nonce,
 	}
@@ -266,125 +266,40 @@ func generateNonce() (string, error) {
 }
 
 // ParseToken parses a JWT token string into Claims
-func (tm *TokenManager) ParseToken(tokenString string) (*Claims, map[string]interface{}, error) {
+func (tm *TokenManager) ParseToken(tokenString string) (*TSClaims, map[string]interface{}, error) {
 	// Get public key for verification
 	publicKey, err := tm.keyManager.GetPublicKey()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get public key: %w", err)
 	}
 
-	// Parse and verify token
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	claims := &TSClaims{}
+	// Parse and verify token using custom claims
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return publicKey, nil
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse token: %w", err)
 	}
 
-	// Extract claims
-	claims := &Claims{}
-	mapClaims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, nil, fmt.Errorf("invalid token claims format")
+	if !token.Valid {
+		return nil, nil, fmt.Errorf("token is invalid")
 	}
 
-	// Extract standard claims
-	if iss, ok := mapClaims["iss"].(string); ok {
-		claims.Iss = iss
-	}
-	if sub, ok := mapClaims["sub"].(string); ok {
-		claims.Sub = sub
-	}
-	if aud, ok := mapClaims["aud"].([]interface{}); ok {
-		claims.Aud = make([]string, len(aud))
-		for i, v := range aud {
-			if s, ok := v.(string); ok {
-				claims.Aud[i] = s
-			}
-		}
-	}
-	if exp, ok := mapClaims["exp"].(float64); ok {
-		claims.Exp = int64(exp)
-	}
-	if nbf, ok := mapClaims["nbf"].(float64); ok {
-		claims.Nbf = int64(nbf)
-	}
-	if iat, ok := mapClaims["iat"].(float64); ok {
-		claims.Iat = int64(iat)
-	}
-	if jti, ok := mapClaims["jti"].(string); ok {
-		claims.Jti = jti
+	// Validate claims using custom logic
+	if err := claims.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("claims validation failed: %w", err)
 	}
 
-	// Extract OpenID Connect claims
-	if name, ok := mapClaims["name"].(string); ok {
-		claims.Name = name
-	}
-	if email, ok := mapClaims["email"].(string); ok {
-		claims.Email = email
-	}
-	if emailVerified, ok := mapClaims["email_verified"].(bool); ok {
-		claims.EmailVerified = emailVerified
-	}
-	if authTime, ok := mapClaims["auth_time"].(float64); ok {
-		claims.AuthTime = int64(authTime)
-	}
-	if amr, ok := mapClaims["amr"].([]interface{}); ok {
-		claims.AMR = make([]string, len(amr))
-		for i, v := range amr {
-			if s, ok := v.(string); ok {
-				claims.AMR[i] = s
-			}
+	// Convert claims to map[string]interface{} for raw claims
+	mapClaims := make(map[string]interface{})
+	if m, ok := token.Claims.(jwt.MapClaims); ok {
+		for k, v := range m {
+			mapClaims[k] = v
 		}
-	}
-	if acr, ok := mapClaims["acr"].(string); ok {
-		claims.ACR = acr
-	}
-
-	// Extract NIST-compliant claims
-	if authLevel, ok := mapClaims["auth_level"].(string); ok {
-		claims.AuthLevel = authLevel
-	}
-	if authFactors, ok := mapClaims["auth_factors"].(float64); ok {
-		claims.AuthFactors = int(authFactors)
-	}
-	if authMethods, ok := mapClaims["auth_methods"].([]interface{}); ok {
-		claims.AuthMethods = make([]string, len(authMethods))
-		for i, v := range authMethods {
-			if s, ok := v.(string); ok {
-				claims.AuthMethods[i] = s
-			}
-		}
-	}
-	if sessionID, ok := mapClaims["session_id"].(string); ok {
-		claims.SessionID = sessionID
-	}
-	if sessionExp, ok := mapClaims["session_exp"].(float64); ok {
-		claims.SessionExp = int64(sessionExp)
-	}
-	if authEvents, ok := mapClaims["auth_events"].([]interface{}); ok {
-		claims.AuthEvents = make([]string, len(authEvents))
-		for i, v := range authEvents {
-			if s, ok := v.(string); ok {
-				claims.AuthEvents[i] = s
-			}
-		}
-	}
-
-	// Extract OpenCHAMI specific claims
-	if scope, ok := mapClaims["scope"].([]interface{}); ok {
-		claims.Scope = make([]string, len(scope))
-		for i, v := range scope {
-			if s, ok := v.(string); ok {
-				claims.Scope[i] = s
-			}
-		}
-	}
-	if clusterID, ok := mapClaims["cluster_id"].(string); ok {
-		claims.ClusterID = clusterID
-	}
-	if openchamiID, ok := mapClaims["openchami_id"].(string); ok {
-		claims.OpenCHAMIID = openchamiID
+	} else {
+		// fallback: marshal and unmarshal claims struct
+		// (optional, can be omitted if not needed)
 	}
 
 	return claims, mapClaims, nil
@@ -398,13 +313,15 @@ func (tm *TokenManager) GetKeyManager() *KeyManager {
 // GenerateServiceToken generates a token for service-to-service communication
 func (tm *TokenManager) GenerateServiceToken(serviceID, targetService string, scopes []string) (string, error) {
 	now := time.Now()
-	claims := &Claims{
-		Iss:         tm.issuer,
-		Sub:         serviceID,
-		Aud:         []string{targetService},
-		Exp:         now.Add(5 * time.Minute).Unix(), // Short-lived tokens for services
-		Nbf:         now.Unix(),
-		Iat:         now.Unix(),
+	claims := &TSClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    tm.issuer,
+			Subject:   serviceID,
+			Audience:  []string{targetService},
+			ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)), // Short-lived tokens for services
+			NotBefore: jwt.NewNumericDate(now),
+			IssuedAt:  jwt.NewNumericDate(now),
+		},
 		Scope:       scopes,
 		ClusterID:   tm.clusterID,
 		OpenCHAMIID: tm.openchamiID,
