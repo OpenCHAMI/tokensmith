@@ -3,6 +3,7 @@ package jwt
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -39,16 +40,12 @@ func NewTokenManager(keyManager *KeyManager, issuer string, clusterID string, op
 
 // SetSigningAlgorithm sets the signing algorithm to use
 func (tm *TokenManager) SetSigningAlgorithm(algorithm string) error {
-	// Only allow FIPS-approved algorithms
-	switch algorithm {
-	case "PS256", "PS384", "PS512", // RSASSA-PSS
-		"RS256", "RS384", "RS512", // RSASSA-PKCS1-v1_5
-		"ES256", "ES384", "ES512": // ECDSA
-		tm.algorithm = algorithm
-		return nil
-	default:
-		return fmt.Errorf("algorithm %s is not FIPS-approved", algorithm)
+	// Use shared FIPS validation
+	if err := ValidateAlgorithm(algorithm); err != nil {
+		return err
 	}
+	tm.algorithm = algorithm
+	return nil
 }
 
 // GetSigningAlgorithm returns the current signing algorithm
@@ -85,65 +82,53 @@ func (tm *TokenManager) GenerateToken(claims *TSClaims) (string, error) {
 		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
-	// Create token claims
-	tokenClaims := jwt.MapClaims{
-		"iss":   claims.Issuer,
-		"sub":   claims.Subject,
-		"aud":   claims.Audience,
-		"exp":   claims.ExpiresAt,
-		"nbf":   claims.NotBefore,
-		"iat":   claims.IssuedAt,
-		"jti":   jti,
-		"nonce": nonce,
+	// Set JTI and nonce in claims
+	claims.ID = jti
+	claims.Nonce = nonce
+
+	// Get the appropriate signing method for the configured algorithm
+	signingMethod, err := GetSigningMethod(tm.algorithm)
+	if err != nil {
+		return "", fmt.Errorf("invalid signing algorithm: %w", err)
 	}
 
-	// Add OpenID Connect claims
-	if claims.Name != "" {
-		tokenClaims["name"] = claims.Name
-	}
-	if claims.Email != "" {
-		tokenClaims["email"] = claims.Email
-	}
-	tokenClaims["email_verified"] = claims.EmailVerified
-	if claims.AuthTime != 0 {
-		tokenClaims["auth_time"] = claims.AuthTime
-	}
-	if len(claims.AMR) > 0 {
-		tokenClaims["amr"] = claims.AMR
-	}
-	if claims.ACR != "" {
-		tokenClaims["acr"] = claims.ACR
-	}
-
-	// Add NIST-compliant claims
-	tokenClaims["auth_level"] = claims.AuthLevel
-	tokenClaims["auth_factors"] = claims.AuthFactors
-	tokenClaims["auth_methods"] = claims.AuthMethods
-	tokenClaims["session_id"] = claims.SessionID
-	tokenClaims["session_exp"] = claims.SessionExp
-	if len(claims.AuthEvents) > 0 {
-		tokenClaims["auth_events"] = claims.AuthEvents
-	}
-
-	// Add OpenCHAMI specific claims
-	if claims.Scope != nil {
-		tokenClaims["scope"] = claims.Scope
-	}
-	if claims.ClusterID != "" {
-		tokenClaims["cluster_id"] = claims.ClusterID
-	}
-	if claims.OpenCHAMIID != "" {
-		tokenClaims["openchami_id"] = claims.OpenCHAMIID
-	}
-
-	// Create and sign token
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, tokenClaims)
+	// Create and sign token using TSClaims directly
+	token := jwt.NewWithClaims(signingMethod, claims)
 	signed, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
 	}
 
 	return signed, nil
+}
+
+// ExtendedClaims extends TSClaims with additional custom claims
+type ExtendedClaims struct {
+	*TSClaims
+	AdditionalClaims map[string]interface{} `json:"-"`
+}
+
+// MarshalJSON implements custom JSON marshaling to include additional claims
+func (ec *ExtendedClaims) MarshalJSON() ([]byte, error) {
+	// First marshal the base TSClaims
+	baseJSON, err := json.Marshal(ec.TSClaims)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the base JSON into a map
+	var baseMap map[string]interface{}
+	if err := json.Unmarshal(baseJSON, &baseMap); err != nil {
+		return nil, err
+	}
+
+	// Add additional claims
+	for key, value := range ec.AdditionalClaims {
+		baseMap[key] = value
+	}
+
+	// Marshal the combined map
+	return json.Marshal(baseMap)
 }
 
 // GenerateTokenWithClaims generates a new JWT token with the given claims and additional claims
@@ -175,64 +160,24 @@ func (tm *TokenManager) GenerateTokenWithClaims(claims *TSClaims, additionalClai
 		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
-	// Create token claims
-	tokenClaims := jwt.MapClaims{
-		"iss":   claims.Issuer,
-		"sub":   claims.Subject,
-		"aud":   claims.Audience,
-		"exp":   claims.ExpiresAt,
-		"nbf":   claims.NotBefore,
-		"iat":   claims.IssuedAt,
-		"jti":   jti,
-		"nonce": nonce,
+	// Set JTI and nonce in claims
+	claims.ID = jti
+	claims.Nonce = nonce
+
+	// Create extended claims with additional claims
+	extendedClaims := &ExtendedClaims{
+		TSClaims:         claims,
+		AdditionalClaims: additionalClaims,
 	}
 
-	// Add OpenID Connect claims
-	if claims.Name != "" {
-		tokenClaims["name"] = claims.Name
-	}
-	if claims.Email != "" {
-		tokenClaims["email"] = claims.Email
-	}
-	tokenClaims["email_verified"] = claims.EmailVerified
-	if claims.AuthTime != 0 {
-		tokenClaims["auth_time"] = claims.AuthTime
-	}
-	if len(claims.AMR) > 0 {
-		tokenClaims["amr"] = claims.AMR
-	}
-	if claims.ACR != "" {
-		tokenClaims["acr"] = claims.ACR
+	// Get the appropriate signing method for the configured algorithm
+	signingMethod, err := GetSigningMethod(tm.algorithm)
+	if err != nil {
+		return "", fmt.Errorf("invalid signing algorithm: %w", err)
 	}
 
-	// Add NIST-compliant claims
-	tokenClaims["auth_level"] = claims.AuthLevel
-	tokenClaims["auth_factors"] = claims.AuthFactors
-	tokenClaims["auth_methods"] = claims.AuthMethods
-	tokenClaims["session_id"] = claims.SessionID
-	tokenClaims["session_exp"] = claims.SessionExp
-	if len(claims.AuthEvents) > 0 {
-		tokenClaims["auth_events"] = claims.AuthEvents
-	}
-
-	// Add OpenCHAMI specific claims
-	if claims.Scope != nil {
-		tokenClaims["scope"] = claims.Scope
-	}
-	if claims.ClusterID != "" {
-		tokenClaims["cluster_id"] = claims.ClusterID
-	}
-	if claims.OpenCHAMIID != "" {
-		tokenClaims["openchami_id"] = claims.OpenCHAMIID
-	}
-
-	// Add additional claims
-	for key, value := range additionalClaims {
-		tokenClaims[key] = value
-	}
-
-	// Create and sign token
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, tokenClaims)
+	// Create and sign token using ExtendedClaims
+	token := jwt.NewWithClaims(signingMethod, extendedClaims)
 	signed, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)
@@ -298,8 +243,14 @@ func (tm *TokenManager) ParseToken(tokenString string) (*TSClaims, map[string]in
 			mapClaims[k] = v
 		}
 	} else {
-		// fallback: marshal and unmarshal claims struct
-		// (optional, can be omitted if not needed)
+		// fallback: marshal and unmarshal claims struct to get all fields
+		claimsJSON, err := json.Marshal(claims)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to marshal claims: %w", err)
+		}
+		if err := json.Unmarshal(claimsJSON, &mapClaims); err != nil {
+			return nil, nil, fmt.Errorf("failed to unmarshal claims to map: %w", err)
+		}
 	}
 
 	return claims, mapClaims, nil

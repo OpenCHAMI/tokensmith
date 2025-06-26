@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -11,6 +12,16 @@ import (
 	"github.com/MicahParks/keyfunc"
 	gjwt "github.com/golang-jwt/jwt/v5"
 	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
+)
+
+// ContextKey is the key used to store the claims in the context
+type ContextKey string
+
+const (
+	// ClaimsContextKey is the key used to store the claims in the context
+	ClaimsContextKey ContextKey = "jwt_claims"
+	// RawClaimsContextKey is the key used to store raw claims in the context
+	RawClaimsContextKey ContextKey = "jwt_raw_claims"
 )
 
 // MiddlewareOptions contains options for the JWT middleware
@@ -98,6 +109,11 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 			var err error
 
 			keyFunc := func(token *gjwt.Token) (interface{}, error) {
+				// Validate the algorithm is FIPS-approved
+				if err := tsjwt.ValidateAlgorithm(token.Method.Alg()); err != nil {
+					return nil, fmt.Errorf("invalid algorithm: %w", err)
+				}
+
 				// If JWKS is used, select key by kid
 				if keySet != nil {
 					if kid, ok := token.Header["kid"].(string); ok {
