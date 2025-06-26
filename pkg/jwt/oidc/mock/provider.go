@@ -3,33 +3,29 @@ package mock
 import (
 	"context"
 	"errors"
-
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 )
 
 // Provider implements oidc.Provider for testing
 type Provider struct {
-	IntrospectFunc          func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error)
-	MetadataFunc            func(ctx context.Context) (*oidc.ProviderMetadata, error)
-	SupportsLocalFunc       func() bool
 	GetJWKSFunc             func(ctx context.Context) (interface{}, error)
-	SupportsLocalIntrospect bool
+	IntrospectTokenFunc     func(ctx context.Context, token string) (interface{}, error)
+	SupportsLocalFunc       func() bool
+	GetProviderMetadataFunc func(ctx context.Context) (interface{}, error)
 	JWKS                    interface{}
 }
 
 // IntrospectToken implements the oidc.Provider interface
-func (m *Provider) IntrospectToken(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
-	if m.IntrospectFunc != nil {
-		return m.IntrospectFunc(ctx, token)
+func (m *Provider) IntrospectToken(ctx context.Context, token string) (interface{}, error) {
+	if m.IntrospectTokenFunc != nil {
+		return m.IntrospectTokenFunc(ctx, token)
 	}
 	return nil, errors.New("IntrospectToken not implemented")
 }
 
 // GetProviderMetadata implements the oidc.Provider interface
-func (m *Provider) GetProviderMetadata(ctx context.Context) (*oidc.ProviderMetadata, error) {
-	if m.MetadataFunc != nil {
-		return m.MetadataFunc(ctx)
+func (m *Provider) GetProviderMetadata(ctx context.Context) (interface{}, error) {
+	if m.GetProviderMetadataFunc != nil {
+		return m.GetProviderMetadataFunc(ctx)
 	}
 	return nil, errors.New("GetProviderMetadata not implemented")
 }
@@ -39,7 +35,7 @@ func (m *Provider) SupportsLocalIntrospection() bool {
 	if m.SupportsLocalFunc != nil {
 		return m.SupportsLocalFunc()
 	}
-	return m.SupportsLocalIntrospect
+	return false
 }
 
 // GetJWKS implements the oidc.Provider interface
@@ -55,8 +51,5 @@ func (m *Provider) GetJWKS(ctx context.Context) (interface{}, error) {
 
 // NewProvider creates a new mock provider with default implementations
 func NewProvider() *Provider {
-	return &Provider{
-		SupportsLocalIntrospect: true,
-		JWKS:                    jwk.NewSet(),
-	}
+	return &Provider{}
 }

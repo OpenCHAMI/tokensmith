@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 
@@ -21,7 +20,7 @@ import (
 type MockProvider struct {
 	introspectResponse *oidc.IntrospectionResponse
 	metadataResponse   *oidc.ProviderMetadata
-	jwks               jwk.Set
+	jwks               map[string]interface{} // map of kid to public key
 }
 
 func (p *MockProvider) IntrospectToken(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
@@ -48,9 +47,6 @@ func (p *MockProvider) SupportsLocalIntrospection() bool {
 }
 
 func (p *MockProvider) GetJWKS(ctx context.Context) (interface{}, error) {
-	if p.jwks == nil {
-		p.jwks = jwk.NewSet()
-	}
 	return p.jwks, nil
 }
 
@@ -126,7 +122,7 @@ func TestTokenService(t *testing.T) {
 		// Verify claims
 		assert.Equal(t, config.Issuer, claims.Issuer)
 		assert.Equal(t, "admin-user", claims.Subject)
-		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, []string(claims.Audience))
 		assert.Equal(t, "Admin User", claims.Name)
 		assert.Equal(t, "admin@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -178,7 +174,7 @@ func TestTokenService(t *testing.T) {
 		// Verify claims
 		assert.Equal(t, config.Issuer, claims.Issuer)
 		assert.Equal(t, "operator-user", claims.Subject)
-		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, []string(claims.Audience))
 		assert.Equal(t, "Operator User", claims.Name)
 		assert.Equal(t, "operator@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)
@@ -230,7 +226,7 @@ func TestTokenService(t *testing.T) {
 		// Verify claims
 		assert.Equal(t, config.Issuer, claims.Issuer)
 		assert.Equal(t, "multi-group-user", claims.Subject)
-		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, claims.Audience)
+		assert.Equal(t, []string{"smd", "bss", "cloud-init"}, []string(claims.Audience))
 		assert.Equal(t, "Multi Group User", claims.Name)
 		assert.Equal(t, "multi@example.com", claims.Email)
 		assert.True(t, claims.EmailVerified)

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MicahParks/keyfunc"
 	gjwt "github.com/golang-jwt/jwt/v5"
 	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
 )
@@ -164,10 +165,22 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 
 // refresh fetches and updates the JWKS cache (expects JWKS as a map of kid to key)
 func (c *keySetCache) refresh(url string) error {
-	// This is a placeholder for JWKS fetching logic.
-	// In production, use a JWKS library to fetch and parse the JWKS into a map[kid]publicKey.
-	// For example, using github.com/MicahParks/keyfunc or similar.
-	// Here, we just leave it as a stub.
+	jwks, err := keyfunc.Get(url, keyfunc.Options{})
+	if err != nil {
+		return err
+	}
+
+	newKeySet := make(map[string]interface{})
+	for kid, key := range jwks.ReadOnlyKeys() {
+		if key == nil {
+			continue
+		}
+		newKeySet[kid] = key
+	}
+
+	c.mu.Lock()
+	c.keySet = newKeySet
+	c.mu.Unlock()
 	return nil
 }
 

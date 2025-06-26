@@ -68,7 +68,16 @@ func (c *Client) GetJWKS(ctx context.Context) (interface{}, error) {
 			return nil, fmt.Errorf("failed to update JWKS: %w", err)
 		}
 	}
-	return c.keySet, nil
+	// Convert KeySet to map[string]interface{}
+	jwksBytes, err := json.Marshal(c.keySet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JWKS: %w", err)
+	}
+	var jwks map[string]interface{}
+	if err := json.Unmarshal(jwksBytes, &jwks); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JWKS: %w", err)
+	}
+	return jwks, nil
 }
 
 // updateJWKS fetches the latest JWKS from Hydra

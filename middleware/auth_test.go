@@ -9,9 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwt"
-	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
+	gjwt "github.com/golang-jwt/jwt/v5"
+	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -21,12 +20,12 @@ type MockTokenService struct {
 	mock.Mock
 }
 
-func (m *MockTokenService) ExchangeToken(ctx context.Context, token string) (*jwtauth.Claims, error) {
+func (m *MockTokenService) ExchangeToken(ctx context.Context, token string) (*tsjwt.TSClaims, error) {
 	args := m.Called(ctx, token)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*jwtauth.Claims), args.Error(1)
+	return args.Get(0).(*tsjwt.TSClaims), args.Error(1)
 }
 
 func (m *MockTokenService) GenerateServiceToken(ctx context.Context, scopes []string) (string, error) {
@@ -34,12 +33,12 @@ func (m *MockTokenService) GenerateServiceToken(ctx context.Context, scopes []st
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockTokenService) ValidateToken(ctx context.Context, token string) (*jwtauth.Claims, error) {
+func (m *MockTokenService) ValidateToken(ctx context.Context, token string) (*tsjwt.TSClaims, error) {
 	args := m.Called(ctx, token)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*jwtauth.Claims), args.Error(1)
+	return args.Get(0).(*tsjwt.TSClaims), args.Error(1)
 }
 
 func (m *MockTokenService) UpdateGroupScopes(ctx context.Context, group string, scopes []string) error {
@@ -55,22 +54,33 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 
 	// Create test claims
-	testClaims := &jwtauth.Claims{
-		Issuer:         "test-issuer",
-		Subject:        "test-subject",
-		Audience:       []string{"test-audience"},
-		ExpirationTime: time.Now().Add(time.Hour).Unix(),
-		NotBefore:      time.Now().Unix(),
-		IssuedAt:       time.Now().Unix(),
-		Scope:          []string{"read", "write"},
-		ClusterID:      "test-cluster",
-		OpenCHAMIID:    "test-openchami-id",
+	testClaims := &tsjwt.TSClaims{
+		RegisteredClaims: gjwt.RegisteredClaims{
+			Issuer:    "test-issuer",
+			Subject:   "test-subject",
+			Audience:  []string{"test-audience"},
+			ExpiresAt: gjwt.NewNumericDate(time.Now().Add(time.Hour)),
+			NotBefore: gjwt.NewNumericDate(time.Now()),
+			IssuedAt:  gjwt.NewNumericDate(time.Now()),
+		},
+		Scope:       []string{"read", "write"},
+		ClusterID:   "test-cluster",
+		OpenCHAMIID: "test-openchami-id",
+		AuthLevel:   "IAL2",
+		AuthFactors: 2,
+		AuthMethods: []string{"password", "sms"},
+		SessionID:   "test-session-123",
+		SessionExp:  time.Now().Add(time.Hour).Unix(),
+		AuthTime:    time.Now().Unix(),
+		AMR:         []string{"pwd", "otp"},
+		ACR:         "AAL2",
+		AuthEvents:  []string{"login"},
 	}
 
 	// Create test handler
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Log claims for debugging
-		claims, ok := r.Context().Value(ClaimsContextKey).(*jwtauth.Claims)
+		claims, ok := r.Context().Value(ClaimsContextKey).(*tsjwt.TSClaims)
 		t.Logf("Claims in context: %v", ok)
 		if ok {
 			t.Logf("Scopes in claims: %v", claims.Scope)
@@ -78,24 +88,12 @@ func TestAuthMiddleware(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Create test token
-	token := jwt.New()
-	_ = token.Set(jwt.IssuerKey, testClaims.Issuer)
-	_ = token.Set(jwt.SubjectKey, testClaims.Subject)
-	_ = token.Set(jwt.AudienceKey, testClaims.Audience)
-	_ = token.Set(jwt.ExpirationKey, time.Unix(testClaims.ExpirationTime, 0))
-	_ = token.Set(jwt.NotBeforeKey, time.Unix(testClaims.NotBefore, 0))
-	_ = token.Set(jwt.IssuedAtKey, time.Unix(testClaims.IssuedAt, 0))
-	_ = token.Set("scope", testClaims.Scope)
-	_ = token.Set("cluster_id", testClaims.ClusterID)
-	_ = token.Set("openchami_id", testClaims.OpenCHAMIID)
-
-	// Sign the token
-	tokenBytes, err := jwt.Sign(token, jwt.WithKey(jwa.RS256, privateKey))
+	// Create test token using Google JWT library
+	token := gjwt.NewWithClaims(gjwt.SigningMethodRS256, testClaims)
+	tokenString, err := token.SignedString(privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokenString := string(tokenBytes)
 
 	tests := []struct {
 		name           string
@@ -181,22 +179,33 @@ func TestAuthMiddleware_WithScopes(t *testing.T) {
 	}
 
 	// Create test claims with scopes
-	testClaims := &jwtauth.Claims{
-		Issuer:         "test-issuer",
-		Subject:        "test-subject",
-		Audience:       []string{"test-audience"},
-		ExpirationTime: time.Now().Add(time.Hour).Unix(),
-		NotBefore:      time.Now().Unix(),
-		IssuedAt:       time.Now().Unix(),
-		Scope:          []string{"read", "write"},
-		ClusterID:      "test-cluster",
-		OpenCHAMIID:    "test-openchami-id",
+	testClaims := &tsjwt.TSClaims{
+		RegisteredClaims: gjwt.RegisteredClaims{
+			Issuer:    "test-issuer",
+			Subject:   "test-subject",
+			Audience:  []string{"test-audience"},
+			ExpiresAt: gjwt.NewNumericDate(time.Now().Add(time.Hour)),
+			NotBefore: gjwt.NewNumericDate(time.Now()),
+			IssuedAt:  gjwt.NewNumericDate(time.Now()),
+		},
+		Scope:       []string{"read", "write"},
+		ClusterID:   "test-cluster",
+		OpenCHAMIID: "test-openchami-id",
+		AuthLevel:   "IAL2",
+		AuthFactors: 2,
+		AuthMethods: []string{"password", "sms"},
+		SessionID:   "test-session-123",
+		SessionExp:  time.Now().Add(time.Hour).Unix(),
+		AuthTime:    time.Now().Unix(),
+		AMR:         []string{"pwd", "otp"},
+		ACR:         "AAL2",
+		AuthEvents:  []string{"login"},
 	}
 
 	// Create test handler
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Log claims for debugging
-		claims, ok := r.Context().Value(ClaimsContextKey).(*jwtauth.Claims)
+		claims, ok := r.Context().Value(ClaimsContextKey).(*tsjwt.TSClaims)
 		t.Logf("Claims in context: %v", ok)
 		if ok {
 			t.Logf("Scopes in claims: %v", claims.Scope)
@@ -204,24 +213,12 @@ func TestAuthMiddleware_WithScopes(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Create test token
-	token := jwt.New()
-	_ = token.Set(jwt.IssuerKey, testClaims.Issuer)
-	_ = token.Set(jwt.SubjectKey, testClaims.Subject)
-	_ = token.Set(jwt.AudienceKey, testClaims.Audience)
-	_ = token.Set(jwt.ExpirationKey, time.Unix(testClaims.ExpirationTime, 0))
-	_ = token.Set(jwt.NotBeforeKey, time.Unix(testClaims.NotBefore, 0))
-	_ = token.Set(jwt.IssuedAtKey, time.Unix(testClaims.IssuedAt, 0))
-	_ = token.Set("scope", testClaims.Scope)
-	_ = token.Set("cluster_id", testClaims.ClusterID)
-	_ = token.Set("openchami_id", testClaims.OpenCHAMIID)
-
-	// Sign the token
-	tokenBytes, err := jwt.Sign(token, jwt.WithKey(jwa.RS256, privateKey))
+	// Create test token using Google JWT library
+	token := gjwt.NewWithClaims(gjwt.SigningMethodRS256, testClaims)
+	tokenString, err := token.SignedString(privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokenString := string(tokenBytes)
 
 	tests := []struct {
 		name           string

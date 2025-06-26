@@ -10,9 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"crypto/rsa"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc/authelia"
@@ -281,30 +282,37 @@ func (s *TokenService) UpdateGroupScopes(groupScopes map[string][]string) {
 
 // JWKSHandler handles JWKS requests
 func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
-	// Get public key as JWK
-	publicKey, err := s.TokenManager.GetKeyManager().GetPublicKey()
+	// Get public key
+	publicKeyInterface, err := s.TokenManager.GetKeyManager().GetPublicKey()
 	if err != nil {
 		http.Error(w, "Failed to get public key", http.StatusInternalServerError)
 		return
 	}
 
-	// Convert public key to JWK
-	jwkKey, err := jwk.FromRaw(publicKey)
-	if err != nil {
-		http.Error(w, "Failed to convert key to JWK", http.StatusInternalServerError)
+	// Type assert to RSA public key
+	publicKey, ok := publicKeyInterface.(*rsa.PublicKey)
+	if !ok {
+		http.Error(w, "Public key is not an RSA key", http.StatusInternalServerError)
 		return
 	}
 
-	// Create JWKS
-	keySet := jwk.NewSet()
-	if err := keySet.AddKey(jwkKey); err != nil {
-		http.Error(w, "Failed to add key to set", http.StatusInternalServerError)
-		return
+	// Create JWKS manually
+	jwks := map[string]interface{}{
+		"keys": []map[string]interface{}{
+			{
+				"kty": "RSA",
+				"use": "sig",
+				"alg": "RS256",
+				"kid": "openchami-key-1", // You might want to generate this dynamically
+				"n":   publicKey.N.String(),
+				"e":   publicKey.E,
+			},
+		},
 	}
 
 	// Marshal and return JWKS
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(keySet); err != nil {
+	if err := json.NewEncoder(w).Encode(jwks); err != nil {
 		http.Error(w, "Failed to encode JWKS", http.StatusInternalServerError)
 		return
 	}

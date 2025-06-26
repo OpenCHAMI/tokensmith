@@ -2,16 +2,55 @@ package oidc
 
 import (
 	"context"
+	"crypto/rsa"
+	"encoding/base64"
+	"errors"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	gjwt "github.com/golang-jwt/jwt/v5"
 )
 
 // TokenCtxKey is the context key for the OIDC token
 type TokenCtxKey struct{}
+
+// Helper to parse a JWKS map and return a map of kid to *rsa.PublicKey
+func parseJWKS(jwks map[string]interface{}) (map[string]*rsa.PublicKey, error) {
+	keys := make(map[string]*rsa.PublicKey)
+	keyList, ok := jwks["keys"].([]interface{})
+	if !ok {
+		return nil, errors.New("invalid JWKS format: missing keys array")
+	}
+	for _, k := range keyList {
+		keyMap, ok := k.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		kid, _ := keyMap["kid"].(string)
+		nStr, _ := keyMap["n"].(string)
+		eVal, _ := keyMap["e"].(string)
+		if kid == "" || nStr == "" || eVal == "" {
+			continue
+		}
+		nBytes, err := base64.RawURLEncoding.DecodeString(nStr)
+		if err != nil {
+			continue
+		}
+		eBytes, err := base64.RawURLEncoding.DecodeString(eVal)
+		if err != nil {
+			continue
+		}
+		n := new(big.Int).SetBytes(nBytes)
+		e := 0
+		for _, b := range eBytes {
+			e = e<<8 + int(b)
+		}
+		keys[kid] = &rsa.PublicKey{N: n, E: e}
+	}
+	return keys, nil
+}
 
 // RequireToken is middleware that validates the presence and format of an OIDC token
 func RequireToken(next http.Handler) http.Handler {
@@ -52,15 +91,36 @@ func RequireValidToken(provider Provider) func(http.Handler) http.Handler {
 
 			if provider.SupportsLocalIntrospection() {
 				// Get JWKS for local validation
-				jwks, err := provider.GetJWKS(r.Context())
+				jwksRaw, err := provider.GetJWKS(r.Context())
 				if err != nil {
 					http.Error(w, "Failed to get JWKS", http.StatusInternalServerError)
 					return
 				}
-
-				// Parse and validate token locally
-				parsedToken, err := jwt.Parse([]byte(token), jwt.WithKeySet(jwks.(jwk.Set)))
+				jwks, ok := jwksRaw.(map[string]interface{})
+				if !ok {
+					http.Error(w, "Invalid JWKS format", http.StatusInternalServerError)
+					return
+				}
+				keyMap, err := parseJWKS(jwks)
 				if err != nil {
+					http.Error(w, "Failed to parse JWKS", http.StatusInternalServerError)
+					return
+				}
+
+				// Parse the JWT header to get the kid
+				parsed, _ := gjwt.Parse(token, nil)
+				kid, _ := parsed.Header["kid"].(string)
+				pubKey, ok := keyMap[kid]
+				if !ok {
+					http.Error(w, "Key not found in JWKS", http.StatusUnauthorized)
+					return
+				}
+
+				claims := gjwt.MapClaims{}
+				parsedToken, err := gjwt.ParseWithClaims(token, claims, func(token *gjwt.Token) (interface{}, error) {
+					return pubKey, nil
+				})
+				if err != nil || !parsedToken.Valid {
 					http.Error(w, "Token validation failed", http.StatusUnauthorized)
 					return
 				}
@@ -68,10 +128,10 @@ func RequireValidToken(provider Provider) func(http.Handler) http.Handler {
 				// Convert parsed token to introspection response
 				introspection = &IntrospectionResponse{
 					Active:    true,
-					Username:  parsedToken.Subject(),
-					ExpiresAt: parsedToken.Expiration().Unix(),
-					IssuedAt:  parsedToken.IssuedAt().Unix(),
-					Claims:    parsedToken.PrivateClaims(),
+					Username:  claims["sub"].(string),
+					ExpiresAt: int64(claims["exp"].(float64)),
+					IssuedAt:  int64(claims["iat"].(float64)),
+					Claims:    claims,
 					TokenType: "Bearer",
 				}
 
