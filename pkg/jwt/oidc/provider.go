@@ -2,7 +2,6 @@ package oidc
 
 import (
 	"context"
-	"net/http"
 )
 
 // Provider defines the interface for OIDC token validation and introspection.
@@ -40,30 +39,6 @@ type Provider interface {
 	GetJWKS(ctx context.Context) (interface{}, error)
 }
 
-// TokenIntrospection represents a standardized token introspection response
-// that follows the OAuth 2.0 Token Introspection specification (RFC 7662)
-// and includes additional OIDC-specific claims.
-type TokenIntrospection struct {
-	// Standard OAuth2 introspection fields
-	Active    bool   `json:"active"`               // Whether the token is currently active
-	Scope     string `json:"scope,omitempty"`      // Space-separated list of scopes associated with the token
-	ClientID  string `json:"client_id,omitempty"`  // ID of the client that requested the token
-	Username  string `json:"username,omitempty"`   // Username associated with the token
-	TokenType string `json:"token_type,omitempty"` // Type of the token (e.g., "Bearer")
-
-	// Standard OIDC claims
-	Subject   string   `json:"sub,omitempty"` // Subject identifier (usually the user ID)
-	Issuer    string   `json:"iss,omitempty"` // Token issuer (provider's URL)
-	Audience  []string `json:"aud,omitempty"` // Intended recipients of the token
-	ExpiresAt int64    `json:"exp,omitempty"` // Token expiration timestamp
-	IssuedAt  int64    `json:"iat,omitempty"` // Token issuance timestamp
-	NotBefore int64    `json:"nbf,omitempty"` // Token validity start timestamp
-
-	// Additional claims as a map
-	// This field can contain provider-specific claims that don't fit into the standard fields
-	Claims map[string]interface{} `json:"claims,omitempty"`
-}
-
 // ProviderMetadata represents the OIDC provider's configuration and capabilities
 // as defined in the OpenID Connect Discovery specification.
 type ProviderMetadata struct {
@@ -79,14 +54,6 @@ type ProviderMetadata struct {
 
 	// ScopesSupported is a list of OAuth 2.0 scopes supported by the provider
 	ScopesSupported []string `json:"scopes_supported"`
-}
-
-func OIDCMiddleware(provider Provider) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			provider.IntrospectToken(r.Context(), r.Header.Get("Authorization"))
-		})
-	}
 }
 
 // IntrospectionResponse represents the response from token introspection

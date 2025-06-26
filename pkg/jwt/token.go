@@ -287,8 +287,3 @@ func (tm *TokenManager) GenerateServiceToken(serviceID, targetService string, sc
 
 	return tm.GenerateTokenWithClaims(claims, claimsMap)
 }
-
-// GetIssuer returns the issuer configured for this token manager
-func (tm *TokenManager) GetIssuer() string {
-	return tm.issuer
-}

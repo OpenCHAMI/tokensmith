@@ -36,7 +36,7 @@ type TSClaims struct {
 	// ExpiresAt is the expiration time, in Unix seconds.
 	// JSON key: "exp"
 	// RFC 7519 §4.1.4; RFC 8725 §3.5: enforce expiration to guard against replay.
-	// NotBefore is the “not before” time, in Unix seconds.
+	// NotBefore is the "not before" time, in Unix seconds.
 	// JSON key: "nbf"
 	// RFC 7519 §4.1.5; RFC 8725 §3.5: enforce nbf to prevent early use.
 	// IssuedAt is the time the JWT was issued, in Unix seconds.
@@ -125,20 +125,6 @@ type TSClaims struct {
 	OpenCHAMIID string `json:"openchami_id,omitempty"`
 }
 
-// ServiceClaims extends TSClaims for service-to-service communication.
-type ServiceClaims struct {
-	TSClaims
-	// ServiceID identifies the calling service.
-	// JSON key: "service_id"
-	ServiceID string `json:"service_id,omitempty"`
-	// TargetService identifies the target service.
-	// JSON key: "target_service"
-	TargetService string `json:"target_service,omitempty"`
-	// ServiceScopes lists scopes specific to service-to-service auth.
-	// JSON key: "service_scopes"
-	ServiceScopes []string `json:"service_scopes,omitempty"`
-}
-
 // NewClaims creates a new Claims instance with default timestamps:
 // IssuedAt = now, NotBefore = now, ExpirationTime = now + 1h.
 func NewClaims() *TSClaims {
@@ -200,29 +186,6 @@ func (c *TSClaims) Validate() error {
 	if c.SessionExp-iat > 86400 {
 		return errors.New("session duration exceeds maximum allowed (24 hours)")
 	}
-	switch c.AuthLevel {
-	case "IAL1":
-		return errors.New("minimum authentication level IAL2 is required")
-	case "IAL2", "IAL3":
-		// valid
-	default:
-		return errors.New("invalid auth_level value")
-	}
 
 	return nil
-}
-
-// SetExpiration sets the "exp" claim to now + duration.
-func (c *TSClaims) SetExpiration(d time.Duration) {
-	c.ExpiresAt = jwt.NewNumericDate(time.Now().Add(d))
-}
-
-// SetAudience sets the "aud" claim.
-func (c *TSClaims) SetAudience(aud []string) {
-	c.Audience = aud
-}
-
-// SetScope sets the "scope" claim.
-func (c *TSClaims) SetScope(scope []string) {
-	c.Scope = scope
 }

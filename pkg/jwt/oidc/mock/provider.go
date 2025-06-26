@@ -2,54 +2,66 @@ package mock
 
 import (
 	"context"
-	"errors"
+
+	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 )
 
-// Provider implements oidc.Provider for testing
+// Provider is a mock implementation of the oidc.Provider interface
 type Provider struct {
 	GetJWKSFunc             func(ctx context.Context) (interface{}, error)
-	IntrospectTokenFunc     func(ctx context.Context, token string) (interface{}, error)
+	IntrospectTokenFunc     func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error)
 	SupportsLocalFunc       func() bool
-	GetProviderMetadataFunc func(ctx context.Context) (interface{}, error)
-	JWKS                    interface{}
+	GetProviderMetadataFunc func(ctx context.Context) (*oidc.ProviderMetadata, error)
 }
 
-// IntrospectToken implements the oidc.Provider interface
-func (m *Provider) IntrospectToken(ctx context.Context, token string) (interface{}, error) {
-	if m.IntrospectTokenFunc != nil {
-		return m.IntrospectTokenFunc(ctx, token)
-	}
-	return nil, errors.New("IntrospectToken not implemented")
+// IntrospectToken calls the mock function
+func (m *Provider) IntrospectToken(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+	return m.IntrospectTokenFunc(ctx, token)
 }
 
-// GetProviderMetadata implements the oidc.Provider interface
-func (m *Provider) GetProviderMetadata(ctx context.Context) (interface{}, error) {
-	if m.GetProviderMetadataFunc != nil {
-		return m.GetProviderMetadataFunc(ctx)
-	}
-	return nil, errors.New("GetProviderMetadata not implemented")
+// GetProviderMetadata calls the mock function
+func (m *Provider) GetProviderMetadata(ctx context.Context) (*oidc.ProviderMetadata, error) {
+	return m.GetProviderMetadataFunc(ctx)
 }
 
-// SupportsLocalIntrospection implements the oidc.Provider interface
+// SupportsLocalIntrospection calls the mock function
 func (m *Provider) SupportsLocalIntrospection() bool {
-	if m.SupportsLocalFunc != nil {
-		return m.SupportsLocalFunc()
-	}
-	return false
+	return m.SupportsLocalFunc()
 }
 
-// GetJWKS implements the oidc.Provider interface
+// GetJWKS calls the mock function
 func (m *Provider) GetJWKS(ctx context.Context) (interface{}, error) {
-	if m.GetJWKSFunc != nil {
-		return m.GetJWKSFunc(ctx)
-	}
-	if m.JWKS != nil {
-		return m.JWKS, nil
-	}
-	return nil, errors.New("GetJWKS not implemented")
+	return m.GetJWKSFunc(ctx)
 }
 
 // NewProvider creates a new mock provider with default implementations
 func NewProvider() *Provider {
-	return &Provider{}
+	return &Provider{
+		IntrospectTokenFunc: func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+			return &oidc.IntrospectionResponse{
+				Active:    true,
+				Username:  "mockuser",
+				ExpiresAt: 0,
+				IssuedAt:  0,
+				Claims:    make(map[string]interface{}),
+				TokenType: "Bearer",
+			}, nil
+		},
+		GetProviderMetadataFunc: func(ctx context.Context) (*oidc.ProviderMetadata, error) {
+			return &oidc.ProviderMetadata{
+				Issuer:                "mock-issuer",
+				IntrospectionEndpoint: "http://mock/introspect",
+				JWKSURI:               "http://mock/jwks",
+				ScopesSupported:       []string{},
+			}, nil
+		},
+		SupportsLocalFunc: func() bool {
+			return false
+		},
+		GetJWKSFunc: func(ctx context.Context) (interface{}, error) {
+			return map[string]interface{}{
+				"keys": []interface{}{},
+			}, nil
+		},
+	}
 }

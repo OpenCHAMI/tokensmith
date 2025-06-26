@@ -85,7 +85,7 @@ func TestKeycloakClient_IntrospectToken(t *testing.T) {
 		token          string
 		clientID       string
 		clientSecret   string
-		mockResponse   *oidc.TokenIntrospection
+		mockResponse   *oidc.IntrospectionResponse
 		mockStatusCode int
 		expectError    bool
 	}{
@@ -94,7 +94,7 @@ func TestKeycloakClient_IntrospectToken(t *testing.T) {
 			token:        "valid-token",
 			clientID:     "test-client",
 			clientSecret: "test-secret",
-			mockResponse: &oidc.TokenIntrospection{
+			mockResponse: &oidc.IntrospectionResponse{
 				Active:    true,
 				Username:  "testuser",
 				ExpiresAt: time.Now().Add(time.Hour).Unix(),
@@ -109,7 +109,7 @@ func TestKeycloakClient_IntrospectToken(t *testing.T) {
 			token:        "expired-token",
 			clientID:     "test-client",
 			clientSecret: "test-secret",
-			mockResponse: &oidc.TokenIntrospection{
+			mockResponse: &oidc.IntrospectionResponse{
 				Active:    false,
 				Username:  "testuser",
 				ExpiresAt: time.Now().Add(-time.Hour).Unix(),
