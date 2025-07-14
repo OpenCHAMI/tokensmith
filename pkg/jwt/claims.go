@@ -16,12 +16,12 @@ import (
 // Claims represents the JWT claims structure used for user authentication.
 //
 // Standards referenced:
-//   - Core JWT:        RFC 7519
-//   - JWT Bearer:      RFC 7523
-//   - OpenID Connect:  Core 1.0
+//   - Core JWT:        RFC 7519 https://datatracker.ietf.org/doc/html/rfc7519
+//   - JWT Bearer:      RFC 7523 https://datatracker.ietf.org/doc/html/rfc7523
+//   - OpenID Connect:  Core 1.0 https://openid.net/specs/openid-connect-core-1_0.html#IDToken
 //   - NIST SP 800-63B: §§5.2.4 (Authentication Context), session management
 //   - JWT Best Practices: RFC 8725 (§3.1–3.5, §3.2 header & claim rules)
-//   - FIPS 140-2/3:    Approved security functions (e.g., RSA-PSS, ECDSA P-256, AES-GCM)
+//   - FIPS 140-2/3:    Approved security functions (e.g., RSA-PSS, ECDSA P-256, AES-GCM) https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.140-3.pdf and https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.140-2.pdf
 type TSClaims struct {
 	jwt.RegisteredClaims // Embedded RegisteredClaims provides standard JWT fields like "iss", "sub", "aud", etc.
 	// Issuer identifies the principal that issued the JWT.
