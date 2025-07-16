@@ -1,13 +1,21 @@
+---
+# Authelia Configuration
+# Minimal configuration for TokenSmith integration testing
+
+# Server configuration
 server:
   address: 0.0.0.0:9091
 
+# Logging
 log:
   level: debug
 
+# Identity validation
 identity_validation:
   reset_password:
     jwt_secret: a_very_long_secret_key_for_testing_purposes
 
+# Authentication backend
 authentication_backend:
   file:
     path: /config/users_database.yml
@@ -18,32 +26,81 @@ authentication_backend:
       parallelism: 8
       memory: 64
 
+# Access control
 access_control:
   default_policy: one_factor
   rules:
-    - domain: "*"
+    - domain: "*.openchami.demo"
       policy: one_factor
-      methods: ["GET", "POST", "HEAD", "PUT", "OPTIONS", "DELETE"]
-      resources:
-        - "/*"
-      subject: ["group:admins"]
 
+# Session configuration
 session:
   name: authelia_session
   secret: a_very_long_secret_key_for_testing_purposes
-  expiration: 3600  # 1 hour
-  inactivity: 300   # 5 minutes
-
+  expiration: 3600
+  inactivity: 300
   cookies:
     - name: authelia_session
       domain: openchami.demo
-      authelia_url: https://authelia.openchami.demo:9091
+      authelia_url: https://auth.openchami.demo:9091
 
+# Storage
 storage:
   local:
     path: /config/db.sqlite3
   encryption_key: a_very_long_secret_key_for_testing_purposes
 
+# Notifier
 notifier:
   filesystem:
     filename: /config/notification.txt
+
+# Identity providers (OIDC)
+identity_providers:
+  oidc:
+    jwks:
+      - key_id: authelia-oidc-key
+        algorithm: RS256
+        use: sig
+        key: |
+          -----BEGIN PRIVATE KEY-----
+          MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC5ufQ26/Im6FA+
+          40SSYF2iikYkwnw0r7OLDLjKNyUwFZDlXVYPCw3DLe+Y+DVlQ0pVxNclJSYZ9IXD
+          IoL1tftWyUg7BQi7V/TEARhI8YACukp5V7HQfe7KqnwwARoQW5uPLliku6gJNPfU
+          d/iwsgrvntO5/NxLbRf9OTARKlKJYca9DL1rDy/jLZ6rmAexeY3lQLJTvsqqMH1l
+          4u9XqaZ2HZFFHAUAeePytj0OvBn9nmrEdM84xSNJ+GwhfguYhTJfVJmqzeL6/YiY
+          ZeZ9BuCdcQ9xRSrtImaJgbATbd43dwKqRSk98XB/vBmrDV7DOzn8wCiyqghNmeaC
+          c17JCeotAgMBAAECggEAAo/1CsBE63zUr+wXw+3jbNImjJby+rvFKNvIkuBMOYvF
+          Sid4VVB25KSgw8YCNT7xQBoCnocS2FR+IfE7HaO1735rFNwJa6Ls2WVrIy/TGcvd
+          1NW9D3N6qhN3D3x8Z7xeeuJjTlvZF3jCcI0lLQmPyrrbZfCoo2ZtEyJzriZHfuYI
+          lmd0RY64bg/fcXZNYj+FS8ceY4a1MzSb7ZbXj6JghwhIAXD1jZiqgE2QpURZFTzR
+          C+ZqjA9CCSu5vRr2BURotJyn/PUgXJ8I+a6kq+h2bSRyozyI8WERnw3qMSwuFy8P
+          o0EBPiWN5CtfnUvO05i2pU6LXID9qnE8/yRnj8yKwQKBgQDb6hMNh8TKIjGOosdN
+          fxLdaw2AyZsy5vW+SXotE5NNgb1elXO+xvzlorGF+TaqmID/ihUEFOD/bjgS4QO/
+          RYqePn8bcXCHBGMafNNxhOukot5rTqo0Cv53KjsSTjqalopGr7UT/wu45LxX9cWN
+          EXJqg7/zakEP/fGyzlCHw3QRYQKBgQDYM7+AIRxAEHWer6cyj8SVNkWk+ExAuTt2
+          ttROnNHsxqgaakyuo1F1JKIOwvFB1VvRDC/RPANB/DDHP/8Zb+DeTafJLNPCn520
+          vDeEnxHwEbsk9Lxq8f4W4bIjJhFzF4/eqvY/e+xEBgsAa+Bktw7pa7vs4aCOxLZ4
+          Zbxt6+6wTQKBgQDRn3AF57LXknx2oAcmgchzssWuS35aqPj6J4QET7KLoO3nqMIp
+          yffq1IgvUnyfZLsh2ndp6pUGJgPhSweNXTZi3OPAPwOqT64/41iRzsfnqTAmTVfE
+          P+6LnH+uVU9bZ7/q3TXYF7cOyUoW9jkW3NiZW3ivCEt4ePHZJPxyTQboQQKBgQCe
+          RQOjYJm1rFbuW9giA2z9bkV9hucLWo5VUXIKOnLSynq1G6wXDCfNgYvBEqRadT5J
+          wooeubgIzf1HX2n3zRbopiB1/QLoLsDcVgyuYWRYQiKl4yMrhwti5MXrRSrw/gas
+          EqtBvg4vndzf6hjSoc+gwOVJe8J1wTty18chEN4i4QKBgDd5uSuQehRhvw57wDC1
+          Fa392bua2f29hRvDRW9SqvWpJYe5FAnKCxXJhbAI3pWpKgTamgpq1BB3AkCn9+c/
+          RFzPP1YmLjsmGYz5CmV1aMlbpOPGqHA1KYWxl1uAikda7eQQlKLzJLLD6HgsOER4
+          mab7Fg7mCSVTIsDs3Gl8AN//
+          -----END PRIVATE KEY-----
+    clients:
+      - client_id: tokensmith
+        client_secret: tokensmith_secret_key_for_testing
+        redirect_uris:
+          - https://tokensmith.openchami.demo:8080/auth/callback
+        scopes:
+          - openid
+          - profile
+          - email
+        grant_types:
+          - authorization_code
+        response_types:
+          - code

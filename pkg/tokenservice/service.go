@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -13,12 +14,17 @@ import (
 	"crypto/rsa"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc/authelia"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc/hydra"
 	"github.com/openchami/tokensmith/pkg/jwt/oidc/keycloak"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+
+	openchami_logger "github.com/openchami/chi-middleware/log"
 )
 
 // ProviderType represents the type of OIDC provider
@@ -320,10 +326,6 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 
 // TokenExchangeHandler handles token exchange requests
 func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
 	// Get token from Authorization header
 	authHeader := r.Header.Get("Authorization")
@@ -472,9 +474,37 @@ func (s *TokenService) getServiceAllowedScopes(serviceID, targetService string) 
 	}
 }
 
+// HealthHandler provides a health check endpoint
+func (s *TokenService) HealthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "healthy",
+		"service":      "tokensmith",
+		"issuer":       s.Issuer,
+		"cluster_id":   s.ClusterID,
+		"openchami_id": s.OpenCHAMIID,
+		"provider":     string(s.Config.ProviderType),
+	})
+}
+
 // Start starts the HTTP server
 func (s *TokenService) Start(port int) error {
+	// Setup logger
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	logger := log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
 	r := chi.NewRouter()
+
+	r.Use(openchami_logger.OpenCHAMILogger(logger))
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.StripSlashes)
+	r.Use(middleware.Timeout(60 * time.Second))
+
+	// Health check endpoint
+	r.Get("/health", s.HealthHandler)
 
 	// Register handlers
 	r.Route("/.well-known", func(r chi.Router) {
@@ -486,6 +516,7 @@ func (s *TokenService) Start(port int) error {
 			r.Use(oidc.RequireToken)
 			r.Use(oidc.RequireValidToken(s.OIDCProvider))
 			r.Post("/token", s.TokenExchangeHandler)
+			r.Get("/token", s.TokenExchangeHandler)
 		})
 	})
 
