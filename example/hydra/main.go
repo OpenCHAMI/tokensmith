@@ -10,9 +10,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	tsmiddleware "github.com/openchami/tokensmith/middleware"
-	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc"
-	hydraclient "github.com/openchami/tokensmith/pkg/jwt/oidc/hydra"
+	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/oidc"
+	hydraclient "github.com/openchami/tokensmith/pkg/oidc/hydra"
+	"github.com/openchami/tokensmith/pkg/token"
 )
 
 func main() {
@@ -23,11 +24,11 @@ func main() {
 	}
 
 	// Create key manager for internal tokens
-	keyManager := jwtauth.NewKeyManager()
+	keyManager := keys.NewKeyManager()
 	if err := keyManager.SetKeyPair(privateKey, &privateKey.PublicKey); err != nil {
 		log.Fatal(err)
 	}
-	tokenManager := jwtauth.NewTokenManager(keyManager, "internal-service", "test-cluster-id", "test-openchami-id")
+	tokenManager := token.NewTokenManager(keyManager, "internal-service", "test-cluster-id", "test-openchami-id")
 
 	// Create Hydra client
 	hydraClient := hydraclient.NewClient("http://hydra:4445", "test-client-id", "test-client-secret")

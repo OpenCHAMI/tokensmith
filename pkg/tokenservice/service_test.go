@@ -9,9 +9,10 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc/mock"
+	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/oidc"
+	"github.com/openchami/tokensmith/pkg/oidc/mock"
+	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,12 +62,12 @@ func TestTokenService(t *testing.T) {
 	require.NotNil(t, privateKey)
 
 	// Create key manager
-	keyManager := tsjwt.NewKeyManager()
+	keyManager := keys.NewKeyManager()
 	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
 	require.NoError(t, err)
 
 	// Create token manager
-	tokenManager := tsjwt.NewTokenManager(keyManager, "test-issuer", "test-cluster-id", "test-openchami-id")
+	tokenManager := token.NewTokenManager(keyManager, "test-issuer", "test-cluster-id", "test-openchami-id")
 
 	// Create configuration
 	config := &Config{
@@ -218,7 +219,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 	require.NotNil(t, privateKey)
 
 	// Create key manager
-	keyManager := tsjwt.NewKeyManager()
+	keyManager := keys.NewKeyManager()
 	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
 	require.NoError(t, err)
 
@@ -230,7 +231,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		targetService  string
 		scopes         []string
 		expectError    bool
-		validateClaims func(*testing.T, *tsjwt.TSClaims)
+		validateClaims func(*testing.T, *token.TSClaims)
 	}{
 		{
 			name: "valid service token",
@@ -244,7 +245,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			targetService: "service2",
 			scopes:        []string{"read", "write"},
 			expectError:   false,
-			validateClaims: func(t *testing.T, claims *tsjwt.TSClaims) {
+			validateClaims: func(t *testing.T, claims *token.TSClaims) {
 				assert.Equal(t, "service1", claims.Subject)
 				assert.Equal(t, "service2", claims.Audience[0])
 				assert.Equal(t, []string{"read", "write"}, claims.Scope)
@@ -274,7 +275,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			targetService: "service2",
 			scopes:        []string{},
 			expectError:   false,
-			validateClaims: func(t *testing.T, claims *tsjwt.TSClaims) {
+			validateClaims: func(t *testing.T, claims *token.TSClaims) {
 				assert.Equal(t, "service1", claims.Subject)
 				assert.Equal(t, "service2", claims.Audience[0])
 				assert.Empty(t, claims.Scope)
@@ -330,7 +331,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			targetService: "service2",
 			scopes:        nil,
 			expectError:   false,
-			validateClaims: func(t *testing.T, claims *tsjwt.TSClaims) {
+			validateClaims: func(t *testing.T, claims *token.TSClaims) {
 				assert.Equal(t, "service1", claims.Subject)
 				assert.Equal(t, "service2", claims.Audience[0])
 				assert.Nil(t, claims.Scope)
@@ -354,7 +355,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create token service
 			service := &TokenService{
-				TokenManager: tsjwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
+				TokenManager: token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
 				Config:       tt.config,
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,
@@ -384,7 +385,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 	require.NotNil(t, privateKey)
 
 	// Create key manager
-	keyManager := tsjwt.NewKeyManager()
+	keyManager := keys.NewKeyManager()
 	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
 	require.NoError(t, err)
 
@@ -394,7 +395,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 		config         Config
 		token          string
 		expectError    bool
-		validateClaims func(*testing.T, *tsjwt.TSClaims)
+		validateClaims func(*testing.T, *token.TSClaims)
 	}{
 		{
 			name: "valid token",
@@ -405,7 +406,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 				OpenCHAMIID:  "test-openchami",
 			},
 			expectError: false,
-			validateClaims: func(t *testing.T, claims *tsjwt.TSClaims) {
+			validateClaims: func(t *testing.T, claims *token.TSClaims) {
 				assert.Equal(t, "testuser", claims.Subject)
 				assert.Equal(t, "test-cluster", claims.ClusterID)
 				assert.Equal(t, "test-openchami", claims.OpenCHAMIID)
@@ -435,7 +436,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create token service
 			service := &TokenService{
-				TokenManager: tsjwt.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
+				TokenManager: token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID),
 				Config:       tt.config,
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,
@@ -444,7 +445,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 
 			// Generate a valid token for the valid token test case
 			if !tt.expectError {
-				claims := &tsjwt.TSClaims{
+				claims := &token.TSClaims{
 					RegisteredClaims: jwt.RegisteredClaims{
 						Issuer:    tt.config.Issuer,
 						Subject:   "testuser",

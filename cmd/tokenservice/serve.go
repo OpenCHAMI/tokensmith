@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/openchami/tokensmith/pkg/jwt"
-	tokenservice "github.com/openchami/tokensmith/pkg/tokenservice"
+	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/tokenservice"
 	"github.com/spf13/cobra"
 )
 
@@ -54,7 +54,7 @@ var serveCmd = &cobra.Command{
 		}
 
 		// Create key manager
-		keyManager := jwt.NewKeyManager()
+		keyManager := keys.NewKeyManager()
 
 		// Handle key loading/generation
 		if keyFile != "" {
@@ -64,7 +64,7 @@ var serveCmd = &cobra.Command{
 			}
 		} else {
 			// Generate new key pair
-			if err := keyManager.GenerateKeyPair(); err != nil {
+			if err := keyManager.GenerateRSAKeyPair(); err != nil {
 				return fmt.Errorf("failed to generate key pair: %w", err)
 			}
 

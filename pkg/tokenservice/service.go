@@ -16,11 +16,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
-	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc/authelia"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc/hydra"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc/keycloak"
+	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/oidc"
+	"github.com/openchami/tokensmith/pkg/oidc/authelia"
+	"github.com/openchami/tokensmith/pkg/oidc/hydra"
+	"github.com/openchami/tokensmith/pkg/oidc/keycloak"
+	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -60,7 +61,7 @@ type Config struct {
 
 // TokenService handles token operations and provider interactions
 type TokenService struct {
-	TokenManager *tsjwt.TokenManager
+	TokenManager *token.TokenManager
 	Config       Config
 	Issuer       string
 	GroupScopes  map[string][]string
@@ -71,9 +72,9 @@ type TokenService struct {
 }
 
 // NewTokenService creates a new TokenService instance
-func NewTokenService(keyManager *tsjwt.KeyManager, config Config) (*TokenService, error) {
+func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService, error) {
 	// Initialize the token manager
-	tokenManager := tsjwt.NewTokenManager(
+	tokenManager := token.NewTokenManager(
 		keyManager,
 		config.Issuer,
 		config.ClusterID,
@@ -113,13 +114,13 @@ func NewTokenService(keyManager *tsjwt.KeyManager, config Config) (*TokenService
 }
 
 // ExchangeToken exchanges an external token for an internal token
-func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string, error) {
-	if token == "" {
+func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (string, error) {
+	if idtoken == "" {
 		return "", errors.New("empty token")
 	}
 
 	// Introspect the token with the OIDC provider
-	introspection, err := s.OIDCProvider.IntrospectToken(ctx, token)
+	introspection, err := s.OIDCProvider.IntrospectToken(ctx, idtoken)
 	if err != nil {
 		return "", fmt.Errorf("token introspection failed: %w", err)
 	}
@@ -129,7 +130,7 @@ func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string,
 	}
 
 	// Create OpenCHAMI claims
-	claims := &tsjwt.TSClaims{
+	claims := &token.TSClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.Issuer,
 			Subject:   introspection.Username,
@@ -229,12 +230,12 @@ func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string,
 	claims.Scope = scopes
 
 	// Generate token
-	token, err = s.TokenManager.GenerateToken(claims)
+	idtoken, err = s.TokenManager.GenerateToken(claims)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate token: %w", err)
 	}
 
-	return token, nil
+	return idtoken, nil
 }
 
 // GenerateServiceToken generates a service-to-service token
@@ -246,7 +247,7 @@ func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targ
 		return "", errors.New("target service cannot be empty")
 	}
 
-	claims := &tsjwt.TSClaims{
+	claims := &token.TSClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.Issuer,
 			Subject:   serviceID,
@@ -270,7 +271,7 @@ func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targ
 }
 
 // ValidateToken validates a token and returns its claims
-func (s *TokenService) ValidateToken(ctx context.Context, token string) (*tsjwt.TSClaims, error) {
+func (s *TokenService) ValidateToken(ctx context.Context, token string) (*token.TSClaims, error) {
 	claims, _, err := s.TokenManager.ParseToken(token)
 	if err != nil {
 		return nil, fmt.Errorf("token validation failed: %w", err)

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openchami/tokensmith/pkg/jwt/oidc"
+	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

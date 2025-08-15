@@ -13,8 +13,8 @@ replace github.com/openchami/tokensmith => ../../
 
 replace github.com/openchami/tokensmith/middleware => ../../middleware
 
-replace github.com/openchami/tokensmith/pkg/jwt => ../../pkg/jwt
+replace github.com/openchami/tokensmith/pkg/token => ../../pkg/token
 
-replace github.com/openchami/tokensmith/pkg/jwt/oidc/hydra => ../../pkg/jwt/oidc/hydra
+replace github.com/openchami/tokensmith/pkg/oidc/hydra => ../../pkg/oidc/hydra
 
-replace github.com/openchami/tokensmith/pkg/jwt/oidc => ../../pkg/jwt/oidc
+replace github.com/openchami/tokensmith/pkg/oidc => ../../pkg/oidc

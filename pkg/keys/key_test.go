@@ -1,4 +1,4 @@
-package jwt
+package keys
 
 import (
 	"crypto/ecdsa"

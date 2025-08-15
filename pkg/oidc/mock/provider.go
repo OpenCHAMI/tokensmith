@@ -3,7 +3,7 @@ package mock
 import (
 	"context"
 
-	"github.com/openchami/tokensmith/pkg/jwt/oidc"
+	"github.com/openchami/tokensmith/pkg/oidc"
 )
 
 // Provider is a mock implementation of the oidc.Provider interface

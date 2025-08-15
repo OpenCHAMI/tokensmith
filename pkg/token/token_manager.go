@@ -1,4 +1,4 @@
-package jwt
+package token
 
 import (
 	"crypto/rand"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/keys"
 )
 
 // FIPS-approved algorithms for JWT signing
@@ -20,7 +21,7 @@ const (
 
 // TokenManager handles JWT token operations
 type TokenManager struct {
-	keyManager  *KeyManager
+	keyManager  *keys.KeyManager
 	issuer      string
 	clusterID   string
 	openchamiID string
@@ -28,7 +29,7 @@ type TokenManager struct {
 }
 
 // NewTokenManager creates a new TokenManager instance
-func NewTokenManager(keyManager *KeyManager, issuer string, clusterID string, openchamiID string) *TokenManager {
+func NewTokenManager(keyManager *keys.KeyManager, issuer string, clusterID string, openchamiID string) *TokenManager {
 	return &TokenManager{
 		keyManager:  keyManager,
 		issuer:      issuer,
@@ -41,7 +42,7 @@ func NewTokenManager(keyManager *KeyManager, issuer string, clusterID string, op
 // SetSigningAlgorithm sets the signing algorithm to use
 func (tm *TokenManager) SetSigningAlgorithm(algorithm string) error {
 	// Use shared FIPS validation
-	if err := ValidateAlgorithm(algorithm); err != nil {
+	if err := keys.ValidateAlgorithm(algorithm); err != nil {
 		return err
 	}
 	tm.algorithm = algorithm
@@ -87,7 +88,7 @@ func (tm *TokenManager) GenerateToken(claims *TSClaims) (string, error) {
 	claims.Nonce = nonce
 
 	// Get the appropriate signing method for the configured algorithm
-	signingMethod, err := GetSigningMethod(tm.algorithm)
+	signingMethod, err := keys.GetSigningMethod(tm.algorithm)
 	if err != nil {
 		return "", fmt.Errorf("invalid signing algorithm: %w", err)
 	}
@@ -171,7 +172,7 @@ func (tm *TokenManager) GenerateTokenWithClaims(claims *TSClaims, additionalClai
 	}
 
 	// Get the appropriate signing method for the configured algorithm
-	signingMethod, err := GetSigningMethod(tm.algorithm)
+	signingMethod, err := keys.GetSigningMethod(tm.algorithm)
 	if err != nil {
 		return "", fmt.Errorf("invalid signing algorithm: %w", err)
 	}
@@ -257,7 +258,7 @@ func (tm *TokenManager) ParseToken(tokenString string) (*TSClaims, map[string]in
 }
 
 // GetKeyManager returns the underlying KeyManager instance
-func (tm *TokenManager) GetKeyManager() *KeyManager {
+func (tm *TokenManager) GetKeyManager() *keys.KeyManager {
 	return tm.keyManager
 }
 

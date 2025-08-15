@@ -7,15 +7,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
+	"github.com/openchami/tokensmith/pkg/keys"
 	tokenservice "github.com/openchami/tokensmith/pkg/tokenservice"
 )
 
 func main() {
 
 	// Create key manager
-	keyManager := jwtauth.NewKeyManager()
-	err := keyManager.GenerateKeyPair()
+	keyManager := keys.NewKeyManager()
+	err := keyManager.GenerateRSAKeyPair()
 	if err != nil {
 		log.Fatalf("Failed to generate RSA key: %v", err)
 	}

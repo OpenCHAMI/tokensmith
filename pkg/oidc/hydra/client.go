@@ -1,4 +1,4 @@
-package authelia
+package hydra
 
 import (
 	"context"
@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc"
+	"github.com/openchami/tokensmith/pkg/oidc"
 )
 
-// Client implements the OIDC provider interface for Authelia
+// Client implements the OIDC provider interface for Hydra
 type Client struct {
 	baseURL          string
 	clientID         string
@@ -45,7 +45,7 @@ type KeySet struct {
 	} `json:"keys"`
 }
 
-// NewClient creates a new Authelia client
+// NewClient creates a new Hydra client
 func NewClient(baseURL, clientID, clientSecret string) *Client {
 	return &Client{
 		baseURL:          baseURL,
@@ -55,7 +55,7 @@ func NewClient(baseURL, clientID, clientSecret string) *Client {
 	}
 }
 
-// SupportsLocalIntrospection returns true as Authelia supports local token validation
+// SupportsLocalIntrospection returns true as Hydra supports local token validation
 func (c *Client) SupportsLocalIntrospection() bool {
 	return true
 }
@@ -68,10 +68,19 @@ func (c *Client) GetJWKS(ctx context.Context) (interface{}, error) {
 			return nil, fmt.Errorf("failed to update JWKS: %w", err)
 		}
 	}
-	return c.keySet, nil
+	// Convert KeySet to map[string]interface{}
+	jwksBytes, err := json.Marshal(c.keySet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JWKS: %w", err)
+	}
+	var jwks map[string]interface{}
+	if err := json.Unmarshal(jwksBytes, &jwks); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JWKS: %w", err)
+	}
+	return jwks, nil
 }
 
-// updateJWKS fetches the latest JWKS from Authelia
+// updateJWKS fetches the latest JWKS from Hydra
 func (c *Client) updateJWKS(ctx context.Context) error {
 	url := fmt.Sprintf("%s/.well-known/jwks.json", c.baseURL)
 
@@ -105,7 +114,7 @@ func (c *Client) updateJWKS(ctx context.Context) error {
 	return nil
 }
 
-// IntrospectToken introspects a token using Authelia's introspection endpoint
+// IntrospectToken introspects a token using Hydra's introspection endpoint
 func (c *Client) IntrospectToken(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
 	// If we have JWKS, try local validation first
 	if c.keySet != nil {
@@ -185,7 +194,7 @@ func (c *Client) IntrospectToken(ctx context.Context, token string) (*oidc.Intro
 	}
 
 	// Fall back to remote introspection
-	url := fmt.Sprintf("%s/api/oauth2/introspect", c.baseURL)
+	url := fmt.Sprintf("%s/oauth2/introspect", c.baseURL)
 
 	// Create form data
 	formData := fmt.Sprintf("token=%s", token)
@@ -217,7 +226,7 @@ func (c *Client) IntrospectToken(ctx context.Context, token string) (*oidc.Intro
 	return &introspection, nil
 }
 
-// GetProviderMetadata returns Authelia's OIDC provider metadata
+// GetProviderMetadata returns Hydra's OIDC provider metadata
 func (c *Client) GetProviderMetadata(ctx context.Context) (*oidc.ProviderMetadata, error) {
 	url := fmt.Sprintf("%s/.well-known/openid-configuration", c.baseURL)
 

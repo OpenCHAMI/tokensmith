@@ -1,10 +1,10 @@
-// Package jwt defines types and utilities for JWT-based authentication in microservices.
+// Package token defines types and utilities for JWT-based authentication in microservices.
 // It supports standard JWT claims (RFC 7519), OpenID Connect fields (OIDC Core 1.0),
 // OAuth2/JWT Bearer extensions (RFC 7523), and NIST SP 800-63B–compliant claims.
 // All validation logic should follow JSON Web Token Best Current Practices (RFC 8725)
 // for algorithm selection, header/claim validation, and cryptographic hygiene,
 // using only FIPS 140-2 or FIPS 140-3–validated modules and approved algorithms.
-package jwt
+package token
 
 import (
 	"errors"

@@ -10,8 +10,9 @@ import (
 	"time"
 
 	"github.com/MicahParks/keyfunc"
-	gjwt "github.com/golang-jwt/jwt/v5"
-	tsjwt "github.com/openchami/tokensmith/pkg/jwt"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/token"
 )
 
 // ContextKey is the key used to store the claims in the context
@@ -104,19 +105,19 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 			}
 
 			tokenString := parts[1]
-			claims := &tsjwt.TSClaims{}
-			var token *gjwt.Token
+			claims := &token.TSClaims{}
+			var idtoken *jwt.Token
 			var err error
 
-			keyFunc := func(token *gjwt.Token) (interface{}, error) {
+			keyFunc := func(idtoken *jwt.Token) (interface{}, error) {
 				// Validate the algorithm is FIPS-approved
-				if err := tsjwt.ValidateAlgorithm(token.Method.Alg()); err != nil {
+				if err := keys.ValidateAlgorithm(idtoken.Method.Alg()); err != nil {
 					return nil, fmt.Errorf("invalid algorithm: %w", err)
 				}
 
 				// If JWKS is used, select key by kid
 				if keySet != nil {
-					if kid, ok := token.Header["kid"].(string); ok {
+					if kid, ok := idtoken.Header["kid"].(string); ok {
 						keySet.mu.RLock()
 						defer keySet.mu.RUnlock()
 						if k, found := keySet.keySet[kid]; found {
@@ -129,8 +130,8 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 				return key, nil
 			}
 
-			token, err = gjwt.ParseWithClaims(tokenString, claims, keyFunc)
-			if err != nil || !token.Valid {
+			idtoken, err = jwt.ParseWithClaims(tokenString, claims, keyFunc)
+			if err != nil || !idtoken.Valid {
 				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
 				return
 			}
@@ -171,7 +172,7 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 			// Add claims to context
 			ctx := context.WithValue(r.Context(), ClaimsContextKey, claims)
 			// Add raw claims to context (as map[string]interface{})
-			if mapClaims, ok := token.Claims.(*tsjwt.TSClaims); ok {
+			if mapClaims, ok := idtoken.Claims.(*token.TSClaims); ok {
 				ctx = context.WithValue(ctx, RawClaimsContextKey, mapClaims)
 			}
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -201,8 +202,8 @@ func (c *keySetCache) refresh(url string) error {
 }
 
 // GetClaimsFromContext retrieves the JWT claims from the request context
-func GetClaimsFromContext(ctx context.Context) (*tsjwt.TSClaims, error) {
-	claims, ok := ctx.Value(ClaimsContextKey).(*tsjwt.TSClaims)
+func GetClaimsFromContext(ctx context.Context) (*token.TSClaims, error) {
+	claims, ok := ctx.Value(ClaimsContextKey).(*token.TSClaims)
 	if !ok {
 		return nil, errors.New("claims not found in context")
 	}
@@ -210,8 +211,8 @@ func GetClaimsFromContext(ctx context.Context) (*tsjwt.TSClaims, error) {
 }
 
 // GetRawClaimsFromContext retrieves the raw JWT claims from the request context
-func GetRawClaimsFromContext(ctx context.Context) (*tsjwt.TSClaims, error) {
-	claims, ok := ctx.Value(RawClaimsContextKey).(*tsjwt.TSClaims)
+func GetRawClaimsFromContext(ctx context.Context) (*token.TSClaims, error) {
+	claims, ok := ctx.Value(RawClaimsContextKey).(*token.TSClaims)
 	if !ok {
 		return nil, errors.New("raw claims not found in context")
 	}

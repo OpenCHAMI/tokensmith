@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc"
+	"github.com/openchami/tokensmith/pkg/oidc"
 )
 
 // KeySet represents a set of JSON Web Keys

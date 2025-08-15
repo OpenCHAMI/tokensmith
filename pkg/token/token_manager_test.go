@@ -1,17 +1,18 @@
-package jwt
+package token
 
 import (
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTokenOperations(t *testing.T) {
 	// Create a key manager for testing
-	km := NewKeyManager()
+	km := keys.NewKeyManager()
 	require.NotNil(t, km)
 
 	// Generate a new key pair for testing
@@ -55,7 +56,7 @@ func TestTokenOperations(t *testing.T) {
 
 	t.Run("SetSigningAlgorithm with ECDSA algorithms", func(t *testing.T) {
 		// Create a new key manager for ECDSA testing
-		ecKm := NewKeyManager()
+		ecKm := keys.NewKeyManager()
 		require.NotNil(t, ecKm)
 
 		// Generate ECDSA key pair for testing
