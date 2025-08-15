@@ -44,6 +44,7 @@ type Config struct {
 	ClusterID    string
 	OpenCHAMIID  string
 	ProviderType ProviderType
+	NonEnforcing bool // Skip validation checks and only log errors
 	// Hydra-specific config
 	HydraAdminURL     string
 	HydraClientID     string
@@ -79,6 +80,7 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		config.Issuer,
 		config.ClusterID,
 		config.OpenCHAMIID,
+		!config.NonEnforcing, // Enforce claims validation
 	)
 
 	// Initialize the appropriate OIDC provider

@@ -26,15 +26,17 @@ type TokenManager struct {
 	clusterID   string
 	openchamiID string
 	algorithm   string
+	enforce     bool
 }
 
 // NewTokenManager creates a new TokenManager instance
-func NewTokenManager(keyManager *keys.KeyManager, issuer string, clusterID string, openchamiID string) *TokenManager {
+func NewTokenManager(keyManager *keys.KeyManager, issuer string, clusterID string, openchamiID string, enforce bool) *TokenManager {
 	return &TokenManager{
 		keyManager:  keyManager,
 		issuer:      issuer,
 		clusterID:   clusterID,
 		openchamiID: openchamiID,
+		enforce:     enforce,
 		algorithm:   DefaultSigningAlgorithm, // Use PS256 by default
 	}
 }
@@ -63,7 +65,7 @@ func (tm *TokenManager) GenerateToken(claims *TSClaims) (string, error) {
 	}
 
 	// Validate claims
-	if err := claims.Validate(); err != nil {
+	if err := claims.Validate(tm.enforce); err != nil {
 		return "", fmt.Errorf("invalid claims: %w", err)
 	}
 
@@ -141,7 +143,7 @@ func (tm *TokenManager) GenerateTokenWithClaims(claims *TSClaims, additionalClai
 	}
 
 	// Validate claims
-	if err := claims.Validate(); err != nil {
+	if err := claims.Validate(tm.enforce); err != nil {
 		return "", fmt.Errorf("invalid claims: %w", err)
 	}
 
@@ -233,7 +235,7 @@ func (tm *TokenManager) ParseToken(tokenString string) (*TSClaims, map[string]in
 	}
 
 	// Validate claims using custom logic
-	if err := claims.Validate(); err != nil {
+	if err := claims.Validate(tm.enforce); err != nil {
 		return nil, nil, fmt.Errorf("claims validation failed: %w", err)
 	}
 

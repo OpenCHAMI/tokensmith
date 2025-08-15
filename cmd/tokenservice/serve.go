@@ -29,6 +29,7 @@ var serveCmd = &cobra.Command{
 			GroupScopes:  fileConfig.GroupScopes,
 			ClusterID:    clusterID,
 			OpenCHAMIID:  openCHAMIID,
+			NonEnforcing: nonEnforcing, // Use the non-enforcing flag
 		}
 
 		fmt.Printf("Provider type after conversion: %q (len=%d)\n", serviceConfig.ProviderType, len(serviceConfig.ProviderType))
@@ -49,6 +50,7 @@ var serveCmd = &cobra.Command{
 			serviceConfig.KeycloakRealm = keycloakRealm
 			serviceConfig.KeycloakClientID = os.Getenv("KEYCLOAK_CLIENT_ID")
 			serviceConfig.KeycloakClientSecret = os.Getenv("KEYCLOAK_CLIENT_SECRET")
+
 		default:
 			return fmt.Errorf("invalid provider type: %s", providerType)
 		}
@@ -109,5 +111,6 @@ func init() {
 	serveCmd.Flags().StringVar(&keycloakRealm, "keycloak-realm", "openchami", "Keycloak realm")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
+	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")
 	rootCmd.AddCommand(serveCmd)
 }

@@ -41,6 +41,8 @@ type MiddlewareOptions struct {
 	JWKSURL string
 	// JWKSRefreshInterval is how often to refresh the JWKS cache
 	JWKSRefreshInterval time.Duration
+	// NonEnforcing allows the middleware to skip validation checks.  It still logs errors.
+	NonEnforcing bool
 }
 
 // DefaultMiddlewareOptions returns the default middleware options
@@ -52,6 +54,7 @@ func DefaultMiddlewareOptions() *MiddlewareOptions {
 		ValidateAudience:    true,
 		RequiredClaims:      []string{"sub", "iss", "aud"},
 		JWKSRefreshInterval: 1 * time.Hour,
+		NonEnforcing:        false,
 	}
 }
 
@@ -138,7 +141,7 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 
 			// Validate claims using TSClaims.Validate
 			if opts.ValidateExpiration {
-				if err := claims.Validate(); err != nil {
+				if err := claims.Validate(!opts.NonEnforcing); err != nil {
 					http.Error(w, "token validation failed: "+err.Error(), http.StatusUnauthorized)
 					return
 				}

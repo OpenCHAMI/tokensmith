@@ -21,6 +21,7 @@ var (
 	configPath    string
 	keyFile       string
 	keyDir        string
+	nonEnforcing  bool // Skip validation checks and only log errors
 )
 
 var rootCmd = &cobra.Command{

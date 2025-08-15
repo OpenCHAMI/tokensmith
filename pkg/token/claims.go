@@ -141,51 +141,93 @@ func NewClaims() *TSClaims {
 }
 
 // Validate checks if the claims are valid according to RFC 7519, RFC 8725, and NIST SP 800-63B.
-func (c *TSClaims) Validate() error {
+// If enforce is false, violations are logged but do not cause errors.
+func (c *TSClaims) Validate(enforce bool) error {
 	now := time.Now()
+	var logs []string
 
 	// Time-based checks (RFC 8725 §3.5)
 	if c.ExpiresAt != nil && now.After(c.ExpiresAt.Time) {
-		return ErrTokenExpired
+		if enforce {
+			return ErrTokenExpired
+		}
+		logs = append(logs, "Token expired")
 	}
 	if c.NotBefore != nil && now.Before(c.NotBefore.Time) {
-		return ErrTokenNotValidYet
+		if enforce {
+			return ErrTokenNotValidYet
+		}
+		logs = append(logs, "Token not valid yet")
 	}
 
 	// Mandatory core claims (RFC 7519 §4.1)
 	if c.Issuer == "" {
-		return ErrMissingIssuer
+		if enforce {
+			return ErrMissingIssuer
+		}
+		logs = append(logs, "Missing issuer claim")
 	}
 	if c.Subject == "" {
-		return ErrMissingSubject
+		if enforce {
+			return ErrMissingSubject
+		}
+		logs = append(logs, "Missing subject claim")
 	}
 	if len(c.Audience) == 0 {
-		return ErrMissingAudience
+		if enforce {
+			return ErrMissingAudience
+		}
+		logs = append(logs, "Missing audience claim")
 	}
 
 	// NIST SP 800-63B requirements
 	if c.AuthLevel == "" {
-		return errors.New("auth_level claim is required")
+		if enforce {
+			return errors.New("auth_level claim is required")
+		}
+		logs = append(logs, "Missing auth_level claim")
 	}
 	if c.AuthFactors < 2 {
-		return errors.New("at least 2 authentication factors are required")
+		if enforce {
+			return errors.New("at least 2 authentication factors are required")
+		}
+		logs = append(logs, "Less than 2 authentication factors")
 	}
 	if len(c.AuthMethods) == 0 {
-		return errors.New("auth_methods claim is required")
+		if enforce {
+			return errors.New("auth_methods claim is required")
+		}
+		logs = append(logs, "Missing auth_methods claim")
 	}
 	if c.SessionID == "" {
-		return errors.New("session_id claim is required")
+		if enforce {
+			return errors.New("session_id claim is required")
+		}
+		logs = append(logs, "Missing session_id claim")
 	}
 	if c.SessionExp == 0 {
-		return errors.New("session_exp claim is required")
+		if enforce {
+			return errors.New("session_exp claim is required")
+		}
+		logs = append(logs, "Missing session_exp claim")
 	}
 	iat := int64(0)
 	if c.IssuedAt != nil {
 		iat = c.IssuedAt.Time.Unix()
 	}
 	if c.SessionExp-iat > 86400 {
-		return errors.New("session duration exceeds maximum allowed (24 hours)")
+		if enforce {
+			return errors.New("session duration exceeds maximum allowed (24 hours)")
+		}
+		logs = append(logs, "Session duration exceeds maximum allowed (24 hours)")
 	}
 
+	if !enforce && len(logs) > 0 {
+		for _, msg := range logs {
+			// Replace with your preferred logging mechanism
+			// e.g., log.Printf("[TSClaims.Validate] %s", msg)
+			println("[TSClaims.Validate]", msg)
+		}
+	}
 	return nil
 }
