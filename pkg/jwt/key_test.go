@@ -18,7 +18,7 @@ func TestKeyManager(t *testing.T) {
 	require.NotNil(t, km)
 
 	t.Run("GenerateKeyPair with FIPS-compliant key size", func(t *testing.T) {
-		err := km.GenerateKeyPair()
+		err := km.GenerateRSAKeyPair()
 		require.NoError(t, err)
 
 		// Verify key size
@@ -64,7 +64,7 @@ func TestKeyManager(t *testing.T) {
 		defer os.RemoveAll(tempDir)
 
 		// Generate and save keys
-		err = km.GenerateKeyPair()
+		err = km.GenerateRSAKeyPair()
 		require.NoError(t, err)
 
 		privateKeyPath := filepath.Join(tempDir, "private.pem")

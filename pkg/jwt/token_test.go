@@ -15,7 +15,7 @@ func TestTokenOperations(t *testing.T) {
 	require.NotNil(t, km)
 
 	// Generate a new key pair for testing
-	err := km.GenerateKeyPair()
+	err := km.GenerateRSAKeyPair()
 	require.NoError(t, err)
 
 	// Create token manager

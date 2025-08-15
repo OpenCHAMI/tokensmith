@@ -79,7 +79,7 @@ func (km *KeyManager) LoadPublicKey(keyPath string) error {
 }
 
 // GenerateKeyPair generates a new RSA key pair with FIPS-compliant key size
-func (km *KeyManager) GenerateKeyPair() error {
+func (km *KeyManager) GenerateRSAKeyPair() error {
 	// Generate RSA key pair with minimum 2048 bits (FIPS 186-4)
 	privateKey, err := rsa.GenerateKey(rand.Reader, MinRSAKeySize)
 	if err != nil {
