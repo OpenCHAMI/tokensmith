@@ -8,44 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Support for local token introspection using JWKS
-- New configuration file support with `--config` flag
-- `generate-config` command to create default configuration files
-- Support for multiple OIDC providers (Hydra, Authelia, Keycloak)
-- Group-based scope mapping for fine-grained access control
-- Service token generation for inter-service communication
-- JWT validation and parsing capabilities
-- JWKS caching for improved performance
-- Docker environment variables for configuration:
-  - `TOKENSMITH_ISSUER`
-  - `TOKENSMITH_CLUSTER_ID`
-  - `TOKENSMITH_OPENCHAMI_ID`
-  - `TOKENSMITH_CONFIG`
+- Admin API and in-memory mapping store (YAML-backed MVP) for mapping upstream claims/groups → internal scopes/roles.
+- Scoped-token issuance flow: exchange an upstream OIDC id_token for a short-lived internal scoped token (role or fine-grained scopes).
+- JWKS caching and key selection by `kid` with background refresh.
+- Non-enforcing validation option for middleware and claim validation.
+- Authelia integration for testing and examples.
+- Docker Buildx and CI workflows (GoReleaser + GitHub Actions) for multi-arch builds and release automation.
+- Integration tests and example integration configuration (TokenSmith ↔ Authelia).
+- Utility: GenerateRSAKeyPair (renamed from GenerateKeyPair) for FIPS clarity.
 
 ### Changed
-- Updated OIDC provider interface to support local introspection
-- Replaced standard `http.ServeMux` with `chi` router for better routing capabilities
-- Enhanced token service to handle multiple group scopes
-- Improved error handling and validation in token processing
-- Updated test suite to cover new functionality
+- Refactored jwt-related code into clearer packages and updated claims structure to embed `jwt.RegisteredClaims`.
+- Replaced lestrrat-go/jwx middleware with `github.com/golang-jwt/jwt/v5` for parsing/validation.
+- Token generation and service token flows updated to use `jwt.NewNumericDate` and proper RegisteredClaims usage.
+- TokenManager.ParseToken now parses into custom `TSClaims` and invokes `TSClaims.Validate()` for centralized validation.
+- Improved key management and NIST/FIPS-oriented naming and algorithms.
+- Updated dependencies; tidied `go.mod` and resolved module import casing issues (canonicalized to `github.com/openchami/tokensmith`).
+- Refactored middleware and tokenservice structure for clearer responsibilities.
 
 ### Fixed
-- Token validation and parsing issues
-- Group scope mapping edge cases
-- JWKS caching and update logic
-- Service token generation validation
+- Linter and build errors caused by incorrect construction of embedded RegisteredClaims fields.
+- go mod tidy / import casing issues (added guidance and temporary replace workaround).
+- Token parsing/validation bugs related to date/time handling and claim types.
+- Group-to-scope mapping edge cases and scope derivation logic.
+- Various test fixes to construct `TSClaims` correctly and to validate NIST-required fields.
 
 ### Security
-- Added support for PKI-based token validation
-- Implemented proper token expiration handling
-- Enhanced scope validation for service tokens
-- Added support for email verification status
+- Enforced FIPS-compliant algorithm validation at verification points.
+- Short TTLs and session-expiration limits for scoped/service tokens.
+- Added PKI-based validation support and improved token expiration handling.
+- Enhanced scope validation and added email verification handling where applicable.
 
 ### Documentation
-- Added comprehensive README with setup and usage instructions
-- Added configuration file documentation
-- Added API documentation for token service
-- Added provider-specific configuration examples
+- Added feature spec and implementation notes for scoped-token issuance and mapping model.
+- Added README updates, configuration docs and example `mappings.yaml`.
+- Documented middleware and JWT changes and provided usage examples.
 
 ## [0.1.0] - 2025-03-21
 
@@ -57,4 +54,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Service token generation
 - JWT validation and parsing
 - Configuration management
-- HTTP server implementation 
+- HTTP server implementation
