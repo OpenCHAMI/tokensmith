@@ -190,7 +190,7 @@ func (c *Client) IntrospectToken(ctx context.Context, token string) (*oidc.Intro
 	// Create form data
 	formData := fmt.Sprintf("token=%s", token)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(formData))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(formData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

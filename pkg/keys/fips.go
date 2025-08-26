@@ -2,6 +2,7 @@ package keys
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -17,7 +18,7 @@ var FIPSApprovedAlgorithms = map[string]bool{
 // ValidateAlgorithm checks if the algorithm is FIPS-approved
 func ValidateAlgorithm(alg string) error {
 	if !FIPSApprovedAlgorithms[alg] {
-		return fmt.Errorf("algorithm %s is not FIPS-approved. Approved algorithms: PS256, PS384, PS512, RS256, RS384, RS512, ES256, ES384, ES512", alg)
+		return fmt.Errorf("algorithm %s is not FIPS-approved. Approved algorithms: %s", alg, strings.Join(GetFIPSApprovedAlgorithms(), ", "))
 	}
 	return nil
 }
