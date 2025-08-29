@@ -1,5 +1,4 @@
-
-FROM chainguard/wolfi-base:latest
+FROM alpine:3
 
 # Include curl in the final image.
 RUN set -ex \
@@ -31,13 +30,13 @@ COPY tokensmith /usr/local/bin/
 USER 65534:65534
 
 # Set up the command to start the service.
-CMD /usr/local/bin/tokensmith serve \
---provider=${TOKENSMITH_OIDC_PROVIDER} \
---issuer=${TOKENSMITH_ISSUER} \
---port=${TOKENSMITH_PORT} \
---cluster-id=${TOKENSMITH_CLUSTER_ID} \
---openchami-id=${TOKENSMITH_OPENCHAMI_ID} \
---config=${TOKENSMITH_CONFIG} \
---key-dir=${TOKENSMITH_KEY_DIR}
+CMD ["/usr/local/bin/tokensmith", "serve", \
+--provider=${TOKENSMITH_OIDC_PROVIDER}, \
+--issuer=${TOKENSMITH_ISSUER}, \
+--port=${TOKENSMITH_PORT}, \
+--cluster-id=${TOKENSMITH_CLUSTER_ID}, \
+--openchami-id=${TOKENSMITH_OPENCHAMI_ID}, \
+--config=${TOKENSMITH_CONFIG}, \
+--key-dir=${TOKENSMITH_KEY_DIR}]
 
 ENTRYPOINT ["/sbin/tini", "--"]
