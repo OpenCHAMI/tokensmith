@@ -16,6 +16,9 @@ import (
 // TokenCtxKey is the context key for the OIDC token
 type TokenCtxKey struct{}
 
+// IntrospectionCtxKey is the context key for the OIDC introspection result
+type IntrospectionCtxKey struct{}
+
 // Helper to parse a JWKS map and return a map of kid to *rsa.PublicKey
 func parseJWKS(jwks map[string]interface{}) (map[string]*rsa.PublicKey, error) {
 	keys := make(map[string]*rsa.PublicKey)
@@ -152,9 +155,8 @@ func RequireValidToken(provider Provider) func(http.Handler) http.Handler {
 				http.Error(w, "Token is not active", http.StatusUnauthorized)
 				return
 			}
-
 			// Add introspection result to context for downstream handlers
-			ctx := context.WithValue(r.Context(), "oidc_introspection", introspection)
+			ctx := context.WithValue(r.Context(), IntrospectionCtxKey{}, introspection)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

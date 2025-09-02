@@ -6,17 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/openchami/tokensmith/pkg/oidc"
+	"github.com/openchami/tokensmith/pkg/oidc/common"
 )
-
-// KeySet represents a set of JSON Web Keys
-type KeySet struct {
-	Keys []map[string]interface{}
-}
 
 // Client implements the OIDC provider interface for Keycloak
 type Client struct {
@@ -25,7 +20,7 @@ type Client struct {
 	clientID         string
 	clientSecret     string
 	metadata         *oidc.ProviderMetadata
-	keySet           *KeySet
+	keySet           jwk.Set
 	lastJWKSUpdate   time.Time
 	jwksUpdatePeriod time.Duration
 }
@@ -90,24 +85,11 @@ func (c *Client) updateJWKS(ctx context.Context) error {
 		return fmt.Errorf("failed to read JWKS response: %w", err)
 	}
 
-	var jwks struct {
-		Keys []json.RawMessage `json:"keys"`
-	}
-	if err := json.Unmarshal(body, &jwks); err != nil {
+	c.keySet, err = jwk.Parse(body)
+	if err != nil {
 		return fmt.Errorf("failed to parse JWKS: %w", err)
 	}
 
-	keySet := &KeySet{}
-	for _, key := range jwks.Keys {
-		var rawKey map[string]interface{}
-		if err := json.Unmarshal(key, &rawKey); err != nil {
-			continue
-		}
-		// Add key to keySet
-		keySet.Keys = append(keySet.Keys, rawKey)
-	}
-
-	c.keySet = keySet
 	c.lastJWKSUpdate = time.Now()
 	return nil
 }
@@ -164,107 +146,6 @@ func (c *Client) GetProviderMetadata(ctx context.Context) (*oidc.ProviderMetadat
 
 // IntrospectToken introspects a token using Keycloak's introspection endpoint
 func (c *Client) IntrospectToken(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
-	// If we have JWKS, try local validation first
-	if c.keySet != nil {
-		parsedToken, err := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
-			// Get the key ID from the token header
-			kid, ok := token.Header["kid"].(string)
-			if !ok {
-				return nil, fmt.Errorf("kid header not found")
-			}
-
-			// Find the key in the keySet
-			for _, key := range c.keySet.Keys {
-				if keyID, ok := key["kid"].(string); ok && keyID == kid {
-					// Convert the key to the appropriate format based on the algorithm
-					switch token.Method.Alg() {
-					case "RS256", "RS384", "RS512":
-						// For RSA keys, we need to parse the modulus and exponent
-						n, ok := key["n"].(string)
-						if !ok {
-							continue
-						}
-						e, ok := key["e"].(string)
-						if !ok {
-							continue
-						}
-						// Convert base64url to big.Int and create RSA public key
-						// This is a simplified version - in production, you'd want to properly
-						// parse the modulus and exponent
-						return jwt.ParseRSAPublicKeyFromPEM([]byte(fmt.Sprintf(
-							"-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA%s\n%s\n-----END PUBLIC KEY-----",
-							n, e,
-						)))
-					case "ES256", "ES384", "ES512":
-						// For ECDSA keys, we need to parse the x and y coordinates
-						x, ok := key["x"].(string)
-						if !ok {
-							continue
-						}
-						y, ok := key["y"].(string)
-						if !ok {
-							continue
-						}
-						// Convert base64url to big.Int and create ECDSA public key
-						// This is a simplified version - in production, you'd want to properly
-						// parse the x and y coordinates
-						return jwt.ParseECPublicKeyFromPEM([]byte(fmt.Sprintf(
-							"-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA%s\n%s\n-----END PUBLIC KEY-----",
-							x, y,
-						)))
-					default:
-						return nil, fmt.Errorf("unsupported signing method: %v", token.Method.Alg())
-					}
-				}
-			}
-			return nil, fmt.Errorf("key not found")
-		})
-
-		if err == nil && parsedToken.Valid {
-			claims, ok := parsedToken.Claims.(jwt.MapClaims)
-			if !ok {
-				return nil, fmt.Errorf("invalid claims format")
-			}
-
-			return &oidc.IntrospectionResponse{
-				Active:    true,
-				Username:  claims["sub"].(string),
-				ExpiresAt: int64(claims["exp"].(float64)),
-				IssuedAt:  int64(claims["iat"].(float64)),
-				Claims:    claims,
-				TokenType: "Bearer",
-			}, nil
-		}
-	}
-
-	// Fall back to remote introspection
-	url := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token/introspect", c.baseURL, c.realm)
-
-	// Create form data
-	formData := fmt.Sprintf("token=%s", token)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(formData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetBasicAuth(c.clientID, c.clientSecret)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to introspect token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to introspect token: status %d", resp.StatusCode)
-	}
-
-	var introspection oidc.IntrospectionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&introspection); err != nil {
-		return nil, fmt.Errorf("failed to decode introspection response: %w", err)
-	}
-
-	return &introspection, nil
+	remoteURL := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token/introspect", c.baseURL, c.realm)
+	return common.IntrospectToken(ctx, c.keySet, remoteURL, c.clientID, c.clientSecret, token)
 }

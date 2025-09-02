@@ -2,19 +2,16 @@ package hydra
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/rsa"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/lestrrat-go/jwx/v3/jwk"
+
 	"github.com/openchami/tokensmith/pkg/oidc"
+	"github.com/openchami/tokensmith/pkg/oidc/common"
 )
 
 // Client implements the OIDC provider interface for Hydra
@@ -23,26 +20,9 @@ type Client struct {
 	clientID         string
 	clientSecret     string
 	metadata         *oidc.ProviderMetadata
-	keySet           *KeySet
+	keySet           jwk.Set
 	lastJWKSUpdate   time.Time
 	jwksUpdatePeriod time.Duration
-}
-
-// KeySet represents a set of JSON Web Keys
-type KeySet struct {
-	Keys []struct {
-		Kid string   `json:"kid"`
-		Kty string   `json:"kty"`
-		Alg string   `json:"alg"`
-		Use string   `json:"use"`
-		X5c []string `json:"x5c"`
-		X5u string   `json:"x5u"`
-		Crv string   `json:"crv"`
-		X   string   `json:"x"`
-		Y   string   `json:"y"`
-		E   string   `json:"e"`
-		N   string   `json:"n"`
-	} `json:"keys"`
 }
 
 // NewClient creates a new Hydra client
@@ -104,126 +84,20 @@ func (c *Client) updateJWKS(ctx context.Context) error {
 		return fmt.Errorf("failed to read JWKS response: %w", err)
 	}
 
-	var keySet KeySet
+	var keySet jwk.Set
 	if err := json.Unmarshal(body, &keySet); err != nil {
 		return fmt.Errorf("failed to parse JWKS: %w", err)
 	}
 
-	c.keySet = &keySet
+	c.keySet = keySet
 	c.lastJWKSUpdate = time.Now()
 	return nil
 }
 
 // IntrospectToken introspects a token using Hydra's introspection endpoint
 func (c *Client) IntrospectToken(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
-	// If we have JWKS, try local validation first
-	if c.keySet != nil {
-		// Parse the token without verification first to get the key ID
-		parser := jwt.Parser{}
-		unverifiedToken, _, err := parser.ParseUnverified(token, jwt.MapClaims{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse token: %w", err)
-		}
-
-		// Find the key with matching kid
-		kid, _ := unverifiedToken.Header["kid"].(string)
-		var publicKey interface{}
-		for _, key := range c.keySet.Keys {
-			if key.Kid == kid {
-				switch key.Kty {
-				case "RSA":
-					// Convert RSA key components
-					n, err := base64.RawURLEncoding.DecodeString(key.N)
-					if err != nil {
-						return nil, fmt.Errorf("failed to decode RSA modulus: %w", err)
-					}
-					e, err := base64.RawURLEncoding.DecodeString(key.E)
-					if err != nil {
-						return nil, fmt.Errorf("failed to decode RSA exponent: %w", err)
-					}
-					publicKey = &rsa.PublicKey{
-						N: new(big.Int).SetBytes(n),
-						E: int(new(big.Int).SetBytes(e).Int64()),
-					}
-				case "EC":
-					// Convert EC key components
-					x, err := base64.RawURLEncoding.DecodeString(key.X)
-					if err != nil {
-						return nil, fmt.Errorf("failed to decode EC X coordinate: %w", err)
-					}
-					y, err := base64.RawURLEncoding.DecodeString(key.Y)
-					if err != nil {
-						return nil, fmt.Errorf("failed to decode EC Y coordinate: %w", err)
-					}
-					publicKey = &ecdsa.PublicKey{
-						X: new(big.Int).SetBytes(x),
-						Y: new(big.Int).SetBytes(y),
-					}
-				}
-				break
-			}
-		}
-
-		if publicKey != nil {
-			// Parse and verify the token with the public key
-			parsedToken, err := parser.Parse(token, func(token *jwt.Token) (interface{}, error) {
-				return publicKey, nil
-			})
-			if err == nil {
-				claims, ok := parsedToken.Claims.(jwt.MapClaims)
-				if !ok {
-					return nil, fmt.Errorf("invalid token claims")
-				}
-
-				// Convert claims to map[string]interface{}
-				claimsMap := make(map[string]interface{})
-				for k, v := range claims {
-					claimsMap[k] = v
-				}
-
-				return &oidc.IntrospectionResponse{
-					Active:    true,
-					Username:  claims["sub"].(string),
-					ExpiresAt: int64(claims["exp"].(float64)),
-					IssuedAt:  int64(claims["iat"].(float64)),
-					Claims:    claimsMap,
-					TokenType: "Bearer",
-				}, nil
-			}
-		}
-	}
-
-	// Fall back to remote introspection
-	url := fmt.Sprintf("%s/oauth2/introspect", c.baseURL)
-
-	// Create form data
-	formData := fmt.Sprintf("token=%s", token)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(formData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Set headers
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetBasicAuth(c.clientID, c.clientSecret)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to introspect token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to introspect token: status %d", resp.StatusCode)
-	}
-
-	var introspection oidc.IntrospectionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&introspection); err != nil {
-		return nil, fmt.Errorf("failed to decode introspection response: %w", err)
-	}
-
-	return &introspection, nil
+	remoteURL := fmt.Sprintf("%s/oauth2/introspect", c.baseURL)
+	return common.IntrospectToken(ctx, c.keySet, remoteURL, c.clientID, c.clientSecret, token)
 }
 
 // GetProviderMetadata returns Hydra's OIDC provider metadata
