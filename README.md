@@ -28,10 +28,17 @@ sequenceDiagram
 
 ## Features
 
+- **Pluggable Policy Engine System**
+  - **Static Policy Engine**: Simple hardcoded policy engine with configurable scopes, audiences, and permissions
+  - **File-Based Policy Engine**: Dynamic policy engine with role-based access control (RBAC) from JSON configuration
+  - **Extensible Architecture**: Easy to implement custom policy engines for complex authorization scenarios
+  - **Hot Configuration Reloading**: File-based policy engine supports configuration updates without service restart
+  - **Role-Based Access Control**: Support for user and group role mappings with fine-grained permissions
+
 - **Identity Bridging**
   - Exchange external OIDC tokens for internal JWTs
   - Map external identities to internal service identities
-  - Group-based authorization and scope management
+  - Dynamic authorization and scope management via policy engines
   - Support for multiple OIDC providers (Keycloak, Hydra, Authelia)
 
 - **Service-to-Service Authentication**
@@ -53,6 +60,96 @@ sequenceDiagram
   - Hydra integration
   - Authelia integration
   - Extensible provider interface
+
+## Policy Engines
+
+TokenSmith uses a pluggable policy engine system to determine scopes, audiences, and permissions for access tokens. This allows for flexible authorization policies that can be adapted to different use cases.
+
+### Static Policy Engine
+
+The static policy engine provides a simple, hardcoded approach to policy decisions. It's ideal for simple deployments or as a fallback when dynamic policies aren't needed.
+
+**Features:**
+- Fixed scopes, audiences, and permissions
+- Configurable token lifetime
+- Additional custom claims support
+- Zero configuration overhead
+
+**Usage:**
+```bash
+tokensmith serve --policy-engine static --provider hydra
+```
+
+### File-Based Policy Engine
+
+The file-based policy engine provides dynamic, role-based access control (RBAC) through JSON configuration files. It supports complex authorization scenarios with user and group role mappings.
+
+**Features:**
+- Role-based access control (RBAC)
+- User and group role mappings
+- Fine-grained permissions per role
+- Hot configuration reloading
+- Default policy fallback
+
+**Usage:**
+```bash
+# Generate a policy configuration file
+tokensmith generate-policy-config --policy-config policy.json
+
+# Run with file-based policy engine
+tokensmith serve --policy-engine file-based --policy-config policy.json --provider hydra
+```
+
+**Policy Configuration Example:**
+```json
+{
+  "version": "1.0.0",
+  "default_policy": {
+    "scopes": ["read"],
+    "audiences": ["smd", "bss", "cloud-init"],
+    "permissions": ["read:basic"]
+  },
+  "roles": {
+    "admin": {
+      "name": "Administrator",
+      "description": "Full administrative access",
+      "scopes": ["read", "write", "admin"],
+      "audiences": ["smd", "bss", "cloud-init", "admin-service"],
+      "permissions": ["read:all", "write:all", "admin:all"]
+    },
+    "user": {
+      "name": "Regular User",
+      "description": "Basic user access",
+      "scopes": ["read"],
+      "audiences": ["smd", "bss", "cloud-init"],
+      "permissions": ["read:basic"]
+    }
+  },
+  "user_role_mappings": {
+    "adminuser": ["admin"],
+    "regularuser": ["user"]
+  },
+  "group_role_mappings": {
+    "admins": ["admin"],
+    "users": ["user"]
+  }
+}
+```
+
+### Custom Policy Engines
+
+You can implement custom policy engines by implementing the `policy.Engine` interface:
+
+```go
+type Engine interface {
+    EvaluatePolicy(ctx context.Context, policyCtx *PolicyContext) (*PolicyDecision, error)
+    GetName() string
+    GetVersion() string
+    ValidateConfiguration() error
+}
+```
+
+See the [policy package documentation](pkg/policy/README.md) for detailed implementation examples.
 
 ## Container Deployment
 
@@ -122,16 +219,23 @@ tokensmith/
 ├── cmd/
 │   └── tokensmith/          # Main application entry point
 ├── pkg/
-│   ├── jwt/                 # JWT package (shared)
-│   │   ├── oidc/           # OIDC provider implementations
-│   │   │   ├── authelia/   # Authelia provider
-│   │   │   ├── hydra/      # Hydra provider
-│   │   │   └── keycloak/   # Keycloak provider
+│   ├── keys/               # Key management utilities
+│   ├── oidc/               # OIDC provider implementations
+│   │   ├── authelia/       # Authelia provider
+│   │   ├── hydra/          # Hydra provider
+│   │   ├── keycloak/       # Keycloak provider
 │   │   └── provider.go     # Provider interface
+│   ├── policy/             # Pluggable policy engine system
+│   │   ├── engine.go       # Policy engine interface
+│   │   ├── static.go       # Static policy engine
+│   │   ├── file_based.go   # File-based policy engine
+│   │   └── README.md       # Policy engine documentation
+│   ├── token/              # JWT token management
 │   ├── tokenservice/       # Token exchange service
 │   └── middleware/         # JWT middleware (standalone)
 └── example/                # Example applications
-    └── middleware/         # Example of middleware usage
+    ├── middleware/         # Example of middleware usage
+    └── policy/             # Policy engine examples
 ```
 
 ## Local Installation
@@ -160,7 +264,15 @@ The token service can be run as a standalone application. First, generate a defa
 tokensmith generate-config --config config.json
 ```
 
-Then start the service with the configuration file:
+#### Available Commands
+
+- `tokensmith serve` - Start the token service
+- `tokensmith generate-config` - Generate a default configuration file
+- `tokensmith generate-policy-config` - Generate a default policy configuration file
+
+#### Using Static Policy Engine (Default)
+
+Start the service with the static policy engine:
 
 ```bash
 tokensmith serve \
@@ -169,7 +281,28 @@ tokensmith serve \
   --port=8080 \
   --cluster-id=test-cluster-id \
   --openchami-id=test-openchami-id \
-  --config=config.json
+  --config=config.json \
+  --policy-engine=static
+```
+
+#### Using File-Based Policy Engine
+
+Generate a policy configuration file and start the service:
+
+```bash
+# Generate a policy configuration file
+tokensmith generate-policy-config --policy-config policy.json
+
+# Start the service with file-based policy engine
+tokensmith serve \
+  --provider=keycloak \
+  --issuer=http://tokensmith:8080 \
+  --port=8080 \
+  --cluster-id=test-cluster-id \
+  --openchami-id=test-openchami-id \
+  --config=config.json \
+  --policy-engine=file-based \
+  --policy-config=policy.json
 ```
 
 #### Configuration File
@@ -201,6 +334,8 @@ Configuration options:
 | `--keycloak-url` | Keycloak admin API URL | `http://keycloak:8080` |
 | `--keycloak-realm` | Keycloak realm | `openchami` |
 | `--config` | Path to configuration file | `""` |
+| `--policy-engine` | Policy engine type (static, file-based) | `static` |
+| `--policy-config` | Path to policy configuration file | `""` |
 
 | Environment Variable | Description |
 |------|-------------|

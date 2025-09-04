@@ -21,6 +21,7 @@ import (
 	"github.com/openchami/tokensmith/pkg/oidc/authelia"
 	"github.com/openchami/tokensmith/pkg/oidc/hydra"
 	"github.com/openchami/tokensmith/pkg/oidc/keycloak"
+	"github.com/openchami/tokensmith/pkg/policy"
 	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -45,6 +46,8 @@ type Config struct {
 	OpenCHAMIID  string
 	ProviderType ProviderType
 	NonEnforcing bool // Skip validation checks and only log errors
+	// Policy engine configuration
+	PolicyEngine *PolicyEngineConfig
 	// Hydra-specific config
 	HydraAdminURL     string
 	HydraClientID     string
@@ -69,6 +72,7 @@ type TokenService struct {
 	ClusterID    string
 	OpenCHAMIID  string
 	OIDCProvider oidc.Provider
+	PolicyEngine policy.Engine
 	mu           sync.RWMutex
 }
 
@@ -104,6 +108,12 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		return nil, fmt.Errorf("unsupported provider type: %s", config.ProviderType)
 	}
 
+	// Initialize the policy engine
+	policyEngine, err := NewPolicyEngine(config.PolicyEngine)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize policy engine: %w", err)
+	}
+
 	return &TokenService{
 		TokenManager: tokenManager,
 		Config:       config,
@@ -112,6 +122,7 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		ClusterID:    config.ClusterID,
 		OpenCHAMIID:  config.OpenCHAMIID,
 		OIDCProvider: oidcProvider,
+		PolicyEngine: policyEngine,
 	}, nil
 }
 
@@ -131,17 +142,37 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		return "", errors.New("token is not active")
 	}
 
+	// Create policy context for policy evaluation
+	policyCtx := &policy.PolicyContext{
+		Username: introspection.Username,
+		Groups:   extractGroupsFromClaims(introspection.Claims),
+		Claims:   introspection.Claims,
+		RequestContext: map[string]interface{}{
+			"client_id":  introspection.ClientID,
+			"token_type": introspection.TokenType,
+		},
+		ClusterID:   s.ClusterID,
+		OpenCHAMIID: s.OpenCHAMIID,
+	}
+
+	// Evaluate policy to determine scopes, audiences, and permissions
+	policyDecision, err := s.PolicyEngine.EvaluatePolicy(ctx, policyCtx)
+	if err != nil {
+		return "", fmt.Errorf("policy evaluation failed: %w", err)
+	}
+
 	// Create OpenCHAMI claims
 	claims := &token.TSClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.Issuer,
 			Subject:   introspection.Username,
-			Audience:  []string{"smd", "bss", "cloud-init"},
+			Audience:  policyDecision.Audiences,
 			ExpiresAt: jwt.NewNumericDate(time.Unix(introspection.ExpiresAt, 0)),
 			IssuedAt:  jwt.NewNumericDate(time.Unix(introspection.IssuedAt, 0)),
 		},
 		ClusterID:   s.ClusterID,
 		OpenCHAMIID: s.OpenCHAMIID,
+		Scope:       policyDecision.Scopes,
 	}
 
 	// Extract additional claims from introspection
@@ -201,35 +232,19 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		return "", fmt.Errorf("missing required claim: auth_events")
 	}
 
-	// Check for groups in claims
-	groups, ok := introspection.Claims["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
-		return "", errors.New("no groups found in token")
+	// Add additional claims from policy decision
+	for k, v := range policyDecision.AdditionalClaims {
+		// Note: We could add these to a custom claims field in TSClaims
+		// For now, we'll skip them as TSClaims doesn't have a generic additional claims field
+		_ = k
+		_ = v
 	}
 
-	// Convert groups to string slice
-	groupStrings := make([]string, 0, len(groups))
-	for _, g := range groups {
-		if gs, ok := g.(string); ok {
-			groupStrings = append(groupStrings, gs)
-		}
+	// Set token lifetime if specified by policy
+	if policyDecision.TokenLifetime != nil {
+		expiresAt := time.Now().Add(*policyDecision.TokenLifetime)
+		claims.ExpiresAt = jwt.NewNumericDate(expiresAt)
 	}
-
-	// Get scopes for groups
-	scopes := make([]string, 0)
-	for _, group := range groupStrings {
-		if groupScopes, ok := s.GroupScopes[group]; ok {
-			scopes = append(scopes, groupScopes...)
-		}
-	}
-
-	// Check if we have any valid scopes
-	if len(scopes) == 0 {
-		return "", errors.New("no valid scopes found for groups")
-	}
-
-	// Set scopes in claims
-	claims.Scope = scopes
 
 	// Generate token
 	idtoken, err = s.TokenManager.GenerateToken(claims)
@@ -238,6 +253,23 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	}
 
 	return idtoken, nil
+}
+
+// extractGroupsFromClaims extracts groups from the introspection claims
+func extractGroupsFromClaims(claims map[string]interface{}) []string {
+	groups, ok := claims["groups"].([]interface{})
+	if !ok || len(groups) == 0 {
+		return []string{}
+	}
+
+	groupStrings := make([]string, 0, len(groups))
+	for _, g := range groups {
+		if gs, ok := g.(string); ok {
+			groupStrings = append(groupStrings, gs)
+		}
+	}
+
+	return groupStrings
 }
 
 // GenerateServiceToken generates a service-to-service token

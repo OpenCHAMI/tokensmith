@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/openchami/tokensmith/pkg/oidc/mock"
+	"github.com/openchami/tokensmith/pkg/policy"
 	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -81,6 +84,50 @@ func TestTokenService(t *testing.T) {
 		},
 	}
 
+	// Create a file-based policy engine for testing that can differentiate between users
+	// We'll create a temporary config file for the test
+	tempDir := t.TempDir()
+	configPath := fmt.Sprintf("%s/policy.json", tempDir)
+
+	policyConfig := &policy.FileBasedConfig{
+		Version: "1.0.0",
+		DefaultPolicy: &policy.PolicyDecision{
+			Scopes:      []string{"read"},
+			Audiences:   []string{"smd", "bss", "cloud-init"},
+			Permissions: []string{"read:basic"},
+		},
+		Roles: map[string]*policy.RolePolicy{
+			"admin": {
+				Name:        "Administrator",
+				Scopes:      []string{"read", "write", "admin"},
+				Audiences:   []string{"smd", "bss", "cloud-init"},
+				Permissions: []string{"read:all", "write:all", "admin:all"},
+			},
+			"operator": {
+				Name:        "Operator",
+				Scopes:      []string{"read", "write"},
+				Audiences:   []string{"smd", "bss", "cloud-init"},
+				Permissions: []string{"read:system", "write:system"},
+			},
+		},
+		GroupRoleMappings: map[string][]string{
+			"admin":    {"admin"},
+			"operator": {"operator"},
+		},
+	}
+
+	configData, err := json.MarshalIndent(policyConfig, "", "  ")
+	require.NoError(t, err)
+	err = os.WriteFile(configPath, configData, 0644)
+	require.NoError(t, err)
+
+	policyEngine, err := policy.NewFileBasedEngine(&policy.FileBasedEngineConfig{
+		Name:       "test-file-engine",
+		Version:    "1.0.0",
+		ConfigPath: configPath,
+	})
+	require.NoError(t, err)
+
 	// Create service
 	service := &TokenService{
 		TokenManager: tokenManager,
@@ -90,6 +137,7 @@ func TestTokenService(t *testing.T) {
 		OpenCHAMIID:  config.OpenCHAMIID,
 		OIDCProvider: mockProvider,
 		GroupScopes:  config.GroupScopes,
+		PolicyEngine: policyEngine,
 	}
 
 	t.Run("Token Exchange - Admin User", func(t *testing.T) {
@@ -353,6 +401,16 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create a static policy engine for testing
+			policyEngine, err := policy.NewStaticEngine(&policy.StaticEngineConfig{
+				Name:        "test-policy-engine",
+				Version:     "1.0.0",
+				Scopes:      []string{"read", "write", "admin"},
+				Audiences:   []string{"smd", "bss", "cloud-init"},
+				Permissions: []string{"read:basic", "write:basic", "admin:all"},
+			})
+			require.NoError(t, err)
+
 			// Create token service
 			service := &TokenService{
 				TokenManager: token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true),
@@ -360,6 +418,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,
 				OpenCHAMIID:  tt.config.OpenCHAMIID,
+				PolicyEngine: policyEngine,
 			}
 
 			// Generate service token
@@ -434,6 +493,16 @@ func TestTokenService_ValidateToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create a static policy engine for testing
+			policyEngine, err := policy.NewStaticEngine(&policy.StaticEngineConfig{
+				Name:        "test-policy-engine",
+				Version:     "1.0.0",
+				Scopes:      []string{"read", "write", "admin"},
+				Audiences:   []string{"smd", "bss", "cloud-init"},
+				Permissions: []string{"read:basic", "write:basic", "admin:all"},
+			})
+			require.NoError(t, err)
+
 			// Create token service
 			service := &TokenService{
 				TokenManager: token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true),
@@ -441,6 +510,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,
 				OpenCHAMIID:  tt.config.OpenCHAMIID,
+				PolicyEngine: policyEngine,
 			}
 
 			// Generate a valid token for the valid token test case

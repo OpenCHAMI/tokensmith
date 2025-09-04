@@ -28,7 +28,7 @@ func main() {
 	if err := keyManager.SetKeyPair(privateKey, &privateKey.PublicKey); err != nil {
 		log.Fatal(err)
 	}
-	tokenManager := token.NewTokenManager(keyManager, "internal-service", "test-cluster-id", "test-openchami-id")
+	tokenManager := token.NewTokenManager(keyManager, "internal-service", "test-cluster-id", "test-openchami-id", false)
 
 	// Create Hydra client
 	hydraClient := hydraclient.NewClient("http://hydra:4445", "test-client-id", "test-client-secret")
