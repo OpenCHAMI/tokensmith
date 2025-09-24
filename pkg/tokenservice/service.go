@@ -199,16 +199,12 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	} else {
 		return "", fmt.Errorf("invalid type for claim auth_factors: expected number")
 	}
-	if authMethods, ok := introspection.Claims["auth_methods"].([]interface{}); ok {
-		claims.AuthMethods = make([]string, len(authMethods))
-		for i, v := range authMethods {
-			if s, ok := v.(string); ok {
-				claims.AuthMethods[i] = s
-			}
-		}
-	} else {
+	// Use helper function to extract auth_methods array
+	authMethods := extractStringArrayFromClaims(introspection.Claims, "auth_methods")
+	if len(authMethods) == 0 {
 		return "", fmt.Errorf("missing required claim: auth_methods")
 	}
+	claims.AuthMethods = authMethods
 	if sessionID, ok := introspection.Claims["session_id"].(string); ok {
 		claims.SessionID = sessionID
 	} else {
@@ -255,21 +251,26 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	return idtoken, nil
 }
 
-// extractGroupsFromClaims extracts groups from the introspection claims
-func extractGroupsFromClaims(claims map[string]interface{}) []string {
-	groups, ok := claims["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
+// extractStringArrayFromClaims extracts string array from claims with given key
+func extractStringArrayFromClaims(claims map[string]interface{}, key string) []string {
+	array, ok := claims[key].([]interface{})
+	if !ok || len(array) == 0 {
 		return []string{}
 	}
 
-	groupStrings := make([]string, 0, len(groups))
-	for _, g := range groups {
-		if gs, ok := g.(string); ok {
-			groupStrings = append(groupStrings, gs)
+	strings := make([]string, 0, len(array))
+	for _, item := range array {
+		if str, ok := item.(string); ok {
+			strings = append(strings, str)
 		}
 	}
 
-	return groupStrings
+	return strings
+}
+
+// extractGroupsFromClaims extracts groups from the introspection claims
+func extractGroupsFromClaims(claims map[string]interface{}) []string {
+	return extractStringArrayFromClaims(claims, "groups")
 }
 
 // GenerateServiceToken generates a service-to-service token
@@ -337,6 +338,11 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate a unique key ID based on timestamp and a hash of the public key's modulus
+	timestamp := time.Now().UnixNano()
+	keyHash := fmt.Sprintf("%x", publicKey.N.Bytes()[:8]) // Use first 8 bytes of modulus for uniqueness
+	kid := fmt.Sprintf("openchami-%s-%d", keyHash, timestamp)
+
 	// Create JWKS manually
 	jwks := map[string]interface{}{
 		"keys": []map[string]interface{}{
@@ -344,7 +350,7 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 				"kty": "RSA",
 				"use": "sig",
 				"alg": "RS256",
-				"kid": "openchami-key-1", // You might want to generate this dynamically
+				"kid": kid,
 				"n":   publicKey.N.String(),
 				"e":   publicKey.E,
 			},

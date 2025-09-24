@@ -70,12 +70,14 @@ TokenSmith uses a pluggable policy engine system to determine scopes, audiences,
 The static policy engine provides a simple, hardcoded approach to policy decisions. It's ideal for simple deployments or as a fallback when dynamic policies aren't needed.
 
 **Features:**
+
 - Fixed scopes, audiences, and permissions
 - Configurable token lifetime
 - Additional custom claims support
 - Zero configuration overhead
 
 **Usage:**
+
 ```bash
 tokensmith serve --policy-engine static --provider hydra
 ```
@@ -85,6 +87,7 @@ tokensmith serve --policy-engine static --provider hydra
 The file-based policy engine provides dynamic, role-based access control (RBAC) through JSON configuration files. It supports complex authorization scenarios with user and group role mappings.
 
 **Features:**
+
 - Role-based access control (RBAC)
 - User and group role mappings
 - Fine-grained permissions per role
@@ -92,6 +95,7 @@ The file-based policy engine provides dynamic, role-based access control (RBAC) 
 - Default policy fallback
 
 **Usage:**
+
 ```bash
 # Generate a policy configuration file
 tokensmith generate-policy-config --policy-config policy.json
@@ -101,6 +105,7 @@ tokensmith serve --policy-engine file-based --policy-config policy.json --provid
 ```
 
 **Policy Configuration Example:**
+
 ```json
 {
   "version": "1.0.0",
