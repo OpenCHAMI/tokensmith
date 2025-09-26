@@ -19,6 +19,10 @@ func main() {
 	// Example 2: Using the file-based policy engine
 	fmt.Println("\n=== File-Based Policy Engine Example ===")
 	fileBasedExample()
+
+	// Example 3: Integrating with TokenService
+	fmt.Println("\n=== TokenService Integration Example ===")
+	tokenServiceExample()
 }
 
 func staticExample() {
@@ -62,6 +66,7 @@ func staticExample() {
 	}
 
 	// Print the results
+	// Note: GetName() and GetVersion() are still available on implementations for logging
 	fmt.Printf("Engine: %s v%s\n", engine.GetName(), engine.GetVersion())
 	fmt.Printf("Scopes: %v\n", decision.Scopes)
 	fmt.Printf("Audiences: %v\n", decision.Audiences)
@@ -179,12 +184,13 @@ func tokenServiceExample() {
 
 	// Create the token service configuration
 	config := tokenservice.Config{
-		Issuer:       "https://tokensmith.example.com",
-		ClusterID:    "example-cluster",
-		OpenCHAMIID:  "example-openchami",
-		ProviderType: tokenservice.ProviderTypeHydra,
-		PolicyEngine: policyConfig,
-		// ... other configuration
+		Issuer:           "https://tokensmith.example.com",
+		ClusterID:        "example-cluster",
+		OpenCHAMIID:      "example-openchami",
+		OIDCIssuerURL:    "https://hydra.example.com",
+		OIDCClientID:     "tokensmith-client",
+		OIDCClientSecret: "client-secret",
+		PolicyEngine:     policyConfig,
 	}
 
 	// Create the token service
@@ -193,7 +199,14 @@ func tokenServiceExample() {
 		log.Fatalf("Failed to create token service: %v", err)
 	}
 
-	fmt.Printf("Token service created with policy engine: %s v%s\n",
-		service.PolicyEngine.GetName(),
-		service.PolicyEngine.GetVersion())
+	// Note: GetName() and GetVersion() are still available on implementations for logging
+	if staticEngine, ok := service.PolicyEngine.(*policy.StaticEngine); ok {
+		fmt.Printf("Token service created with policy engine: %s v%s\n",
+			staticEngine.GetName(), staticEngine.GetVersion())
+	} else if fileBasedEngine, ok := service.PolicyEngine.(*policy.FileBasedEngine); ok {
+		fmt.Printf("Token service created with policy engine: %s v%s\n",
+			fileBasedEngine.GetName(), fileBasedEngine.GetVersion())
+	} else {
+		fmt.Printf("Token service created with policy engine: %T\n", service.PolicyEngine)
+	}
 }

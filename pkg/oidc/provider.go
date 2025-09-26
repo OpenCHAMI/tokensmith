@@ -5,32 +5,14 @@ import (
 	"net/http"
 )
 
-// Provider defines the interface for OIDC token validation and introspection.
-// This interface abstracts the interaction with different OIDC providers (e.g., Hydra, Keycloak, Authelia)
-// by providing a common set of methods for token introspection and provider metadata retrieval.
+// Provider defines the simplified interface for OIDC token validation and introspection.
+// This interface provides a common set of methods for token introspection and provider metadata retrieval.
 type Provider interface {
-	// IntrospectToken validates and introspects an OIDC token by making a request to the provider's introspection endpoint.
-	// It returns a TokenIntrospection object containing the token's claims and metadata.
-	//
-	// Parameters:
-	//   - ctx: Context for the request, which can be used for cancellation and timeouts
-	//   - token: The OIDC token to introspect
-	//
-	// Returns:
-	//   - *TokenIntrospection: Contains the token's claims and metadata if successful
-	//   - error: Any error that occurred during introspection
+	// IntrospectToken validates and introspects an OIDC token.
+	// It returns an IntrospectionResponse containing the token's claims and metadata.
 	IntrospectToken(ctx context.Context, token string) (*IntrospectionResponse, error)
 
 	// GetProviderMetadata fetches the OIDC provider's configuration and capabilities.
-	// This method retrieves information about the provider's supported features,
-	// endpoints, and other configuration details.
-	//
-	// Parameters:
-	//   - ctx: Context for the request, which can be used for cancellation and timeouts
-	//
-	// Returns:
-	//   - *ProviderMetadata: Contains the provider's configuration and capabilities
-	//   - error: Any error that occurred while fetching the metadata
 	GetProviderMetadata(ctx context.Context) (*ProviderMetadata, error)
 
 	// SupportsLocalIntrospection returns true if the provider supports local token introspection

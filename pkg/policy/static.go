@@ -123,12 +123,12 @@ func (e *StaticEngine) EvaluatePolicy(ctx context.Context, policyCtx *PolicyCont
 	return decision, nil
 }
 
-// GetName returns the name of this policy engine
+// GetName returns the name of this policy engine (for logging purposes)
 func (e *StaticEngine) GetName() string {
 	return e.name
 }
 
-// GetVersion returns the version of this policy engine
+// GetVersion returns the version of this policy engine (for logging purposes)
 func (e *StaticEngine) GetVersion() string {
 	return e.version
 }
@@ -148,55 +148,13 @@ func (e *StaticEngine) ValidateConfiguration() error {
 
 // validateStaticConfig validates a static policy engine configuration
 func validateStaticConfig(config *StaticEngineConfig) error {
-	if config == nil {
-		return fmt.Errorf("configuration cannot be nil")
-	}
-
-	if config.Name == "" {
-		return fmt.Errorf("name cannot be empty")
-	}
-
-	if config.Version == "" {
-		return fmt.Errorf("version cannot be empty")
-	}
-
-	if len(config.Scopes) == 0 {
-		return fmt.Errorf("at least one scope must be specified")
-	}
-
-	if len(config.Audiences) == 0 {
-		return fmt.Errorf("at least one audience must be specified")
-	}
-
-	if len(config.Permissions) == 0 {
-		return fmt.Errorf("at least one permission must be specified")
-	}
-
-	// Validate that scopes don't contain empty strings
-	for i, scope := range config.Scopes {
-		if scope == "" {
-			return fmt.Errorf("scope at index %d cannot be empty", i)
+	result := ValidateStaticEngineConfig(config)
+	if !result.IsValid() {
+		// Return the first error for backward compatibility
+		if len(result.Errors) > 0 {
+			return result.Errors[0]
 		}
+		return fmt.Errorf("configuration validation failed")
 	}
-
-	// Validate that audiences don't contain empty strings
-	for i, audience := range config.Audiences {
-		if audience == "" {
-			return fmt.Errorf("audience at index %d cannot be empty", i)
-		}
-	}
-
-	// Validate that permissions don't contain empty strings
-	for i, permission := range config.Permissions {
-		if permission == "" {
-			return fmt.Errorf("permission at index %d cannot be empty", i)
-		}
-	}
-
-	// Validate token lifetime if specified
-	if config.TokenLifetime != nil && *config.TokenLifetime <= 0 {
-		return fmt.Errorf("token lifetime must be positive")
-	}
-
 	return nil
 }

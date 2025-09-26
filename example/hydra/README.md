@@ -1,19 +1,19 @@
-# JWT Authentication with Hydra Integration Example
+# JWT Authentication with OIDC Integration Example
 
-This example demonstrates how to use the JWT authentication middleware with Hydra for external OIDC/SSO integration and service-to-service communication.
+This example demonstrates how to use the JWT authentication middleware with any OIDC-compliant provider (including Hydra) for external OIDC/SSO integration and service-to-service communication.
 
 ## Features
 
-- External token validation through Hydra
+- External token validation through any OIDC-compliant provider
 - Internal token generation for service-to-service communication
 - Scope-based authorization
 - Claims extraction from context
 - Support for both external and internal tokens
-- Automatic token introspection with Hydra
+- Automatic token introspection with OIDC discovery
 
 ## Prerequisites
 
-- A running Hydra instance (configured with your OIDC provider)
+- A running OIDC-compliant provider (Hydra, Keycloak, Authelia, etc.)
 - Go 1.21 or later
 
 ## Running the Example
@@ -23,9 +23,9 @@ This example demonstrates how to use the JWT authentication middleware with Hydr
    cd example/hydra
    ```
 
-2. Update the Hydra admin URL in `main.go` to point to your Hydra instance:
+2. Update the OIDC provider URL in `main.go` to point to your OIDC provider:
    ```go
-   hydraClient := jwtauth.NewHydraClient("http://hydra:4445")
+   oidcProvider := oidc.NewSimpleProvider("http://hydra:4444", "test-client-id", "test-client-secret")
    ```
 
 3. Run the example:
@@ -40,8 +40,8 @@ This example demonstrates how to use the JWT authentication middleware with Hydr
 ### Public Routes
 - `GET /` - Welcome message
 
-### Routes Protected by Hydra (External Tokens)
-- `GET /protected` - Protected route requiring valid Hydra token
+### Routes Protected by OIDC Provider (External Tokens)
+- `GET /protected` - Protected route requiring valid OIDC token
 - `POST /write` - Write scope-protected route
 
 ### Routes Protected by Internal Tokens (Service-to-Service)
@@ -49,9 +49,9 @@ This example demonstrates how to use the JWT authentication middleware with Hydr
 
 ## Testing the Endpoints
 
-1. External Token Protected Route (requires Hydra token):
+1. External Token Protected Route (requires OIDC token):
    ```bash
-   curl -H "Authorization: Bearer YOUR_HYDRA_TOKEN" http://localhost:8080/protected
+   curl -H "Authorization: Bearer YOUR_OIDC_TOKEN" http://localhost:8080/protected
    ```
 
 2. Internal Token Protected Route (requires service token):
@@ -59,17 +59,17 @@ This example demonstrates how to use the JWT authentication middleware with Hydr
    curl -H "Authorization: Bearer YOUR_SERVICE_TOKEN" http://localhost:8080/internal
    ```
 
-3. Write Scope Protected Route (requires write scope):
+3. Write Scope Protected Route (requires write scope in OIDC token):
    ```bash
-   curl -X POST -H "Authorization: Bearer YOUR_HYDRA_TOKEN" http://localhost:8080/write
+   curl -X POST -H "Authorization: Bearer YOUR_OIDC_TOKEN" http://localhost:8080/write
    ```
 
 ## Token Types
 
-### External Tokens (Hydra)
-- Validated through Hydra's introspection endpoint
+### External Tokens (OIDC Provider)
+- Validated through OIDC discovery and introspection endpoint
 - Claims are extracted from the external token
-- Internal tokens are generated based on external token claims
+- Works with any OIDC-compliant provider (Hydra, Keycloak, Authelia, etc.)
 
 ### Internal Tokens (Service-to-Service)
 - Generated using the internal key pair
@@ -95,16 +95,16 @@ The generated token will include:
 - Scopes: `read`, `write`
 - Standard JWT claims (iss, exp, iat, etc.)
 
-## Hydra Integration
+## OIDC Integration
 
-The middleware handles Hydra integration by:
+The middleware handles OIDC integration by:
 1. Receiving external tokens
-2. Validating them through Hydra's introspection endpoint
-3. Creating internal tokens based on the validated claims
+2. Using OIDC discovery to find provider endpoints
+3. Validating tokens through the provider's introspection endpoint
 4. Making the claims available in the request context
 
 This allows your services to:
-- Accept tokens from external identity providers
+- Accept tokens from any OIDC-compliant identity provider
 - Maintain consistent authorization across your system
 - Support service-to-service communication
-- Handle token rotation and key management 
+- Handle token rotation and key management automatically 

@@ -481,3 +481,74 @@ func TestDefaultFileBasedConfig(t *testing.T) {
 		t.Error("Default config should have a reload interval")
 	}
 }
+
+func TestFileBasedEngine_ImplementsSimplifiedInterface(t *testing.T) {
+	// Create a temporary config file
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "policy.json")
+
+	config := &FileBasedConfig{
+		Version: "1.0.0",
+		DefaultPolicy: &PolicyDecision{
+			Scopes:      []string{"read"},
+			Audiences:   []string{"default-service"},
+			Permissions: []string{"read:basic"},
+		},
+		Roles: map[string]*RolePolicy{
+			"admin": {
+				Name:        "Administrator",
+				Description: "Full administrative access",
+				Scopes:      []string{"read", "write", "admin"},
+				Audiences:   []string{"admin-service"},
+				Permissions: []string{"read:all", "write:all", "admin:all"},
+			},
+		},
+		UserRoleMappings: map[string][]string{
+			"adminuser": {"admin"},
+		},
+		GroupRoleMappings: map[string][]string{
+			"admins": {"admin"},
+		},
+	}
+
+	configData, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("Failed to marshal config: %v", err)
+	}
+
+	if err := os.WriteFile(configPath, configData, 0644); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	engineConfig := &FileBasedEngineConfig{
+		Name:       "test-engine",
+		Version:    "1.0.0",
+		ConfigPath: configPath,
+	}
+
+	engine, err := NewFileBasedEngine(engineConfig)
+	if err != nil {
+		t.Fatalf("Failed to create file-based engine: %v", err)
+	}
+
+	// Test that the engine implements the simplified interface
+	var _ Engine = engine
+
+	// Test that EvaluatePolicy works
+	ctx := context.Background()
+	policyCtx := &PolicyContext{
+		Username:    "adminuser",
+		Groups:      []string{"admins"},
+		Claims:      map[string]interface{}{"email": "admin@example.com"},
+		ClusterID:   "test-cluster",
+		OpenCHAMIID: "test-openchami",
+	}
+
+	decision, err := engine.EvaluatePolicy(ctx, policyCtx)
+	if err != nil {
+		t.Errorf("EvaluatePolicy failed: %v", err)
+	}
+	if decision == nil {
+		t.Error("EvaluatePolicy returned nil decision")
+	}
+}

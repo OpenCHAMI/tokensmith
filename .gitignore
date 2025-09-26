@@ -45,4 +45,6 @@ tests/integration/authelia/config/notification.txt
 # Authelia generated keys
 tests/integration/authelia/config/oidc-key.pem
 
+# LLM files
 CLAUDE.md
+CURSOR/

@@ -83,6 +83,35 @@ type FileBasedEngineConfig struct {
 	ReloadInterval *time.Duration `json:"reload_interval,omitempty"`
 }
 
+// FileBasedConfigWithStringDurations is used for JSON unmarshaling to handle string durations
+type FileBasedConfigWithStringDurations struct {
+	Version           string                           `json:"version"`
+	DefaultPolicy     *PolicyDecisionWithString        `json:"default_policy"`
+	Roles             map[string]*RolePolicyWithString `json:"roles"`
+	UserRoleMappings  map[string][]string              `json:"user_role_mappings"`
+	GroupRoleMappings map[string][]string              `json:"group_role_mappings"`
+}
+
+// PolicyDecisionWithString handles string durations during unmarshaling
+type PolicyDecisionWithString struct {
+	Scopes           []string               `json:"scopes"`
+	Audiences        []string               `json:"audiences"`
+	Permissions      []string               `json:"permissions"`
+	TokenLifetimeStr string                 `json:"token_lifetime,omitempty"`
+	AdditionalClaims map[string]interface{} `json:"additional_claims,omitempty"`
+}
+
+// RolePolicyWithString handles string durations during unmarshaling
+type RolePolicyWithString struct {
+	Name             string                 `json:"name"`
+	Description      string                 `json:"description"`
+	Scopes           []string               `json:"scopes"`
+	Audiences        []string               `json:"audiences"`
+	Permissions      []string               `json:"permissions"`
+	TokenLifetimeStr string                 `json:"token_lifetime,omitempty"`
+	AdditionalClaims map[string]interface{} `json:"additional_claims,omitempty"`
+}
+
 // DefaultFileBasedConfig returns a default configuration for the file-based policy engine
 func DefaultFileBasedConfig() *FileBasedEngineConfig {
 	return &FileBasedEngineConfig{
@@ -94,6 +123,78 @@ func DefaultFileBasedConfig() *FileBasedEngineConfig {
 			return &d
 		}(),
 	}
+}
+
+// convertStringDurationsToFileBasedConfig converts a config with string durations to proper FileBasedConfig
+func convertStringDurationsToFileBasedConfig(configWithStrings *FileBasedConfigWithStringDurations) (*FileBasedConfig, error) {
+	config := &FileBasedConfig{
+		Version:           configWithStrings.Version,
+		UserRoleMappings:  configWithStrings.UserRoleMappings,
+		GroupRoleMappings: configWithStrings.GroupRoleMappings,
+		Roles:             make(map[string]*RolePolicy),
+	}
+
+	// Convert default policy
+	if configWithStrings.DefaultPolicy != nil {
+		defaultPolicy, err := convertPolicyDecisionWithString(configWithStrings.DefaultPolicy)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert default policy: %w", err)
+		}
+		config.DefaultPolicy = defaultPolicy
+	}
+
+	// Convert roles
+	for roleName, rolePolicyWithString := range configWithStrings.Roles {
+		rolePolicy, err := convertRolePolicyWithString(rolePolicyWithString)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert role policy '%s': %w", roleName, err)
+		}
+		config.Roles[roleName] = rolePolicy
+	}
+
+	return config, nil
+}
+
+// convertPolicyDecisionWithString converts a PolicyDecisionWithString to PolicyDecision
+func convertPolicyDecisionWithString(pdWithString *PolicyDecisionWithString) (*PolicyDecision, error) {
+	pd := &PolicyDecision{
+		Scopes:           pdWithString.Scopes,
+		Audiences:        pdWithString.Audiences,
+		Permissions:      pdWithString.Permissions,
+		AdditionalClaims: pdWithString.AdditionalClaims,
+	}
+
+	if pdWithString.TokenLifetimeStr != "" {
+		duration, err := time.ParseDuration(pdWithString.TokenLifetimeStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid token_lifetime '%s': %w", pdWithString.TokenLifetimeStr, err)
+		}
+		pd.TokenLifetime = &duration
+	}
+
+	return pd, nil
+}
+
+// convertRolePolicyWithString converts a RolePolicyWithString to RolePolicy
+func convertRolePolicyWithString(rpWithString *RolePolicyWithString) (*RolePolicy, error) {
+	rp := &RolePolicy{
+		Name:             rpWithString.Name,
+		Description:      rpWithString.Description,
+		Scopes:           rpWithString.Scopes,
+		Audiences:        rpWithString.Audiences,
+		Permissions:      rpWithString.Permissions,
+		AdditionalClaims: rpWithString.AdditionalClaims,
+	}
+
+	if rpWithString.TokenLifetimeStr != "" {
+		duration, err := time.ParseDuration(rpWithString.TokenLifetimeStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid token_lifetime '%s': %w", rpWithString.TokenLifetimeStr, err)
+		}
+		rp.TokenLifetime = &duration
+	}
+
+	return rp, nil
 }
 
 // NewFileBasedEngine creates a new file-based policy engine with the given configuration
@@ -173,12 +274,12 @@ func (e *FileBasedEngine) EvaluatePolicy(ctx context.Context, policyCtx *PolicyC
 	return MergePolicyDecisions(decisions...), nil
 }
 
-// GetName returns the name of this policy engine
+// GetName returns the name of this policy engine (for logging purposes)
 func (e *FileBasedEngine) GetName() string {
 	return e.name
 }
 
-// GetVersion returns the version of this policy engine
+// GetVersion returns the version of this policy engine (for logging purposes)
 func (e *FileBasedEngine) GetVersion() string {
 	return e.version
 }
@@ -232,18 +333,25 @@ func (e *FileBasedEngine) loadConfig() error {
 		return fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	var config FileBasedConfig
-	if err := json.Unmarshal(data, &config); err != nil {
+	// First try to unmarshal with string durations
+	var configWithStrings FileBasedConfigWithStringDurations
+	if err := json.Unmarshal(data, &configWithStrings); err != nil {
 		return fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// Convert string durations to proper time.Duration values
+	config, err := convertStringDurationsToFileBasedConfig(&configWithStrings)
+	if err != nil {
+		return fmt.Errorf("failed to convert configuration: %w", err)
+	}
+
 	// Validate the loaded configuration
-	if err := validateFileBasedConfig(&config); err != nil {
+	if err := validateFileBasedConfig(config); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	e.mu.Lock()
-	e.config = &config
+	e.config = config
 	e.mu.Unlock()
 
 	// Update last modification time
@@ -338,172 +446,14 @@ func validateFileBasedEngineConfig(config *FileBasedEngineConfig) error {
 
 // validateFileBasedConfig validates a file-based policy configuration
 func validateFileBasedConfig(config *FileBasedConfig) error {
-	if config == nil {
-		return fmt.Errorf("configuration cannot be nil")
-	}
-
-	if config.Version == "" {
-		return fmt.Errorf("version cannot be empty")
-	}
-
-	// Validate default policy if present
-	if config.DefaultPolicy != nil {
-		if err := validatePolicyDecision(config.DefaultPolicy); err != nil {
-			return fmt.Errorf("invalid default policy: %w", err)
+	result := ValidateFileBasedConfig(config)
+	if !result.IsValid() {
+		// Return the first error for backward compatibility
+		if len(result.Errors) > 0 {
+			return result.Errors[0]
 		}
+		return fmt.Errorf("configuration validation failed")
 	}
-
-	// Validate roles
-	if config.Roles == nil {
-		return fmt.Errorf("roles cannot be nil")
-	}
-
-	for roleName, rolePolicy := range config.Roles {
-		if roleName == "" {
-			return fmt.Errorf("role name cannot be empty")
-		}
-
-		if rolePolicy == nil {
-			return fmt.Errorf("role policy for '%s' cannot be nil", roleName)
-		}
-
-		if err := validateRolePolicy(rolePolicy); err != nil {
-			return fmt.Errorf("invalid role policy for '%s': %w", roleName, err)
-		}
-	}
-
-	// Validate user role mappings
-	for username, roles := range config.UserRoleMappings {
-		if username == "" {
-			return fmt.Errorf("username cannot be empty")
-		}
-
-		for i, role := range roles {
-			if role == "" {
-				return fmt.Errorf("role at index %d for user '%s' cannot be empty", i, username)
-			}
-
-			if _, exists := config.Roles[role]; !exists {
-				return fmt.Errorf("user '%s' references undefined role '%s'", username, role)
-			}
-		}
-	}
-
-	// Validate group role mappings
-	for groupName, roles := range config.GroupRoleMappings {
-		if groupName == "" {
-			return fmt.Errorf("group name cannot be empty")
-		}
-
-		for i, role := range roles {
-			if role == "" {
-				return fmt.Errorf("role at index %d for group '%s' cannot be empty", i, groupName)
-			}
-
-			if _, exists := config.Roles[role]; !exists {
-				return fmt.Errorf("group '%s' references undefined role '%s'", groupName, role)
-			}
-		}
-	}
-
-	return nil
-}
-
-// validatePolicyDecision validates a policy decision
-func validatePolicyDecision(decision *PolicyDecision) error {
-	if decision == nil {
-		return fmt.Errorf("policy decision cannot be nil")
-	}
-
-	if len(decision.Scopes) == 0 {
-		return fmt.Errorf("at least one scope must be specified")
-	}
-
-	if len(decision.Audiences) == 0 {
-		return fmt.Errorf("at least one audience must be specified")
-	}
-
-	if len(decision.Permissions) == 0 {
-		return fmt.Errorf("at least one permission must be specified")
-	}
-
-	// Validate scopes
-	for i, scope := range decision.Scopes {
-		if scope == "" {
-			return fmt.Errorf("scope at index %d cannot be empty", i)
-		}
-	}
-
-	// Validate audiences
-	for i, audience := range decision.Audiences {
-		if audience == "" {
-			return fmt.Errorf("audience at index %d cannot be empty", i)
-		}
-	}
-
-	// Validate permissions
-	for i, permission := range decision.Permissions {
-		if permission == "" {
-			return fmt.Errorf("permission at index %d cannot be empty", i)
-		}
-	}
-
-	// Validate token lifetime if specified
-	if decision.TokenLifetime != nil && *decision.TokenLifetime <= 0 {
-		return fmt.Errorf("token lifetime must be positive")
-	}
-
-	return nil
-}
-
-// validateRolePolicy validates a role policy
-func validateRolePolicy(rolePolicy *RolePolicy) error {
-	if rolePolicy == nil {
-		return fmt.Errorf("role policy cannot be nil")
-	}
-
-	if rolePolicy.Name == "" {
-		return fmt.Errorf("role name cannot be empty")
-	}
-
-	if len(rolePolicy.Scopes) == 0 {
-		return fmt.Errorf("at least one scope must be specified for role '%s'", rolePolicy.Name)
-	}
-
-	if len(rolePolicy.Audiences) == 0 {
-		return fmt.Errorf("at least one audience must be specified for role '%s'", rolePolicy.Name)
-	}
-
-	if len(rolePolicy.Permissions) == 0 {
-		return fmt.Errorf("at least one permission must be specified for role '%s'", rolePolicy.Name)
-	}
-
-	// Validate scopes
-	for i, scope := range rolePolicy.Scopes {
-		if scope == "" {
-			return fmt.Errorf("scope at index %d for role '%s' cannot be empty", i, rolePolicy.Name)
-		}
-	}
-
-	// Validate audiences
-	for i, audience := range rolePolicy.Audiences {
-		if audience == "" {
-			return fmt.Errorf("audience at index %d for role '%s' cannot be empty", i, rolePolicy.Name)
-		}
-	}
-
-	// Validate permissions
-	for i, permission := range rolePolicy.Permissions {
-		if permission == "" {
-			return fmt.Errorf("permission at index %d for role '%s' cannot be empty", i, rolePolicy.Name)
-		}
-	}
-
-	// Validate token lifetime if specified
-	if rolePolicy.TokenLifetime != nil && *rolePolicy.TokenLifetime <= 0 {
-		return fmt.Errorf("token lifetime for role '%s' must be positive", rolePolicy.Name)
-	}
-
 	return nil
 }
 

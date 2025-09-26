@@ -13,7 +13,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
-	"github.com/openchami/tokensmith/pkg/oidc/mock"
 	"github.com/openchami/tokensmith/pkg/policy"
 	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/stretchr/testify/assert"
@@ -22,7 +21,7 @@ import (
 
 func TestTokenService(t *testing.T) {
 	// Create a mock provider using the existing mock implementation
-	mockProvider := mock.NewProvider()
+	mockProvider := oidc.NewMockProvider()
 	mockProvider.IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
 		// Return a mock introspection response
 		return &oidc.IntrospectionResponse{
@@ -50,7 +49,7 @@ func TestTokenService(t *testing.T) {
 			ScopesSupported:       []string{"read", "write"},
 		}, nil
 	}
-	mockProvider.SupportsLocalFunc = func() bool {
+	mockProvider.SupportsLocalIntrospectionFunc = func() bool {
 		return false
 	}
 	mockProvider.GetJWKSFunc = func(ctx context.Context) (interface{}, error) {
@@ -74,9 +73,12 @@ func TestTokenService(t *testing.T) {
 
 	// Create configuration
 	config := &Config{
-		Issuer:      "test-issuer",
-		ClusterID:   "test-cluster-id",
-		OpenCHAMIID: "test-openchami-id",
+		Issuer:           "test-issuer",
+		ClusterID:        "test-cluster-id",
+		OpenCHAMIID:      "test-openchami-id",
+		OIDCIssuerURL:    "http://test-oidc",
+		OIDCClientID:     "test-client",
+		OIDCClientSecret: "test-secret",
 		GroupScopes: map[string][]string{
 			"admin":    {"read", "write", "admin"},
 			"operator": {"read", "write"},
@@ -142,7 +144,7 @@ func TestTokenService(t *testing.T) {
 
 	t.Run("Token Exchange - Admin User", func(t *testing.T) {
 		// Configure mock to return admin user response
-		service.OIDCProvider.(*mock.Provider).IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+		service.OIDCProvider.(*oidc.MockProvider).IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
 			return &oidc.IntrospectionResponse{
 				Active:    true,
 				Username:  "admin-user",
@@ -181,7 +183,7 @@ func TestTokenService(t *testing.T) {
 
 	t.Run("Token Exchange - Operator User", func(t *testing.T) {
 		// Configure mock to return operator user response
-		service.OIDCProvider.(*mock.Provider).IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+		service.OIDCProvider.(*oidc.MockProvider).IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
 			return &oidc.IntrospectionResponse{
 				Active:    true,
 				Username:  "operator-user",
@@ -220,7 +222,7 @@ func TestTokenService(t *testing.T) {
 
 	t.Run("Token Exchange - Invalid Token", func(t *testing.T) {
 		// Configure mock to return inactive token
-		service.OIDCProvider.(*mock.Provider).IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+		service.OIDCProvider.(*oidc.MockProvider).IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
 			return &oidc.IntrospectionResponse{
 				Active:    false,
 				Username:  "testuser",
@@ -240,7 +242,7 @@ func TestTokenService(t *testing.T) {
 
 	t.Run("Token Exchange - Provider Error", func(t *testing.T) {
 		// Configure mock to return an error
-		service.OIDCProvider.(*mock.Provider).IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+		service.OIDCProvider.(*oidc.MockProvider).IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
 			return nil, fmt.Errorf("provider error")
 		}
 
@@ -284,10 +286,12 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		{
 			name: "valid service token",
 			config: Config{
-				ProviderType: ProviderTypeHydra,
-				Issuer:       "test-issuer",
-				ClusterID:    "test-cluster",
-				OpenCHAMIID:  "test-openchami",
+				Issuer:           "test-issuer",
+				ClusterID:        "test-cluster",
+				OpenCHAMIID:      "test-openchami",
+				OIDCIssuerURL:    "http://test-oidc",
+				OIDCClientID:     "test-client",
+				OIDCClientSecret: "test-secret",
 			},
 			serviceID:     "service1",
 			targetService: "service2",
@@ -314,10 +318,12 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		{
 			name: "empty scopes",
 			config: Config{
-				ProviderType: ProviderTypeHydra,
-				Issuer:       "test-issuer",
-				ClusterID:    "test-cluster",
-				OpenCHAMIID:  "test-openchami",
+				Issuer:           "test-issuer",
+				ClusterID:        "test-cluster",
+				OpenCHAMIID:      "test-openchami",
+				OIDCIssuerURL:    "http://test-oidc",
+				OIDCClientID:     "test-client",
+				OIDCClientSecret: "test-secret",
 			},
 			serviceID:     "service1",
 			targetService: "service2",
@@ -344,10 +350,12 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		{
 			name: "empty service ID",
 			config: Config{
-				ProviderType: ProviderTypeHydra,
-				Issuer:       "test-issuer",
-				ClusterID:    "test-cluster",
-				OpenCHAMIID:  "test-openchami",
+				Issuer:           "test-issuer",
+				ClusterID:        "test-cluster",
+				OpenCHAMIID:      "test-openchami",
+				OIDCIssuerURL:    "http://test-oidc",
+				OIDCClientID:     "test-client",
+				OIDCClientSecret: "test-secret",
 			},
 			serviceID:     "",
 			targetService: "service2",
@@ -357,10 +365,12 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		{
 			name: "empty target service",
 			config: Config{
-				ProviderType: ProviderTypeHydra,
-				Issuer:       "test-issuer",
-				ClusterID:    "test-cluster",
-				OpenCHAMIID:  "test-openchami",
+				Issuer:           "test-issuer",
+				ClusterID:        "test-cluster",
+				OpenCHAMIID:      "test-openchami",
+				OIDCIssuerURL:    "http://test-oidc",
+				OIDCClientID:     "test-client",
+				OIDCClientSecret: "test-secret",
 			},
 			serviceID:     "service1",
 			targetService: "",
@@ -370,10 +380,12 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		{
 			name: "nil scopes",
 			config: Config{
-				ProviderType: ProviderTypeHydra,
-				Issuer:       "test-issuer",
-				ClusterID:    "test-cluster",
-				OpenCHAMIID:  "test-openchami",
+				Issuer:           "test-issuer",
+				ClusterID:        "test-cluster",
+				OpenCHAMIID:      "test-openchami",
+				OIDCIssuerURL:    "http://test-oidc",
+				OIDCClientID:     "test-client",
+				OIDCClientSecret: "test-secret",
 			},
 			serviceID:     "service1",
 			targetService: "service2",
@@ -459,10 +471,12 @@ func TestTokenService_ValidateToken(t *testing.T) {
 		{
 			name: "valid token",
 			config: Config{
-				ProviderType: ProviderTypeHydra,
-				Issuer:       "test-issuer",
-				ClusterID:    "test-cluster",
-				OpenCHAMIID:  "test-openchami",
+				Issuer:           "test-issuer",
+				ClusterID:        "test-cluster",
+				OpenCHAMIID:      "test-openchami",
+				OIDCIssuerURL:    "http://test-oidc",
+				OIDCClientID:     "test-client",
+				OIDCClientSecret: "test-secret",
 			},
 			expectError: false,
 			validateClaims: func(t *testing.T, claims *token.TSClaims) {
@@ -481,10 +495,12 @@ func TestTokenService_ValidateToken(t *testing.T) {
 		{
 			name: "invalid token",
 			config: Config{
-				ProviderType: ProviderTypeHydra,
-				Issuer:       "test-issuer",
-				ClusterID:    "test-cluster",
-				OpenCHAMIID:  "test-openchami",
+				Issuer:           "test-issuer",
+				ClusterID:        "test-cluster",
+				OpenCHAMIID:      "test-openchami",
+				OIDCIssuerURL:    "http://test-oidc",
+				OIDCClientID:     "test-client",
+				OIDCClientSecret: "test-secret",
 			},
 			token:       "invalid-token",
 			expectError: true,

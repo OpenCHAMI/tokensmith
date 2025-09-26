@@ -251,6 +251,42 @@ func TestStaticEngine_GetVersion(t *testing.T) {
 	}
 }
 
+func TestStaticEngine_ImplementsSimplifiedInterface(t *testing.T) {
+	config := &StaticEngineConfig{
+		Name:        "test-engine",
+		Version:     "1.0.0",
+		Scopes:      []string{"read"},
+		Audiences:   []string{"service1"},
+		Permissions: []string{"read:data"},
+	}
+
+	engine, err := NewStaticEngine(config)
+	if err != nil {
+		t.Fatalf("Failed to create static engine: %v", err)
+	}
+
+	// Test that the engine implements the simplified interface
+	var _ Engine = engine
+
+	// Test that EvaluatePolicy works
+	ctx := context.Background()
+	policyCtx := &PolicyContext{
+		Username:    "testuser",
+		Groups:      []string{"users"},
+		Claims:      map[string]interface{}{"email": "test@example.com"},
+		ClusterID:   "test-cluster",
+		OpenCHAMIID: "test-openchami",
+	}
+
+	decision, err := engine.EvaluatePolicy(ctx, policyCtx)
+	if err != nil {
+		t.Errorf("EvaluatePolicy failed: %v", err)
+	}
+	if decision == nil {
+		t.Error("EvaluatePolicy returned nil decision")
+	}
+}
+
 func TestStaticEngine_ValidateConfiguration(t *testing.T) {
 	config := &StaticEngineConfig{
 		Name:        "test-engine",

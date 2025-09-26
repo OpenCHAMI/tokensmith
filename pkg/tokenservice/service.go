@@ -18,9 +18,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
-	"github.com/openchami/tokensmith/pkg/oidc/authelia"
-	"github.com/openchami/tokensmith/pkg/oidc/hydra"
-	"github.com/openchami/tokensmith/pkg/oidc/keycloak"
 	"github.com/openchami/tokensmith/pkg/policy"
 	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/rs/zerolog"
@@ -29,38 +26,19 @@ import (
 	openchami_logger "github.com/openchami/chi-middleware/log"
 )
 
-// ProviderType represents the type of OIDC provider
-type ProviderType string
-
-const (
-	ProviderTypeHydra    ProviderType = "hydra"
-	ProviderTypeAuthelia ProviderType = "authelia"
-	ProviderTypeKeycloak ProviderType = "keycloak"
-)
-
 // Config holds the configuration for the token service
 type Config struct {
 	Issuer       string
 	GroupScopes  map[string][]string
 	ClusterID    string
 	OpenCHAMIID  string
-	ProviderType ProviderType
 	NonEnforcing bool // Skip validation checks and only log errors
 	// Policy engine configuration
 	PolicyEngine *PolicyEngineConfig
-	// Hydra-specific config
-	HydraAdminURL     string
-	HydraClientID     string
-	HydraClientSecret string
-	// Authelia-specific config
-	AutheliaURL          string
-	AutheliaClientID     string
-	AutheliaClientSecret string
-	// Keycloak-specific config
-	KeycloakURL          string
-	KeycloakRealm        string
-	KeycloakClientID     string
-	KeycloakClientSecret string
+	// OIDC provider configuration
+	OIDCIssuerURL    string
+	OIDCClientID     string
+	OIDCClientSecret string
 }
 
 // TokenService handles token operations and provider interactions
@@ -87,26 +65,12 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		!config.NonEnforcing, // Enforce claims validation
 	)
 
-	// Initialize the appropriate OIDC provider
-	var oidcProvider oidc.Provider
-	switch config.ProviderType {
-	case ProviderTypeHydra:
-		hydraClient := hydra.NewClient(config.HydraAdminURL, config.HydraClientID, config.HydraClientSecret)
-		oidcProvider = hydraClient
-	case ProviderTypeAuthelia:
-		autheliaClient := authelia.NewClient(config.AutheliaURL, config.AutheliaClientID, config.AutheliaClientSecret)
-		oidcProvider = autheliaClient
-	case ProviderTypeKeycloak:
-		keycloakClient := keycloak.NewClient(
-			config.KeycloakURL,
-			config.KeycloakRealm,
-			config.KeycloakClientID,
-			config.KeycloakClientSecret,
-		)
-		oidcProvider = keycloakClient
-	default:
-		return nil, fmt.Errorf("unsupported provider type: %s", config.ProviderType)
-	}
+	// Initialize the simplified OIDC provider
+	oidcProvider := oidc.NewSimpleProvider(
+		config.OIDCIssuerURL,
+		config.OIDCClientID,
+		config.OIDCClientSecret,
+	)
 
 	// Initialize the policy engine
 	policyEngine, err := NewPolicyEngine(config.PolicyEngine)
@@ -144,13 +108,9 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 
 	// Create policy context for policy evaluation
 	policyCtx := &policy.PolicyContext{
-		Username: introspection.Username,
-		Groups:   extractGroupsFromClaims(introspection.Claims),
-		Claims:   introspection.Claims,
-		RequestContext: map[string]interface{}{
-			"client_id":  introspection.ClientID,
-			"token_type": introspection.TokenType,
-		},
+		Username:    introspection.Username,
+		Groups:      extractGroupsFromClaims(introspection.Claims),
+		Claims:      introspection.Claims,
 		ClusterID:   s.ClusterID,
 		OpenCHAMIID: s.OpenCHAMIID,
 	}
@@ -525,7 +485,7 @@ func (s *TokenService) HealthHandler(w http.ResponseWriter, r *http.Request) {
 		"issuer":       s.Issuer,
 		"cluster_id":   s.ClusterID,
 		"openchami_id": s.OpenCHAMIID,
-		"provider":     string(s.Config.ProviderType),
+		"oidc_issuer":  s.Config.OIDCIssuerURL,
 	})
 }
 

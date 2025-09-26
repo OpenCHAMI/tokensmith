@@ -22,46 +22,31 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 
-		fmt.Printf("Provider type from flag: %q\n", providerType)
-
 		// Create policy engine configuration
 		policyEngineConfig, err := createPolicyEngineConfig()
 		if err != nil {
 			return fmt.Errorf("failed to create policy engine config: %w", err)
 		}
 
-		// Create token service configuration
-		serviceConfig := tokenservice.Config{
-			ProviderType: tokenservice.ProviderType(providerType),
-			Issuer:       issuer,
-			GroupScopes:  fileConfig.GroupScopes, // Keep for backward compatibility
-			ClusterID:    clusterID,
-			OpenCHAMIID:  openCHAMIID,
-			NonEnforcing: nonEnforcing, // Use the non-enforcing flag
-			PolicyEngine: policyEngineConfig,
+		// Get OIDC credentials from environment variables if not provided via flags
+		if oidcClientID == "" {
+			oidcClientID = os.Getenv("OIDC_CLIENT_ID")
+		}
+		if oidcClientSecret == "" {
+			oidcClientSecret = os.Getenv("OIDC_CLIENT_SECRET")
 		}
 
-		fmt.Printf("Provider type after conversion: %q (len=%d)\n", serviceConfig.ProviderType, len(serviceConfig.ProviderType))
-		fmt.Printf("Expected constant value: %q (len=%d)\n", tokenservice.ProviderTypeAuthelia, len(tokenservice.ProviderTypeAuthelia))
-
-		// Set provider-specific configuration
-		switch serviceConfig.ProviderType {
-		case tokenservice.ProviderTypeHydra:
-			serviceConfig.HydraAdminURL = hydraURL
-			serviceConfig.HydraClientID = os.Getenv("HYDRA_CLIENT_ID")
-			serviceConfig.HydraClientSecret = os.Getenv("HYDRA_CLIENT_SECRET")
-		case tokenservice.ProviderTypeAuthelia:
-			serviceConfig.AutheliaURL = autheliaURL
-			serviceConfig.AutheliaClientID = os.Getenv("AUTHELIA_CLIENT_ID")
-			serviceConfig.AutheliaClientSecret = os.Getenv("AUTHELIA_CLIENT_SECRET")
-		case tokenservice.ProviderTypeKeycloak:
-			serviceConfig.KeycloakURL = keycloakURL
-			serviceConfig.KeycloakRealm = keycloakRealm
-			serviceConfig.KeycloakClientID = os.Getenv("KEYCLOAK_CLIENT_ID")
-			serviceConfig.KeycloakClientSecret = os.Getenv("KEYCLOAK_CLIENT_SECRET")
-
-		default:
-			return fmt.Errorf("invalid provider type: %s", providerType)
+		// Create token service configuration
+		serviceConfig := tokenservice.Config{
+			Issuer:           issuer,
+			GroupScopes:      fileConfig.GroupScopes, // Keep for backward compatibility
+			ClusterID:        clusterID,
+			OpenCHAMIID:      openCHAMIID,
+			NonEnforcing:     nonEnforcing,
+			PolicyEngine:     policyEngineConfig,
+			OIDCIssuerURL:    oidcIssuerURL,
+			OIDCClientID:     oidcClientID,
+			OIDCClientSecret: oidcClientSecret,
 		}
 
 		// Create key manager
@@ -109,15 +94,13 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	// Serve command flags
-	serveCmd.Flags().StringVar(&providerType, "provider", "hydra", "OIDC provider type (hydra, keycloak, authelia)")
 	serveCmd.Flags().StringVar(&issuer, "issuer", "http://tokensmith:8080", "Token issuer identifier")
 	serveCmd.Flags().IntVar(&port, "port", 8080, "HTTP server port")
 	serveCmd.Flags().StringVar(&clusterID, "cluster-id", "cl-F00F00F00", "Unique identifier for this cluster")
 	serveCmd.Flags().StringVar(&openCHAMIID, "openchami-id", "oc-F00F00F00", "Unique identifier for this instance of OpenCHAMI")
-	serveCmd.Flags().StringVar(&hydraURL, "hydra-url", "http://hydra:4445", "Hydra admin API URL")
-	serveCmd.Flags().StringVar(&autheliaURL, "authelia-url", "http://authelia:9091", "Authelia admin API URL")
-	serveCmd.Flags().StringVar(&keycloakURL, "keycloak-url", "http://keycloak:8080", "Keycloak admin API URL")
-	serveCmd.Flags().StringVar(&keycloakRealm, "keycloak-realm", "openchami", "Keycloak realm")
+	serveCmd.Flags().StringVar(&oidcIssuerURL, "oidc-issuer", "http://hydra:4444", "OIDC provider issuer URL")
+	serveCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OIDC client ID (or set OIDC_CLIENT_ID env var)")
+	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")

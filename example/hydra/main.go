@@ -12,7 +12,6 @@ import (
 	tsmiddleware "github.com/openchami/tokensmith/middleware"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
-	hydraclient "github.com/openchami/tokensmith/pkg/oidc/hydra"
 	"github.com/openchami/tokensmith/pkg/token"
 )
 
@@ -30,8 +29,8 @@ func main() {
 	}
 	tokenManager := token.NewTokenManager(keyManager, "internal-service", "test-cluster-id", "test-openchami-id", false)
 
-	// Create Hydra client
-	hydraClient := hydraclient.NewClient("http://hydra:4445", "test-client-id", "test-client-secret")
+	// Create simplified OIDC provider (works with any OIDC-compliant provider including Hydra)
+	oidcProvider := oidc.NewSimpleProvider("http://hydra:4444", "test-client-id", "test-client-secret")
 
 	// Create middleware options for internal token validation
 	opts := tsmiddleware.DefaultMiddlewareOptions()
@@ -51,23 +50,50 @@ func main() {
 		})
 	})
 
-	// Routes protected by Hydra (external tokens)
+	// Routes protected by OIDC provider (external tokens)
 	r.Group(func(r chi.Router) {
-		r.Use(oidc.OIDCMiddleware(hydraClient))
+		r.Use(oidc.RequireToken)
+		r.Use(oidc.RequireValidToken(oidcProvider))
 
 		r.Get("/protected", func(w http.ResponseWriter, r *http.Request) {
-			claims, err := tsmiddleware.GetClaimsFromContext(r.Context())
-			if err != nil {
-				http.Error(w, "Failed to get claims", http.StatusInternalServerError)
+			// Get introspection result from OIDC context
+			introspection, ok := r.Context().Value(oidc.IntrospectionCtxKey{}).(*oidc.IntrospectionResponse)
+			if !ok {
+				http.Error(w, "Failed to get introspection result", http.StatusInternalServerError)
 				return
 			}
 
-			w.Write([]byte(fmt.Sprintf("Protected route accessed by %s\n", claims.Subject)))
+			w.Write([]byte(fmt.Sprintf("Protected route accessed by %s\n", introspection.Username)))
 		})
 
 		// Scope-protected routes
 		r.Group(func(r chi.Router) {
-			r.Use(tsmiddleware.RequireScope("write"))
+			r.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// Get introspection result from OIDC context
+					introspection, ok := r.Context().Value(oidc.IntrospectionCtxKey{}).(*oidc.IntrospectionResponse)
+					if !ok {
+						http.Error(w, "Failed to get introspection result", http.StatusInternalServerError)
+						return
+					}
+
+					// Check if user has write scope
+					hasWriteScope := false
+					if scopes, ok := introspection.Claims["scope"].(string); ok {
+						// Simple scope check - in production you'd want more sophisticated scope parsing
+						if scopes == "write" || scopes == "read write" || scopes == "write read" {
+							hasWriteScope = true
+						}
+					}
+
+					if !hasWriteScope {
+						http.Error(w, "Insufficient scope: write required", http.StatusForbidden)
+						return
+					}
+
+					next.ServeHTTP(w, r)
+				})
+			})
 
 			r.Post("/write", func(w http.ResponseWriter, r *http.Request) {
 				w.Write([]byte("Write access granted"))
@@ -98,12 +124,12 @@ func main() {
 
 	fmt.Printf("Example service-to-service token: %s\n", serviceToken)
 	fmt.Println("\nTest the endpoints:")
-	fmt.Println("1. External token protected route (requires Hydra token):")
-	fmt.Println("   curl -H \"Authorization: Bearer YOUR_HYDRA_TOKEN\" http://localhost:8080/protected")
+	fmt.Println("1. External token protected route (requires OIDC token from Hydra):")
+	fmt.Println("   curl -H \"Authorization: Bearer YOUR_OIDC_TOKEN\" http://localhost:8080/protected")
 	fmt.Println("\n2. Internal token protected route (requires service token):")
 	fmt.Println("   curl -H \"Authorization: Bearer YOUR_SERVICE_TOKEN\" http://localhost:8080/internal")
-	fmt.Println("\n3. Write scope protected route (requires write scope):")
-	fmt.Println("   curl -X POST -H \"Authorization: Bearer YOUR_HYDRA_TOKEN\" http://localhost:8080/write")
+	fmt.Println("\n3. Write scope protected route (requires write scope in OIDC token):")
+	fmt.Println("   curl -X POST -H \"Authorization: Bearer YOUR_OIDC_TOKEN\" http://localhost:8080/write")
 
 	// Start the server
 	log.Println("Server starting on :8080")

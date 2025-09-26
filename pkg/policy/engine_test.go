@@ -183,28 +183,3 @@ func TestMergePolicyDecisions(t *testing.T) {
 		})
 	}
 }
-
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	// Create maps for comparison
-	mapA := make(map[string]int)
-	mapB := make(map[string]int)
-
-	for _, s := range a {
-		mapA[s]++
-	}
-	for _, s := range b {
-		mapB[s]++
-	}
-
-	for k, v := range mapA {
-		if mapB[k] != v {
-			return false
-		}
-	}
-
-	return true
-}

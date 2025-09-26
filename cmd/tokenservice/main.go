@@ -10,19 +10,17 @@ import (
 )
 
 var (
-	providerType  string
-	issuer        string
-	port          int
-	clusterID     string
-	openCHAMIID   string
-	hydraURL      string
-	autheliaURL   string
-	keycloakURL   string
-	keycloakRealm string
-	configPath    string
-	keyFile       string
-	keyDir        string
-	nonEnforcing  bool // Skip validation checks and only log errors
+	issuer           string
+	port             int
+	clusterID        string
+	openCHAMIID      string
+	oidcIssuerURL    string
+	oidcClientID     string
+	oidcClientSecret string
+	configPath       string
+	keyFile          string
+	keyDir           string
+	nonEnforcing     bool // Skip validation checks and only log errors
 	// Policy engine configuration
 	policyEngineType string
 	policyConfigPath string

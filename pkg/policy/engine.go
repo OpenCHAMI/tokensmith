@@ -28,7 +28,7 @@ type PolicyDecision struct {
 	AdditionalClaims map[string]interface{} `json:"additional_claims,omitempty"`
 }
 
-// PolicyContext contains the context information needed for policy evaluation
+// PolicyContext contains the simplified context information needed for policy evaluation
 type PolicyContext struct {
 	// User information from the upstream OIDC provider
 	Username string   `json:"username"`
@@ -37,40 +37,18 @@ type PolicyContext struct {
 	// Claims from the upstream token
 	Claims map[string]interface{} `json:"claims"`
 
-	// Request context (IP, user agent, etc.)
-	RequestContext map[string]interface{} `json:"request_context,omitempty"`
-
 	// Cluster and deployment information
 	ClusterID   string `json:"cluster_id"`
 	OpenCHAMIID string `json:"openchami_id"`
 }
 
-// Engine defines the interface for pluggable policy engines.
+// Engine defines the simplified interface for pluggable policy engines.
 // Policy engines are responsible for determining what scopes, audiences, and permissions
 // should be granted to a user based on their identity and context.
 type Engine interface {
 	// EvaluatePolicy determines the policy decision for a given user context.
 	// This method should be thread-safe and can be called concurrently.
-	//
-	// Parameters:
-	//   - ctx: Context for the request, which can be used for cancellation and timeouts
-	//   - policyCtx: The context containing user information and claims
-	//
-	// Returns:
-	//   - *PolicyDecision: The policy decision containing scopes, audiences, and permissions
-	//   - error: Any error that occurred during policy evaluation
 	EvaluatePolicy(ctx context.Context, policyCtx *PolicyContext) (*PolicyDecision, error)
-
-	// GetName returns a human-readable name for this policy engine
-	GetName() string
-
-	// GetVersion returns the version of this policy engine
-	GetVersion() string
-
-	// ValidateConfiguration validates the policy engine configuration
-	// This method should be called during initialization to ensure the engine
-	// is properly configured before use.
-	ValidateConfiguration() error
 }
 
 // DefaultPolicyDecision returns a default policy decision with basic scopes and audiences
