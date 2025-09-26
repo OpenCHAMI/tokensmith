@@ -1,3 +1,5 @@
+version: 2
+project_name: "tokensmith"
 before:
   hooks:
     - go mod download
@@ -8,7 +10,6 @@ builds:
     dir: "cmd/tokenservice"
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
       - arm64

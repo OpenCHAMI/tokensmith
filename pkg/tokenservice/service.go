@@ -6,17 +6,27 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"crypto/rsa"
+
 	"github.com/go-chi/chi/v5"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc/authelia"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc/hydra"
-	"github.com/openchami/tokensmith/pkg/jwt/oidc/keycloak"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/oidc"
+	"github.com/openchami/tokensmith/pkg/oidc/authelia"
+	"github.com/openchami/tokensmith/pkg/oidc/hydra"
+	"github.com/openchami/tokensmith/pkg/oidc/keycloak"
+	"github.com/openchami/tokensmith/pkg/policy"
+	"github.com/openchami/tokensmith/pkg/token"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+
+	openchami_logger "github.com/openchami/chi-middleware/log"
 )
 
 // ProviderType represents the type of OIDC provider
@@ -35,6 +45,9 @@ type Config struct {
 	ClusterID    string
 	OpenCHAMIID  string
 	ProviderType ProviderType
+	NonEnforcing bool // Skip validation checks and only log errors
+	// Policy engine configuration
+	PolicyEngine *PolicyEngineConfig
 	// Hydra-specific config
 	HydraAdminURL     string
 	HydraClientID     string
@@ -52,24 +65,26 @@ type Config struct {
 
 // TokenService handles token operations and provider interactions
 type TokenService struct {
-	TokenManager *jwtauth.TokenManager
+	TokenManager *token.TokenManager
 	Config       Config
 	Issuer       string
 	GroupScopes  map[string][]string
 	ClusterID    string
 	OpenCHAMIID  string
 	OIDCProvider oidc.Provider
+	PolicyEngine policy.Engine
 	mu           sync.RWMutex
 }
 
 // NewTokenService creates a new TokenService instance
-func NewTokenService(keyManager *jwtauth.KeyManager, config Config) (*TokenService, error) {
+func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService, error) {
 	// Initialize the token manager
-	tokenManager := jwtauth.NewTokenManager(
+	tokenManager := token.NewTokenManager(
 		keyManager,
 		config.Issuer,
 		config.ClusterID,
 		config.OpenCHAMIID,
+		!config.NonEnforcing, // Enforce claims validation
 	)
 
 	// Initialize the appropriate OIDC provider
@@ -93,6 +108,12 @@ func NewTokenService(keyManager *jwtauth.KeyManager, config Config) (*TokenServi
 		return nil, fmt.Errorf("unsupported provider type: %s", config.ProviderType)
 	}
 
+	// Initialize the policy engine
+	policyEngine, err := NewPolicyEngine(config.PolicyEngine)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize policy engine: %w", err)
+	}
+
 	return &TokenService{
 		TokenManager: tokenManager,
 		Config:       config,
@@ -101,17 +122,18 @@ func NewTokenService(keyManager *jwtauth.KeyManager, config Config) (*TokenServi
 		ClusterID:    config.ClusterID,
 		OpenCHAMIID:  config.OpenCHAMIID,
 		OIDCProvider: oidcProvider,
+		PolicyEngine: policyEngine,
 	}, nil
 }
 
 // ExchangeToken exchanges an external token for an internal token
-func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string, error) {
-	if token == "" {
+func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (string, error) {
+	if idtoken == "" {
 		return "", errors.New("empty token")
 	}
 
 	// Introspect the token with the OIDC provider
-	introspection, err := s.OIDCProvider.IntrospectToken(ctx, token)
+	introspection, err := s.OIDCProvider.IntrospectToken(ctx, idtoken)
 	if err != nil {
 		return "", fmt.Errorf("token introspection failed: %w", err)
 	}
@@ -120,15 +142,37 @@ func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string,
 		return "", errors.New("token is not active")
 	}
 
+	// Create policy context for policy evaluation
+	policyCtx := &policy.PolicyContext{
+		Username: introspection.Username,
+		Groups:   extractGroupsFromClaims(introspection.Claims),
+		Claims:   introspection.Claims,
+		RequestContext: map[string]interface{}{
+			"client_id":  introspection.ClientID,
+			"token_type": introspection.TokenType,
+		},
+		ClusterID:   s.ClusterID,
+		OpenCHAMIID: s.OpenCHAMIID,
+	}
+
+	// Evaluate policy to determine scopes, audiences, and permissions
+	policyDecision, err := s.PolicyEngine.EvaluatePolicy(ctx, policyCtx)
+	if err != nil {
+		return "", fmt.Errorf("policy evaluation failed: %w", err)
+	}
+
 	// Create OpenCHAMI claims
-	claims := &jwtauth.Claims{
-		Issuer:         s.Issuer,
-		Subject:        introspection.Username,
-		Audience:       []string{"smd", "bss", "cloud-init"},
-		ExpirationTime: introspection.ExpiresAt,
-		IssuedAt:       introspection.IssuedAt,
-		ClusterID:      s.ClusterID,
-		OpenCHAMIID:    s.OpenCHAMIID,
+	claims := &token.TSClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    s.Issuer,
+			Subject:   introspection.Username,
+			Audience:  policyDecision.Audiences,
+			ExpiresAt: jwt.NewNumericDate(time.Unix(introspection.ExpiresAt, 0)),
+			IssuedAt:  jwt.NewNumericDate(time.Unix(introspection.IssuedAt, 0)),
+		},
+		ClusterID:   s.ClusterID,
+		OpenCHAMIID: s.OpenCHAMIID,
+		Scope:       policyDecision.Scopes,
 	}
 
 	// Extract additional claims from introspection
@@ -142,63 +186,127 @@ func (s *TokenService) ExchangeToken(ctx context.Context, token string) (string,
 		claims.EmailVerified = emailVerified
 	}
 
-	// Check for groups in claims
-	groups, ok := introspection.Claims["groups"].([]interface{})
-	if !ok || len(groups) == 0 {
-		return "", errors.New("no groups found in token")
+	// Extract NIST-compliant claims
+	if authLevel, ok := introspection.Claims["auth_level"].(string); ok {
+		claims.AuthLevel = authLevel
+	} else {
+		return "", fmt.Errorf("missing required claim: auth_level")
 	}
-
-	// Convert groups to string slice
-	groupStrings := make([]string, 0, len(groups))
-	for _, g := range groups {
-		if gs, ok := g.(string); ok {
-			groupStrings = append(groupStrings, gs)
+	if authFactors, ok := introspection.Claims["auth_factors"].(float64); ok {
+		claims.AuthFactors = int(authFactors)
+	} else if _, exists := introspection.Claims["auth_factors"]; !exists {
+		return "", fmt.Errorf("missing required claim: auth_factors")
+	} else {
+		return "", fmt.Errorf("invalid type for claim auth_factors: expected number")
+	}
+	// Use helper function to extract auth_methods array
+	authMethods := extractStringArrayFromClaims(introspection.Claims, "auth_methods")
+	if len(authMethods) == 0 {
+		return "", fmt.Errorf("missing required claim: auth_methods")
+	}
+	claims.AuthMethods = authMethods
+	if sessionID, ok := introspection.Claims["session_id"].(string); ok {
+		claims.SessionID = sessionID
+	} else {
+		return "", fmt.Errorf("missing required claim: session_id")
+	}
+	if sessionExp, ok := introspection.Claims["session_exp"].(float64); ok {
+		claims.SessionExp = int64(sessionExp)
+	} else if _, exists := introspection.Claims["session_exp"]; !exists {
+		return "", fmt.Errorf("missing required claim: session_exp")
+	} else {
+		return "", fmt.Errorf("invalid type for claim session_exp: expected number")
+	}
+	if authEvents, ok := introspection.Claims["auth_events"].([]interface{}); ok {
+		claims.AuthEvents = make([]string, len(authEvents))
+		for i, v := range authEvents {
+			if s, ok := v.(string); ok {
+				claims.AuthEvents[i] = s
+			}
 		}
+	} else {
+		return "", fmt.Errorf("missing required claim: auth_events")
 	}
 
-	// Get scopes for groups
-	scopes := make([]string, 0)
-	for _, group := range groupStrings {
-		if groupScopes, ok := s.GroupScopes[group]; ok {
-			scopes = append(scopes, groupScopes...)
-		}
+	// Add additional claims from policy decision
+	for k, v := range policyDecision.AdditionalClaims {
+		// Note: We could add these to a custom claims field in TSClaims
+		// For now, we'll skip them as TSClaims doesn't have a generic additional claims field
+		_ = k
+		_ = v
 	}
 
-	// Check if we have any valid scopes
-	if len(scopes) == 0 {
-		return "", errors.New("no valid scopes found for groups")
+	// Set token lifetime if specified by policy
+	if policyDecision.TokenLifetime != nil {
+		expiresAt := time.Now().Add(*policyDecision.TokenLifetime)
+		claims.ExpiresAt = jwt.NewNumericDate(expiresAt)
 	}
-
-	// Set scopes in claims
-	claims.Scope = scopes
 
 	// Generate token
-	token, err = s.TokenManager.GenerateToken(claims)
+	idtoken, err = s.TokenManager.GenerateToken(claims)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate token: %w", err)
 	}
 
-	return token, nil
+	return idtoken, nil
+}
+
+// extractStringArrayFromClaims extracts string array from claims with given key
+func extractStringArrayFromClaims(claims map[string]interface{}, key string) []string {
+	array, ok := claims[key].([]interface{})
+	if !ok || len(array) == 0 {
+		return []string{}
+	}
+
+	strings := make([]string, 0, len(array))
+	for _, item := range array {
+		if str, ok := item.(string); ok {
+			strings = append(strings, str)
+		}
+	}
+
+	return strings
+}
+
+// extractGroupsFromClaims extracts groups from the introspection claims
+func extractGroupsFromClaims(claims map[string]interface{}) []string {
+	return extractStringArrayFromClaims(claims, "groups")
 }
 
 // GenerateServiceToken generates a service-to-service token
 func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targetService string, scopes []string) (string, error) {
-	claims := &jwtauth.Claims{
-		Issuer:         s.Issuer,
-		Subject:        serviceID,
-		Audience:       []string{targetService},
-		ExpirationTime: time.Now().Add(time.Hour).Unix(),
-		IssuedAt:       time.Now().Unix(),
-		ClusterID:      s.ClusterID,
-		OpenCHAMIID:    s.OpenCHAMIID,
-		Scope:          scopes,
+	if serviceID == "" {
+		return "", errors.New("service ID cannot be empty")
+	}
+	if targetService == "" {
+		return "", errors.New("target service cannot be empty")
+	}
+
+	claims := &token.TSClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    s.Issuer,
+			Subject:   serviceID,
+			Audience:  []string{targetService},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+		ClusterID:   s.ClusterID,
+		OpenCHAMIID: s.OpenCHAMIID,
+		Scope:       scopes,
+		// Add NIST-compliant claims for service tokens
+		AuthLevel:   "IAL2",
+		AuthFactors: 2,
+		AuthMethods: []string{"service", "certificate"},
+		SessionID:   fmt.Sprintf("service-%s-%d", serviceID, time.Now().UnixNano()),
+		SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+		AuthEvents:  []string{"service_auth"},
 	}
 
 	return s.TokenManager.GenerateToken(claims)
 }
 
 // ValidateToken validates a token and returns its claims
-func (s *TokenService) ValidateToken(ctx context.Context, token string) (*jwtauth.Claims, error) {
+func (s *TokenService) ValidateToken(ctx context.Context, token string) (*token.TSClaims, error) {
 	claims, _, err := s.TokenManager.ParseToken(token)
 	if err != nil {
 		return nil, fmt.Errorf("token validation failed: %w", err)
@@ -216,23 +324,42 @@ func (s *TokenService) UpdateGroupScopes(groupScopes map[string][]string) {
 
 // JWKSHandler handles JWKS requests
 func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
-	// Get public key as JWK
-	publicKey, err := s.TokenManager.GetKeyManager().GetPublicJWK()
+	// Get public key
+	publicKeyInterface, err := s.TokenManager.GetKeyManager().GetPublicKey()
 	if err != nil {
 		http.Error(w, "Failed to get public key", http.StatusInternalServerError)
 		return
 	}
 
-	// Create JWKS
-	keySet := jwk.NewSet()
-	if err := keySet.AddKey(publicKey); err != nil {
-		http.Error(w, "Failed to add key to set", http.StatusInternalServerError)
+	// Type assert to RSA public key
+	publicKey, ok := publicKeyInterface.(*rsa.PublicKey)
+	if !ok {
+		http.Error(w, "Public key is not an RSA key", http.StatusInternalServerError)
 		return
+	}
+
+	// Generate a unique key ID based on timestamp and a hash of the public key's modulus
+	timestamp := time.Now().UnixNano()
+	keyHash := fmt.Sprintf("%x", publicKey.N.Bytes()[:8]) // Use first 8 bytes of modulus for uniqueness
+	kid := fmt.Sprintf("openchami-%s-%d", keyHash, timestamp)
+
+	// Create JWKS manually
+	jwks := map[string]interface{}{
+		"keys": []map[string]interface{}{
+			{
+				"kty": "RSA",
+				"use": "sig",
+				"alg": "RS256",
+				"kid": kid,
+				"n":   publicKey.N.String(),
+				"e":   publicKey.E,
+			},
+		},
 	}
 
 	// Marshal and return JWKS
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(keySet); err != nil {
+	if err := json.NewEncoder(w).Encode(jwks); err != nil {
 		http.Error(w, "Failed to encode JWKS", http.StatusInternalServerError)
 		return
 	}
@@ -240,10 +367,6 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 
 // TokenExchangeHandler handles token exchange requests
 func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
 	// Get token from Authorization header
 	authHeader := r.Header.Get("Authorization")
@@ -392,9 +515,37 @@ func (s *TokenService) getServiceAllowedScopes(serviceID, targetService string) 
 	}
 }
 
+// HealthHandler provides a health check endpoint
+func (s *TokenService) HealthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "healthy",
+		"service":      "tokensmith",
+		"issuer":       s.Issuer,
+		"cluster_id":   s.ClusterID,
+		"openchami_id": s.OpenCHAMIID,
+		"provider":     string(s.Config.ProviderType),
+	})
+}
+
 // Start starts the HTTP server
 func (s *TokenService) Start(port int) error {
+	// Setup logger
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	logger := log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
 	r := chi.NewRouter()
+
+	r.Use(openchami_logger.OpenCHAMILogger(logger))
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.StripSlashes)
+	r.Use(middleware.Timeout(60 * time.Second))
+
+	// Health check endpoint
+	r.Get("/health", s.HealthHandler)
 
 	// Register handlers
 	r.Route("/.well-known", func(r chi.Router) {
@@ -406,6 +557,7 @@ func (s *TokenService) Start(port int) error {
 			r.Use(oidc.RequireToken)
 			r.Use(oidc.RequireValidToken(s.OIDCProvider))
 			r.Post("/token", s.TokenExchangeHandler)
+			r.Get("/token", s.TokenExchangeHandler)
 		})
 	})
 

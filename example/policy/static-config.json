@@ -1,0 +1,13 @@
+{
+  "name": "static-policy-engine",
+  "version": "1.0.0",
+  "scopes": ["read", "write"],
+  "audiences": ["smd", "bss", "cloud-init"],
+  "permissions": ["read:basic", "write:basic"],
+  "token_lifetime": "1h",
+  "additional_claims": {
+    "policy_engine": "static",
+    "environment": "production",
+    "deployment": "openchami"
+  }
+}

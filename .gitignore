@@ -41,3 +41,8 @@ tests/integration/authelia/config/notification.txt
 # certs
 
 *.pem
+
+# Authelia generated keys
+tests/integration/authelia/config/oidc-key.pem
+
+CLAUDE.md

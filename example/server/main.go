@@ -7,15 +7,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	jwtauth "github.com/openchami/tokensmith/pkg/jwt"
+	"github.com/openchami/tokensmith/pkg/keys"
 	tokenservice "github.com/openchami/tokensmith/pkg/tokenservice"
 )
 
 func main() {
 
 	// Create key manager
-	keyManager := jwtauth.NewKeyManager()
-	err := keyManager.GenerateKeyPair(2048)
+	keyManager := keys.NewKeyManager()
+	err := keyManager.GenerateRSAKeyPair()
 	if err != nil {
 		log.Fatalf("Failed to generate RSA key: %v", err)
 	}
@@ -24,7 +24,6 @@ func main() {
 	config := tokenservice.Config{
 		HydraAdminURL: "http://hydra:4445", // Hydra admin API URL
 		Issuer:        "https://openchami.example.com",
-		Audience:      "openchami-api",
 		GroupScopes: map[string][]string{
 			"admin":    {"admin", "write", "read"},
 			"operator": {"write", "read"},

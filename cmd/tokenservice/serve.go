@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
-	"github.com/openchami/tokensmith/pkg/jwt"
-	tokenservice "github.com/openchami/tokensmith/pkg/tokenservice"
+	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/policy"
+	"github.com/openchami/tokensmith/pkg/tokenservice"
 	"github.com/spf13/cobra"
 )
 
@@ -22,13 +24,21 @@ var serveCmd = &cobra.Command{
 
 		fmt.Printf("Provider type from flag: %q\n", providerType)
 
+		// Create policy engine configuration
+		policyEngineConfig, err := createPolicyEngineConfig()
+		if err != nil {
+			return fmt.Errorf("failed to create policy engine config: %w", err)
+		}
+
 		// Create token service configuration
 		serviceConfig := tokenservice.Config{
 			ProviderType: tokenservice.ProviderType(providerType),
 			Issuer:       issuer,
-			GroupScopes:  fileConfig.GroupScopes,
+			GroupScopes:  fileConfig.GroupScopes, // Keep for backward compatibility
 			ClusterID:    clusterID,
 			OpenCHAMIID:  openCHAMIID,
+			NonEnforcing: nonEnforcing, // Use the non-enforcing flag
+			PolicyEngine: policyEngineConfig,
 		}
 
 		fmt.Printf("Provider type after conversion: %q (len=%d)\n", serviceConfig.ProviderType, len(serviceConfig.ProviderType))
@@ -49,12 +59,13 @@ var serveCmd = &cobra.Command{
 			serviceConfig.KeycloakRealm = keycloakRealm
 			serviceConfig.KeycloakClientID = os.Getenv("KEYCLOAK_CLIENT_ID")
 			serviceConfig.KeycloakClientSecret = os.Getenv("KEYCLOAK_CLIENT_SECRET")
+
 		default:
 			return fmt.Errorf("invalid provider type: %s", providerType)
 		}
 
 		// Create key manager
-		keyManager := jwt.NewKeyManager()
+		keyManager := keys.NewKeyManager()
 
 		// Handle key loading/generation
 		if keyFile != "" {
@@ -64,7 +75,7 @@ var serveCmd = &cobra.Command{
 			}
 		} else {
 			// Generate new key pair
-			if err := keyManager.GenerateKeyPair(2048); err != nil {
+			if err := keyManager.GenerateRSAKeyPair(); err != nil {
 				return fmt.Errorf("failed to generate key pair: %w", err)
 			}
 
@@ -109,5 +120,48 @@ func init() {
 	serveCmd.Flags().StringVar(&keycloakRealm, "keycloak-realm", "openchami", "Keycloak realm")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
+	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")
+
+	// Policy engine flags
+	serveCmd.Flags().StringVar(&policyEngineType, "policy-engine", "static", "Policy engine type (static, file-based)")
+	serveCmd.Flags().StringVar(&policyConfigPath, "policy-config", "", "Path to policy configuration file (for file-based engine)")
+
 	rootCmd.AddCommand(serveCmd)
+}
+
+// createPolicyEngineConfig creates a policy engine configuration based on command-line flags
+func createPolicyEngineConfig() (*tokenservice.PolicyEngineConfig, error) {
+	switch policyEngineType {
+	case "static":
+		return &tokenservice.PolicyEngineConfig{
+			Type: tokenservice.PolicyEngineTypeStatic,
+			Static: &policy.StaticEngineConfig{
+				Name:          "tokensmith-static-engine",
+				Version:       "1.0.0",
+				Scopes:        []string{"read", "write"},
+				Audiences:     []string{"smd", "bss", "cloud-init"},
+				Permissions:   []string{"read:basic", "write:basic"},
+				TokenLifetime: func() *time.Duration { d := time.Hour; return &d }(),
+				AdditionalClaims: map[string]interface{}{
+					"policy_engine": "static",
+					"version":       "1.0.0",
+				},
+			},
+		}, nil
+	case "file-based":
+		if policyConfigPath == "" {
+			return nil, fmt.Errorf("policy-config path is required for file-based policy engine")
+		}
+		return &tokenservice.PolicyEngineConfig{
+			Type: tokenservice.PolicyEngineTypeFileBased,
+			FileBased: &policy.FileBasedEngineConfig{
+				Name:           "tokensmith-file-engine",
+				Version:        "1.0.0",
+				ConfigPath:     policyConfigPath,
+				ReloadInterval: func() *time.Duration { d := 5 * time.Minute; return &d }(),
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported policy engine type: %s", policyEngineType)
+	}
 }

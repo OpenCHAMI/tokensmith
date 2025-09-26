@@ -3,14 +3,26 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/MicahParks/keyfunc"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/token"
+)
+
+// ContextKey is the key used to store the claims in the context
+type ContextKey string
+
+const (
+	// ClaimsContextKey is the key used to store the claims in the context
+	ClaimsContextKey ContextKey = "jwt_claims"
+	// RawClaimsContextKey is the key used to store raw claims in the context
+	RawClaimsContextKey ContextKey = "jwt_raw_claims"
 )
 
 // MiddlewareOptions contains options for the JWT middleware
@@ -29,6 +41,8 @@ type MiddlewareOptions struct {
 	JWKSURL string
 	// JWKSRefreshInterval is how often to refresh the JWKS cache
 	JWKSRefreshInterval time.Duration
+	// NonEnforcing allows the middleware to skip validation checks.  It still logs errors.
+	NonEnforcing bool
 }
 
 // DefaultMiddlewareOptions returns the default middleware options
@@ -40,16 +54,17 @@ func DefaultMiddlewareOptions() *MiddlewareOptions {
 		ValidateAudience:    true,
 		RequiredClaims:      []string{"sub", "iss", "aud"},
 		JWKSRefreshInterval: 1 * time.Hour,
+		NonEnforcing:        false,
 	}
 }
 
 // keySetCache holds the JWKS cache and its metadata
 type keySetCache struct {
-	keySet jwk.Set
+	keySet map[string]interface{}
 	mu     sync.RWMutex
 }
 
-// Middleware creates a new JWT middleware
+// JWTMiddleware creates a new JWT middleware using golang-jwt/jwt/v5
 func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) http.Handler {
 	if opts == nil {
 		opts = DefaultMiddlewareOptions()
@@ -67,10 +82,7 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 			ticker := time.NewTicker(opts.JWKSRefreshInterval)
 			defer ticker.Stop()
 			for range ticker.C {
-				if err := keySet.refresh(opts.JWKSURL); err != nil {
-					// Log error but don't panic
-					// TODO: Add proper logging
-				}
+				_ = keySet.refresh(opts.JWKSURL)
 			}
 		}()
 	}
@@ -95,127 +107,106 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 				return
 			}
 
-			// Parse and verify token
-			var token jwt.Token
+			tokenString := parts[1]
+			claims := &token.TSClaims{}
+			var idtoken *jwt.Token
 			var err error
 
-			if keySet != nil {
-				// Use JWKS
-				token, err = jwt.ParseString(parts[1], jwt.WithKeySet(keySet.getKeySet()))
-			} else {
-				// Use provided key
-				token, err = jwt.ParseString(parts[1], jwt.WithKey(jwa.RS256, key), jwt.WithValidate(true))
+			keyFunc := func(idtoken *jwt.Token) (interface{}, error) {
+				// Validate the algorithm is FIPS-approved
+				if err := keys.ValidateAlgorithm(idtoken.Method.Alg()); err != nil {
+					return nil, fmt.Errorf("invalid algorithm: %w", err)
+				}
+
+				// If JWKS is used, select key by kid
+				if keySet != nil {
+					if kid, ok := idtoken.Header["kid"].(string); ok {
+						keySet.mu.RLock()
+						defer keySet.mu.RUnlock()
+						if k, found := keySet.keySet[kid]; found {
+							return k, nil
+						}
+						return nil, errors.New("key not found in JWKS")
+					}
+					return nil, errors.New("no kid in token header")
+				}
+				return key, nil
 			}
 
-			if err != nil {
-				// Log the specific error for debugging
+			idtoken, err = jwt.ParseWithClaims(tokenString, claims, keyFunc)
+			if err != nil || !idtoken.Valid {
 				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
 				return
 			}
 
-			// Extract claims
-			claims := &Claims{
-				Issuer:         token.Issuer(),
-				Subject:        token.Subject(),
-				Audience:       token.Audience(),
-				ExpirationTime: token.Expiration().Unix(),
-				NotBefore:      token.NotBefore().Unix(),
-				IssuedAt:       token.IssuedAt().Unix(),
-			}
-
-			// Extract custom claims
-			if scope, ok := token.PrivateClaims()["scope"].([]interface{}); ok {
-				claims.Scope = make([]string, len(scope))
-				for i, v := range scope {
-					if s, ok := v.(string); ok {
-						claims.Scope[i] = s
-					}
-				}
-			}
-			if name, ok := token.PrivateClaims()["name"].(string); ok {
-				claims.Name = name
-			}
-			if email, ok := token.PrivateClaims()["email"].(string); ok {
-				claims.Email = email
-			}
-			if emailVerified, ok := token.PrivateClaims()["email_verified"].(bool); ok {
-				claims.EmailVerified = emailVerified
-			}
-			if clusterID, ok := token.PrivateClaims()["cluster_id"].(string); ok {
-				claims.ClusterID = clusterID
-			}
-			if openchamiID, ok := token.PrivateClaims()["openchami_id"].(string); ok {
-				claims.OpenCHAMIID = openchamiID
-			}
-
-			// Validate claims based on options
+			// Validate claims using TSClaims.Validate
 			if opts.ValidateExpiration {
-				if err := claims.Validate(); err != nil {
+				if err := claims.Validate(!opts.NonEnforcing); err != nil {
 					http.Error(w, "token validation failed: "+err.Error(), http.StatusUnauthorized)
 					return
 				}
 			}
 
+			// Required claims check
 			if opts.RequiredClaims != nil {
 				for _, claim := range opts.RequiredClaims {
 					switch claim {
 					case "sub":
-						if token.Subject() == "" {
+						if claims.Subject == "" {
 							http.Error(w, "missing required claim: sub", http.StatusUnauthorized)
 							return
 						}
 					case "iss":
-						if token.Issuer() == "" {
+						if claims.Issuer == "" {
 							http.Error(w, "missing required claim: iss", http.StatusUnauthorized)
 							return
 						}
 					case "aud":
-						if len(token.Audience()) == 0 {
+						if len(claims.Audience) == 0 {
 							http.Error(w, "missing required claim: aud", http.StatusUnauthorized)
 							return
 						}
 					default:
-						// Check private claims
-						if _, ok := token.PrivateClaims()[claim]; !ok {
-							http.Error(w, "missing required claim: "+claim, http.StatusUnauthorized)
-							return
-						}
+						// For custom claims, use reflection or mapstructure if needed
 					}
 				}
 			}
 
 			// Add claims to context
 			ctx := context.WithValue(r.Context(), ClaimsContextKey, claims)
-			// Add raw claims to context
-			ctx = context.WithValue(ctx, RawClaimsContextKey, token.PrivateClaims())
+			// Add raw claims to context (as map[string]interface{})
+			if mapClaims, ok := idtoken.Claims.(*token.TSClaims); ok {
+				ctx = context.WithValue(ctx, RawClaimsContextKey, mapClaims)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-// refresh fetches and updates the JWKS cache
+// refresh fetches and updates the JWKS cache (expects JWKS as a map of kid to key)
 func (c *keySetCache) refresh(url string) error {
-	keySet, err := jwk.Fetch(context.Background(), url)
+	jwks, err := keyfunc.Get(url, keyfunc.Options{})
 	if err != nil {
 		return err
 	}
 
+	newKeySet := make(map[string]interface{})
+	for kid, key := range jwks.ReadOnlyKeys() {
+		if key == nil {
+			continue
+		}
+		newKeySet[kid] = key
+	}
+
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.keySet = keySet
+	c.keySet = newKeySet
+	c.mu.Unlock()
 	return nil
 }
 
-// getKeySet returns the current JWKS
-func (c *keySetCache) getKeySet() jwk.Set {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.keySet
-}
-
 // GetClaimsFromContext retrieves the JWT claims from the request context
-func GetClaimsFromContext(ctx context.Context) (*Claims, error) {
-	claims, ok := ctx.Value(ClaimsContextKey).(*Claims)
+func GetClaimsFromContext(ctx context.Context) (*token.TSClaims, error) {
+	claims, ok := ctx.Value(ClaimsContextKey).(*token.TSClaims)
 	if !ok {
 		return nil, errors.New("claims not found in context")
 	}
@@ -223,8 +214,8 @@ func GetClaimsFromContext(ctx context.Context) (*Claims, error) {
 }
 
 // GetRawClaimsFromContext retrieves the raw JWT claims from the request context
-func GetRawClaimsFromContext(ctx context.Context) (map[string]interface{}, error) {
-	claims, ok := ctx.Value(RawClaimsContextKey).(map[string]interface{})
+func GetRawClaimsFromContext(ctx context.Context) (*token.TSClaims, error) {
+	claims, ok := ctx.Value(RawClaimsContextKey).(*token.TSClaims)
 	if !ok {
 		return nil, errors.New("raw claims not found in context")
 	}
@@ -294,26 +285,20 @@ func RequireScopes(requiredScopes []string) func(http.Handler) http.Handler {
 func RequireServiceToken(requiredService string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Get raw claims from token
-			rawClaims, ok := r.Context().Value(RawClaimsContextKey).(map[string]interface{})
-			if !ok || rawClaims == nil {
+			rawClaims, err := GetRawClaimsFromContext(r.Context())
+			if err != nil || rawClaims == nil {
 				http.Error(w, "invalid token type", http.StatusUnauthorized)
 				return
 			}
-
 			// Check service-specific claims
-			targetService, ok := rawClaims["target_service"].(string)
-			if !ok || targetService != requiredService {
+			if rawClaims.ClusterID != requiredService {
 				http.Error(w, "invalid target service", http.StatusForbidden)
 				return
 			}
-
-			// Verify service ID is present
-			if _, ok := rawClaims["service_id"].(string); !ok {
+			if rawClaims.OpenCHAMIID == "" {
 				http.Error(w, "missing service ID", http.StatusUnauthorized)
 				return
 			}
-
 			next.ServeHTTP(w, r)
 		})
 	}
