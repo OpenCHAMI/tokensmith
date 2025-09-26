@@ -3,13 +3,13 @@ package tokenservice
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
+
+	tserrors "github.com/openchami/tokensmith/pkg/errors"
 
 	"crypto/rsa"
 
@@ -17,10 +17,10 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/logging"
 	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/openchami/tokensmith/pkg/policy"
 	"github.com/openchami/tokensmith/pkg/token"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
 	openchami_logger "github.com/openchami/chi-middleware/log"
@@ -51,6 +51,7 @@ type TokenService struct {
 	OpenCHAMIID  string
 	OIDCProvider oidc.Provider
 	PolicyEngine policy.Engine
+	logger       *logging.StructuredLogger
 	mu           sync.RWMutex
 }
 
@@ -75,8 +76,11 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	// Initialize the policy engine
 	policyEngine, err := NewPolicyEngine(config.PolicyEngine)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize policy engine: %w", err)
+		return nil, tserrors.Wrap(err, tserrors.ErrCodePolicyValidation, "failed to initialize policy engine")
 	}
+
+	// Initialize the logger
+	logger := logging.NewStructuredLogger("tokenservice")
 
 	return &TokenService{
 		TokenManager: tokenManager,
@@ -87,24 +91,34 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		OpenCHAMIID:  config.OpenCHAMIID,
 		OIDCProvider: oidcProvider,
 		PolicyEngine: policyEngine,
+		logger:       logger,
 	}, nil
 }
 
 // ExchangeToken exchanges an external token for an internal token
 func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (string, error) {
+	logger := logging.NewStructuredLoggerFromContext(ctx, "token-exchange")
+
 	if idtoken == "" {
-		return "", errors.New("empty token")
+		logger.Error("empty token provided")
+		return "", tserrors.New(tserrors.ErrCodeInvalidToken, "empty token")
 	}
+
+	logger.Debug("starting token exchange")
 
 	// Introspect the token with the OIDC provider
 	introspection, err := s.OIDCProvider.IntrospectToken(ctx, idtoken)
 	if err != nil {
-		return "", fmt.Errorf("token introspection failed: %w", err)
+		logger.WithError(err).Error("token introspection failed")
+		return "", tserrors.Wrap(err, tserrors.ErrCodeIntrospectionFailed, "token introspection failed")
 	}
 
 	if !introspection.Active {
-		return "", errors.New("token is not active")
+		logger.Warn("token is not active")
+		return "", tserrors.New(tserrors.ErrCodeInvalidToken, "token is not active")
 	}
+
+	logger.WithField("username", introspection.Username).Debug("token introspection successful")
 
 	// Create policy context for policy evaluation
 	policyCtx := &policy.PolicyContext{
@@ -116,10 +130,24 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	}
 
 	// Evaluate policy to determine scopes, audiences, and permissions
+	logger.WithFields(map[string]interface{}{
+		"username":     policyCtx.Username,
+		"groups":       policyCtx.Groups,
+		"cluster_id":   policyCtx.ClusterID,
+		"openchami_id": policyCtx.OpenCHAMIID,
+	}).Debug("evaluating policy")
+
 	policyDecision, err := s.PolicyEngine.EvaluatePolicy(ctx, policyCtx)
 	if err != nil {
-		return "", fmt.Errorf("policy evaluation failed: %w", err)
+		logger.WithError(err).Error("policy evaluation failed")
+		return "", tserrors.Wrap(err, tserrors.ErrCodePolicyEvaluation, "policy evaluation failed")
 	}
+
+	logger.WithFields(map[string]interface{}{
+		"scopes":      policyDecision.Scopes,
+		"audiences":   policyDecision.Audiences,
+		"permissions": policyDecision.Permissions,
+	}).Debug("policy evaluation successful")
 
 	// Create OpenCHAMI claims
 	claims := &token.TSClaims{
@@ -150,32 +178,39 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	if authLevel, ok := introspection.Claims["auth_level"].(string); ok {
 		claims.AuthLevel = authLevel
 	} else {
-		return "", fmt.Errorf("missing required claim: auth_level")
+		logger.Error("missing required claim: auth_level")
+		return "", tserrors.New(tserrors.ErrCodeInvalidToken, "missing required claim: auth_level")
 	}
 	if authFactors, ok := introspection.Claims["auth_factors"].(float64); ok {
 		claims.AuthFactors = int(authFactors)
 	} else if _, exists := introspection.Claims["auth_factors"]; !exists {
-		return "", fmt.Errorf("missing required claim: auth_factors")
+		logger.Error("missing required claim: auth_factors")
+		return "", tserrors.New(tserrors.ErrCodeInvalidToken, "missing required claim: auth_factors")
 	} else {
-		return "", fmt.Errorf("invalid type for claim auth_factors: expected number")
+		logger.Error("invalid type for claim auth_factors: expected number")
+		return "", tserrors.New(tserrors.ErrCodeInvalidToken, "invalid type for claim auth_factors: expected number")
 	}
 	// Use helper function to extract auth_methods array
 	authMethods := extractStringArrayFromClaims(introspection.Claims, "auth_methods")
 	if len(authMethods) == 0 {
-		return "", fmt.Errorf("missing required claim: auth_methods")
+		logger.Error("missing required claim: auth_methods")
+		return "", tserrors.New(tserrors.ErrCodeInvalidToken, "missing required claim: auth_methods")
 	}
 	claims.AuthMethods = authMethods
 	if sessionID, ok := introspection.Claims["session_id"].(string); ok {
 		claims.SessionID = sessionID
 	} else {
-		return "", fmt.Errorf("missing required claim: session_id")
+		logger.Error("missing required claim: session_id")
+		return "", tserrors.New(tserrors.ErrCodeInvalidToken, "missing required claim: session_id")
 	}
 	if sessionExp, ok := introspection.Claims["session_exp"].(float64); ok {
 		claims.SessionExp = int64(sessionExp)
 	} else if _, exists := introspection.Claims["session_exp"]; !exists {
-		return "", fmt.Errorf("missing required claim: session_exp")
+		logger.Error("missing required claim: session_exp")
+		return "", tserrors.New(tserrors.ErrCodeInvalidToken, "missing required claim: session_exp")
 	} else {
-		return "", fmt.Errorf("invalid type for claim session_exp: expected number")
+		logger.Error("invalid type for claim session_exp: expected number")
+		return "", tserrors.New(tserrors.ErrCodeInvalidToken, "invalid type for claim session_exp: expected number")
 	}
 	if authEvents, ok := introspection.Claims["auth_events"].([]interface{}); ok {
 		claims.AuthEvents = make([]string, len(authEvents))
@@ -185,7 +220,8 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 			}
 		}
 	} else {
-		return "", fmt.Errorf("missing required claim: auth_events")
+		logger.Error("missing required claim: auth_events")
+		return "", tserrors.New(tserrors.ErrCodeInvalidToken, "missing required claim: auth_events")
 	}
 
 	// Add additional claims from policy decision
@@ -203,11 +239,14 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	}
 
 	// Generate token
+	logger.Debug("generating internal token")
 	idtoken, err = s.TokenManager.GenerateToken(claims)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate token: %w", err)
+		logger.WithError(err).Error("failed to generate token")
+		return "", tserrors.Wrap(err, tserrors.ErrCodeTokenGeneration, "failed to generate token")
 	}
 
+	logger.WithField("token_length", len(idtoken)).Info("token exchange completed successfully")
 	return idtoken, nil
 }
 
@@ -236,10 +275,10 @@ func extractGroupsFromClaims(claims map[string]interface{}) []string {
 // GenerateServiceToken generates a service-to-service token
 func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targetService string, scopes []string) (string, error) {
 	if serviceID == "" {
-		return "", errors.New("service ID cannot be empty")
+		return "", tserrors.New(tserrors.ErrCodeInvalidInput, "service ID cannot be empty")
 	}
 	if targetService == "" {
-		return "", errors.New("target service cannot be empty")
+		return "", tserrors.New(tserrors.ErrCodeInvalidInput, "target service cannot be empty")
 	}
 
 	claims := &token.TSClaims{
@@ -327,10 +366,12 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 
 // TokenExchangeHandler handles token exchange requests
 func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Request) {
+	logger := logging.NewStructuredLoggerFromContext(r.Context(), "token-exchange-handler")
 
 	// Get token from Authorization header
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
+		logger.Error("missing authorization header")
 		http.Error(w, "Missing authorization header", http.StatusUnauthorized)
 		return
 	}
@@ -338,16 +379,35 @@ func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Reque
 	// Check if it's a Bearer token
 	parts := strings.Split(authHeader, " ")
 	if len(parts) != 2 || parts[0] != "Bearer" {
+		logger.Error("invalid authorization header format")
 		http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
 		return
 	}
 
+	logger.Debug("processing token exchange request")
+
 	// Exchange token
 	token, err := s.ExchangeToken(r.Context(), parts[1])
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		logger.WithError(err).Error("token exchange failed")
+
+		// Use structured error response
+		if tsErr, ok := err.(*tserrors.TokenSmithError); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(tsErr.HTTPStatus)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":             tsErr.Code,
+				"error_description": tsErr.Message,
+				"details":           tsErr.Details,
+				"trace_id":          tsErr.TraceID,
+			})
+		} else {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+		}
 		return
 	}
+
+	logger.Info("token exchange completed successfully")
 
 	// Return token
 	w.Header().Set("Content-Type", "application/json")
@@ -411,7 +471,7 @@ func (s *TokenService) authenticateService(r *http.Request) (string, error) {
 	// Example using API key:
 	apiKey := r.Header.Get("X-Service-API-Key")
 	if apiKey == "" {
-		return "", errors.New("missing service API key")
+		return "", tserrors.New(tserrors.ErrCodeInvalidCredentials, "missing service API key")
 	}
 
 	// Validate API key and return service ID
@@ -477,6 +537,10 @@ func (s *TokenService) getServiceAllowedScopes(serviceID, targetService string) 
 
 // HealthHandler provides a health check endpoint
 func (s *TokenService) HealthHandler(w http.ResponseWriter, r *http.Request) {
+	logger := logging.NewStructuredLoggerFromContext(r.Context(), "health-handler")
+
+	logger.Debug("health check requested")
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -487,16 +551,20 @@ func (s *TokenService) HealthHandler(w http.ResponseWriter, r *http.Request) {
 		"openchami_id": s.OpenCHAMIID,
 		"oidc_issuer":  s.Config.OIDCIssuerURL,
 	})
+
+	logger.Info("health check completed")
 }
 
 // Start starts the HTTP server
 func (s *TokenService) Start(port int) error {
-	// Setup logger
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	logger := log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	// Configure logging
+	logging.ConfigureFromEnv()
+	logger := log.Logger
 
 	r := chi.NewRouter()
 
+	// Add tracing middleware
+	r.Use(logging.Middleware)
 	r.Use(openchami_logger.OpenCHAMILogger(logger))
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
