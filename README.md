@@ -10,7 +10,7 @@ TokenSmith bridges external OIDC user identity with internal identity and access
 
 ## Badges
 [![REUSE status](https://api.reuse.software/badge/github.com/OpenCHAMI/tokensmith)](https://api.reuse.software/info/github.com/OpenCHAMI/tokensmith)
-[![Build](https://github.com/OpenCHAMI/tokensmith/actions/workflows/Release.yml/badge.svg)](https://github.com/OpenCHAMI/tokensmith/actions/workflows/Release.yml)
+[![Build](https://github.com/OpenCHAMI/tokensmith/actions/workflows/Release.yaml/badge.svg)](https://github.com/OpenCHAMI/tokensmith/actions/workflows/Release.yaml)
 [![Release](https://img.shields.io/github/v/release/OpenCHAMI/tokensmith?sort=semver)](https://github.com/OpenCHAMI/tokensmith/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/OpenCHAMI/tokensmith.svg)](https://pkg.go.dev/github.com/OpenCHAMI/tokensmith)
 [![Go Report Card](https://goreportcard.com/badge/github.com/OpenCHAMI/tokensmith)](https://goreportcard.com/report/github.com/OpenCHAMI/tokensmith)
