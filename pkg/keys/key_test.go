@@ -65,9 +65,9 @@ func TestKeyManager(t *testing.T) {
 		// Create temp directory
 		tempDir, err := os.MkdirTemp("", "key-test")
 		require.NoError(t, err)
-		defer os.RemoveAll(tempDir)
-
-		// Generate and save keys
+		defer func() {
+			_ = os.RemoveAll(tempDir)
+		}() // Generate and save keys
 		err = km.GenerateRSAKeyPair()
 		require.NoError(t, err)
 

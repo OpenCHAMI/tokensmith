@@ -15,4 +15,4 @@ http:
     acme-challenge-service:
       loadBalancer:
         servers:
-          - url: "file:///home/step/acme" 
+          - url: "file:///home/step/acme"

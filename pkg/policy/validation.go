@@ -303,9 +303,9 @@ func DefaultValidator() *PolicyConfigValidator {
 	validator := NewPolicyConfigValidator()
 
 	// Add default patterns
-	validator.AddScopePattern(`^[a-z][a-z0-9_]*$`)                      // lowercase, alphanumeric, underscore
-	validator.AddAudiencePattern(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)        // alphanumeric, dot, underscore, hyphen
-	validator.AddPermissionPattern(`^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$`) // resource:action format
+	_ = validator.AddScopePattern(`^[a-z][a-z0-9_]*$`)                      // lowercase, alphanumeric, underscore
+	_ = validator.AddAudiencePattern(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)        // alphanumeric, dot, underscore, hyphen
+	_ = validator.AddPermissionPattern(`^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$`) // resource:action format
 
 	return validator
 }

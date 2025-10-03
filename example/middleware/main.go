@@ -68,7 +68,7 @@ func main() {
 	// Public routes
 	r.Group(func(r chi.Router) {
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("Welcome to the API"))
+			_, _ = w.Write([]byte("Welcome to the API"))
 		})
 	})
 
@@ -83,11 +83,9 @@ func main() {
 				return
 			}
 
-			w.Write([]byte(fmt.Sprintf("Protected route (static key) accessed by %s\n", claims.Subject)))
+			_, _ = fmt.Fprintf(w, "Protected route (static key) accessed by %s\n", claims.Subject)
 		})
-	})
-
-	// Protected routes with JWKS
+	}) // Protected routes with JWKS
 	r.Group(func(r chi.Router) {
 		r.Use(jwksMiddleware)
 
@@ -98,15 +96,13 @@ func main() {
 				return
 			}
 
-			w.Write([]byte(fmt.Sprintf("Protected route (JWKS) accessed by %s\n", claims.Subject)))
-		})
-
-		// Scope-protected routes
+			_, _ = fmt.Fprintf(w, "Protected route (JWKS) accessed by %s\n", claims.Subject)
+		}) // Scope-protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(tsmiddleware.RequireScope("write"))
 
 			r.Post("/write", func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte("Write access granted"))
+				_, _ = w.Write([]byte("Write access granted"))
 			})
 		})
 	})

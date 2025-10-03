@@ -134,12 +134,12 @@ To integrate this pattern into your services:
 3. Use the client to make authenticated requests:
    ```go
    ctx := context.Background()
-   
+
    // Get initial token
    if err := client.GetToken(ctx); err != nil {
        // Handle error
    }
-   
+
    // Make authenticated request
    if err := client.CallTargetService(ctx, "https://api.example.com/protected"); err != nil {
        // Handle error

@@ -24,4 +24,4 @@ else
     exit 1
 fi
 
-echo "Authelia setup complete!" 
+echo "Authelia setup complete!"

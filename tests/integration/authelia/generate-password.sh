@@ -30,13 +30,13 @@ USERS_FILE="config/users_database.yml"
 
 if [ -f "$USERS_FILE" ]; then
     echo "Updating $USERS_FILE..."
-    
+
     # Create a backup
     cp "$USERS_FILE" "${USERS_FILE}.backup"
-    
+
     # Update the password hash
     sed -i.bak "s|password: \".*\"|password: \"$HASH\"|" "$USERS_FILE"
-    
+
     echo "Password hash updated successfully!"
     echo "Backup saved as ${USERS_FILE}.backup"
 else
@@ -45,4 +45,4 @@ else
 fi
 
 echo ""
-echo "You can now use the password '$PASSWORD' to log in as admin@example.com" 
+echo "You can now use the password '$PASSWORD' to log in as admin@example.com"

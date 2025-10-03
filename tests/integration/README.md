@@ -43,7 +43,7 @@ mkdir -p certificates step-ca/certs step-ca/config step-ca/data step-ca/secrets
 docker compose up -d
 ```
 
-**What this does:** 
+**What this does:**
 - Creates required directories for certificates and configuration
 - Starts all services in detached mode (`-d` flag)
 - The services will initialize in the correct order due to dependencies
@@ -58,7 +58,7 @@ docker compose ps
 docker compose logs -f
 ```
 
-**What this does:** 
+**What this does:**
 - `docker compose ps` shows the status of all services
 - `docker compose logs -f` follows the logs in real-time to see initialization progress
 - Press `Ctrl+C` to stop following logs
@@ -290,4 +290,4 @@ docker rmi ghcr.io/openchami/tokensmith:0.0-amd64
 4. **Security Testing:** Verify token validation and access controls
 5. **Production Setup:** Adapt the configuration for production use
 
-For more information about TokenSmith, see the main [README.md](../../README.md) in the project root. 
+For more information about TokenSmith, see the main [README.md](../../README.md) in the project root.

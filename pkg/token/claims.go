@@ -217,7 +217,7 @@ func (c *TSClaims) Validate(enforce bool) error {
 	}
 	iat := int64(0)
 	if c.IssuedAt != nil {
-		iat = c.IssuedAt.Time.Unix()
+		iat = c.IssuedAt.Unix()
 	}
 	if c.SessionExp-iat > 86400 {
 		if enforce {

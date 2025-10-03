@@ -113,4 +113,4 @@ This allows your services to:
 - Accept tokens from any OIDC-compliant identity provider
 - Maintain consistent authorization across your system
 - Support service-to-service communication
-- Handle token rotation and key management automatically 
+- Handle token rotation and key management automatically

@@ -8,4 +8,4 @@
     "allowed_scopes": ["admin", "read", "write"],
     "expiration": "1h"
   }
-} 
+}

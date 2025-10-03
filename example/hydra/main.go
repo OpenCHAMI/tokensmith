@@ -50,7 +50,7 @@ func main() {
 	// Public routes
 	r.Group(func(r chi.Router) {
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("Welcome to the API"))
+			_, _ = w.Write([]byte("Welcome to the API"))
 		})
 	})
 
@@ -67,10 +67,8 @@ func main() {
 				return
 			}
 
-			w.Write([]byte(fmt.Sprintf("Protected route accessed by %s\n", introspection.Username)))
-		})
-
-		// Scope-protected routes
+			_, _ = fmt.Fprintf(w, "Protected route accessed by %s\n", introspection.Username)
+		}) // Scope-protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +98,7 @@ func main() {
 			})
 
 			r.Post("/write", func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte("Write access granted"))
+				_, _ = w.Write([]byte("Write access granted"))
 			})
 		})
 	})
@@ -116,11 +114,9 @@ func main() {
 				return
 			}
 
-			w.Write([]byte(fmt.Sprintf("Internal route accessed by %s\n", claims.Subject)))
+			_, _ = fmt.Fprintf(w, "Internal route accessed by %s\n", claims.Subject)
 		})
-	})
-
-	// Example of creating a service-to-service token
+	}) // Example of creating a service-to-service token
 	serviceToken, err := tokenManager.GenerateServiceToken("service-a", "service-b", []string{"read", "write"})
 	if err != nil {
 		log.Fatal(err)

@@ -57,7 +57,7 @@ func (dg *DocumentationGenerator) initTemplates() {
 
 {{.Description}}
 
-**Generated:** {{.GeneratedAt.Format "2006-01-02 15:04:05 UTC"}}  
+**Generated:** {{.GeneratedAt.Format "2006-01-02 15:04:05 UTC"}}
 **Version:** {{.Version}}
 
 {{range .Sections}}
@@ -71,10 +71,10 @@ func (dg *DocumentationGenerator) initTemplates() {
 	// Policy decision template
 	decisionTemplate := `### Policy Decision
 
-**Scopes:** {{range $i, $scope := .Scopes}}{{if $i}}, {{end}}{{$scope}}{{end}}  
-**Audiences:** {{range $i, $audience := .Audiences}}{{if $i}}, {{end}}{{$audience}}{{end}}  
-**Permissions:** {{range $i, $permission := .Permissions}}{{if $i}}, {{end}}{{$permission}}{{end}}  
-{{if .TokenLifetime}}**Token Lifetime:** {{.TokenLifetime}}  
+**Scopes:** {{range $i, $scope := .Scopes}}{{if $i}}, {{end}}{{$scope}}{{end}}
+**Audiences:** {{range $i, $audience := .Audiences}}{{if $i}}, {{end}}{{$audience}}{{end}}
+**Permissions:** {{range $i, $permission := .Permissions}}{{if $i}}, {{end}}{{$permission}}{{end}}
+{{if .TokenLifetime}}**Token Lifetime:** {{.TokenLifetime}}
 {{end}}{{if .AdditionalClaims}}**Additional Claims:** {{range $key, $value := .AdditionalClaims}}
 - {{$key}}: {{$value}}{{end}}
 {{end}}`
@@ -84,10 +84,10 @@ func (dg *DocumentationGenerator) initTemplates() {
 
 {{.Description}}
 
-**Scopes:** {{range $i, $scope := .Scopes}}{{if $i}}, {{end}}{{$scope}}{{end}}  
-**Audiences:** {{range $i, $audience := .Audiences}}{{if $i}}, {{end}}{{$audience}}{{end}}  
-**Permissions:** {{range $i, $permission := .Permissions}}{{if $i}}, {{end}}{{$permission}}{{end}}  
-{{if .TokenLifetime}}**Token Lifetime:** {{.TokenLifetime}}  
+**Scopes:** {{range $i, $scope := .Scopes}}{{if $i}}, {{end}}{{$scope}}{{end}}
+**Audiences:** {{range $i, $audience := .Audiences}}{{if $i}}, {{end}}{{$audience}}{{end}}
+**Permissions:** {{range $i, $permission := .Permissions}}{{if $i}}, {{end}}{{$permission}}{{end}}
+{{if .TokenLifetime}}**Token Lifetime:** {{.TokenLifetime}}
 {{end}}{{if .AdditionalClaims}}**Additional Claims:** {{range $key, $value := .AdditionalClaims}}
 - {{$key}}: {{$value}}{{end}}
 {{end}}`

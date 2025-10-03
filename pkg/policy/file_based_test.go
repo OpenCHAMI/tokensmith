@@ -317,7 +317,7 @@ func TestFileBasedEngine_GetName(t *testing.T) {
 	}
 
 	configData, _ := json.Marshal(config)
-	os.WriteFile(configPath, configData, 0644)
+	_ = os.WriteFile(configPath, configData, 0644)
 
 	engineConfig := &FileBasedEngineConfig{
 		Name:       "test-engine",
@@ -353,7 +353,7 @@ func TestFileBasedEngine_GetVersion(t *testing.T) {
 	}
 
 	configData, _ := json.Marshal(config)
-	os.WriteFile(configPath, configData, 0644)
+	_ = os.WriteFile(configPath, configData, 0644)
 
 	engineConfig := &FileBasedEngineConfig{
 		Name:       "test-engine",
@@ -389,7 +389,7 @@ func TestFileBasedEngine_ValidateConfiguration(t *testing.T) {
 	}
 
 	configData, _ := json.Marshal(config)
-	os.WriteFile(configPath, configData, 0644)
+	_ = os.WriteFile(configPath, configData, 0644)
 
 	engineConfig := &FileBasedEngineConfig{
 		Name:       "test-engine",
@@ -427,7 +427,7 @@ func TestFileBasedEngine_ThreadSafety(t *testing.T) {
 	}
 
 	configData, _ := json.Marshal(config)
-	os.WriteFile(configPath, configData, 0644)
+	_ = os.WriteFile(configPath, configData, 0644)
 
 	engineConfig := &FileBasedEngineConfig{
 		Name:       "test-engine",

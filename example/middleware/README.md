@@ -89,4 +89,4 @@ opts.JWKSURL = "https://your-tenant.auth0.com/.well-known/jwks.json"
 opts.JWKSRefreshInterval = 15 * time.Minute
 ```
 
-The middleware will handle key rotation automatically by refreshing the JWKS cache. 
+The middleware will handle key rotation automatically by refreshing the JWKS cache.

@@ -355,7 +355,7 @@ func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Reque
 
 	// Return token
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"access_token": token,
 		"token_type":   "Bearer",
 	})
@@ -400,7 +400,7 @@ func (s *TokenService) ServiceTokenHandler(w http.ResponseWriter, r *http.Reques
 
 	// Return token
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"access_token": token,
 		"token_type":   "Bearer",
 	})
@@ -483,7 +483,7 @@ func (s *TokenService) getServiceAllowedScopes(serviceID, targetService string) 
 func (s *TokenService) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":       "healthy",
 		"service":      "tokensmith",
 		"issuer":       s.Issuer,

@@ -64,7 +64,9 @@ func (c *ServiceClient) GetToken(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -105,7 +107,9 @@ func (c *ServiceClient) CallTargetService(ctx context.Context, targetURL string)
 	if err != nil {
 		return fmt.Errorf("failed to call target service: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

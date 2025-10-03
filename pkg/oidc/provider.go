@@ -59,7 +59,7 @@ type IntrospectionResponse struct {
 func OIDCMiddleware(provider Provider) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			provider.IntrospectToken(r.Context(), r.Header.Get("Authorization"))
+			_, _ = provider.IntrospectToken(r.Context(), r.Header.Get("Authorization"))
 		})
 	}
 }

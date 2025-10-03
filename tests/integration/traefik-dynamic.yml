@@ -22,4 +22,4 @@ tls:
         email: test@openchami.demo
         storage: /certificates/acme.json
         httpChallenge:
-          entryPoint: web 
+          entryPoint: web

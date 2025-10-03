@@ -26,7 +26,7 @@ func main() {
 
 	// Configure token service
 	config := tokenservice.Config{
-		HydraAdminURL: "http://hydra:4445", // Hydra admin API URL
+		OIDCIssuerURL: "http://hydra:4445", // Hydra admin API URL
 		Issuer:        "https://openchami.example.com",
 		GroupScopes: map[string][]string{
 			"admin":    {"admin", "write", "read"},

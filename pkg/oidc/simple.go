@@ -67,7 +67,9 @@ func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMeta
 	if err != nil {
 		return nil, fmt.Errorf("failed to get provider metadata: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to get provider metadata: status %d", resp.StatusCode)
@@ -131,7 +133,9 @@ func (p *SimpleProvider) updateJWKS(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to fetch JWKS: status %d", resp.StatusCode)
@@ -233,7 +237,9 @@ func (p *SimpleProvider) introspectTokenRemotely(ctx context.Context, token stri
 	if err != nil {
 		return nil, fmt.Errorf("failed to introspect token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to introspect token: status %d", resp.StatusCode)

@@ -112,4 +112,4 @@ echo "Key file: $KEY_FILE"
 echo "Configuration updated: $CONFIG_FILE"
 
 # Clean up the temporary key file
-rm -f "$KEY_FILE" 
+rm -f "$KEY_FILE"

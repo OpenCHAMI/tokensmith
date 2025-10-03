@@ -56,4 +56,4 @@ The configuration includes:
 - **Access Control**: One-factor authentication for all domains
 - **Session**: Basic session management
 - **Storage**: Local SQLite database
-- **OIDC**: TokenSmith client with dynamic key generation 
+- **OIDC**: TokenSmith client with dynamic key generation

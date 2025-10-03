@@ -5,7 +5,7 @@ project_name: "tokensmith"
 before:
   hooks:
     - go mod download
-  
+
 builds:
   - id: "tokensmith"
     binary: "tokensmith"
@@ -88,7 +88,7 @@ docker_manifests:
     image_templates:
       - *amd64_linux_image
       - *arm64v8_linux_image
-    
+
 archives:
   - id: "tokensmith"
     # this name template makes the OS and Arch compatible with the results of uname.
