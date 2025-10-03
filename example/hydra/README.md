@@ -1,3 +1,9 @@
+<!--
+Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+
+SPDX-License-Identifier: MIT
+-->
+
 # JWT Authentication with OIDC Integration Example
 
 This example demonstrates how to use the JWT authentication middleware with any OIDC-compliant provider (including Hydra) for external OIDC/SSO integration and service-to-service communication.

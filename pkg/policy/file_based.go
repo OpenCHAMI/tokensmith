@@ -1,3 +1,7 @@
+// Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+//
+// SPDX-License-Identifier: MIT
+
 // Package policy provides a file-based policy engine implementation that reads
 // policy configuration from a file on disk. This implementation supports role-based
 // access control where users can be mapped to multiple roles, and each role has

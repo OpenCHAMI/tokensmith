@@ -1,3 +1,7 @@
+// Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+//
+// SPDX-License-Identifier: MIT
+
 // Package token defines types and utilities for JWT-based authentication in microservices.
 // It supports standard JWT claims (RFC 7519), OpenID Connect fields (OIDC Core 1.0),
 // OAuth2/JWT Bearer extensions (RFC 7523), and NIST SP 800-63B–compliant claims.

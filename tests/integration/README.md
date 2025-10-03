@@ -1,3 +1,9 @@
+<!--
+Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+
+SPDX-License-Identifier: MIT
+-->
+
 # TokenSmith Integration Testing
 
 This directory contains a complete Docker Compose environment for testing TokenSmith with all its dependencies. The setup includes a Certificate Authority (Step-CA), reverse proxy (Traefik), authentication service (Authelia), TokenSmith, and a protected resource (httpbin).

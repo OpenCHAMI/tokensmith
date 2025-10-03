@@ -1,3 +1,7 @@
+# Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+
 FROM alpine:3
 
 # Include curl in the final image.

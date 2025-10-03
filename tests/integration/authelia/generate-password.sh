@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+
 # Generate password hash for Authelia user database
 # This script uses Authelia's built-in hash-password command
 

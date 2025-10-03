@@ -1,3 +1,9 @@
+<!--
+Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+
+SPDX-License-Identifier: MIT
+-->
+
 # JWT Middleware for Go
 
 A flexible and feature-rich JWT middleware for Go applications that supports token validation, scope checking, and service-to-service authentication.
