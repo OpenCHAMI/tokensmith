@@ -1,3 +1,9 @@
+<!--
+Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+
+SPDX-License-Identifier: MIT
+-->
+
 # Service Authentication Example
 
 This example demonstrates how to implement service-to-service authentication using the tokensmith service. It shows how a service can:

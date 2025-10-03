@@ -1,0 +1,10 @@
+version = 1
+SPDX-PackageName = "tokensmith"
+SPDX-PackageDownloadLocation = "https://github.com/OpenCHAMI/tokensmith"
+
+[[annotations]]
+path = "**/**.go"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC"
+SPDX-License-Identifier = "MIT"
+

@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+
 # Setup script for Authelia integration testing
 # This script generates RSA keys and creates the Authelia configuration
 

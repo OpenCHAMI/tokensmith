@@ -1,3 +1,7 @@
+// Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+//
+// SPDX-License-Identifier: MIT
+
 // Package policy provides a static policy engine implementation that always returns
 // the same hardcoded scopes, audiences, and permissions regardless of user context.
 // This implementation serves as an example and can be used for simple deployments

@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+
 # Generate RSA key for Authelia OIDC
 # This script generates a new RSA key pair and creates the Authelia configuration
 

@@ -1,3 +1,9 @@
+<!--
+Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+
+SPDX-License-Identifier: MIT
+-->
+
 # JWT Authentication Middleware Example
 
 This example demonstrates how to use the JWT authentication middleware with a chi router. It shows both static key and JWKS (JSON Web Key Set) usage.

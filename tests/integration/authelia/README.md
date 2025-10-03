@@ -1,3 +1,9 @@
+<!--
+Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+
+SPDX-License-Identifier: MIT
+-->
+
 # Authelia Configuration
 
 This directory contains the Authelia configuration for TokenSmith integration testing.

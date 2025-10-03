@@ -1,3 +1,7 @@
+// Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+//
+// SPDX-License-Identifier: MIT
+
 // Package policy provides pluggable policy engines for determining token scopes, audiences, and permissions.
 // This package allows for flexible policy decisions based on user identity, groups, and other contextual information.
 package policy

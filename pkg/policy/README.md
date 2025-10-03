@@ -1,3 +1,9 @@
+<!--
+Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+
+SPDX-License-Identifier: MIT
+-->
+
 # Policy Engine Package
 
 The `policy` package provides pluggable policy engines for determining token scopes, audiences, and permissions in the OpenCHAMI TokenSmith service. This package allows for flexible policy decisions based on user identity, groups, and other contextual information.

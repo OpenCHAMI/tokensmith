@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+
 # TokenSmith Integration Test - Complete Authentication Flow
 # This script demonstrates the full OIDC authentication chain:
 # 1. Login to Authelia
