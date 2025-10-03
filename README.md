@@ -9,7 +9,7 @@ SPDX-License-Identifier: MIT
 TokenSmith bridges external OIDC user identity with internal identity and access management using signed JWTs. It provides internal service-to-service identity and access management, along with a standalone chi middleware for JWT verification using PKI.
 
 ## Badges
-[![REUSE status](https://api.reuse.software/badge/github.com/OpenCHAMI/tokensmith)](https://api.reuse.software/info/github.com/OpenCHAMI/tokensmith)[![golangci-lint](https://github.com/OpenCHAMI/tokensmith/actions/workflows/golangci-lint.yml/badge.svg)](https://github.com/OpenCHAMI/tokensmith/actions/workflows/golangci-lint.yml)
+[![REUSE status](https://api.reuse.software/badge/github.com/OpenCHAMI/tokensmith)](https://api.reuse.software/info/github.com/OpenCHAMI/tokensmith)[![golangci-lint](https://github.com/OpenCHAMI/tokensmith/actions/workflows/golangci-lint.yaml/badge.svg)](https://github.com/OpenCHAMI/tokensmith/actions/workflows/golangci-lint.yaml)
 [![Build](https://github.com/OpenCHAMI/tokensmith/actions/workflows/Release.yaml/badge.svg)](https://github.com/OpenCHAMI/tokensmith/actions/workflows/Release.yaml)
 [![Release](https://img.shields.io/github/v/release/OpenCHAMI/tokensmith?sort=semver)](https://github.com/OpenCHAMI/tokensmith/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/OpenCHAMI/tokensmith.svg)](https://pkg.go.dev/github.com/OpenCHAMI/tokensmith)
