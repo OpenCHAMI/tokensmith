@@ -14,7 +14,6 @@ TokenSmith bridges external OIDC user identity with internal identity and access
 [![Release](https://img.shields.io/github/v/release/OpenCHAMI/tokensmith?sort=semver)](https://github.com/OpenCHAMI/tokensmith/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/OpenCHAMI/tokensmith.svg)](https://pkg.go.dev/github.com/OpenCHAMI/tokensmith)
 [![Go Report Card](https://goreportcard.com/badge/github.com/OpenCHAMI/tokensmith)](https://goreportcard.com/report/github.com/OpenCHAMI/tokensmith)
-[![codecov](https://codecov.io/gh/OpenCHAMI/tokensmith/branch/main/graph/badge.svg?token=YOUR_CODECOV_TOKEN)](https://codecov.io/gh/OpenCHAMI/tokensmith)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/OpenCHAMI/tokensmith/badge)](https://securityscorecards.dev/viewer/?uri=github.com/OpenCHAMI/tokensmith)
 
 
