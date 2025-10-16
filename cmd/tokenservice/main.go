@@ -24,9 +24,6 @@ var (
 	keyFile          string
 	keyDir           string
 	nonEnforcing     bool // Skip validation checks and only log errors
-	// Policy engine configuration
-	policyEngineType string
-	policyConfigPath string
 )
 
 var rootCmd = &cobra.Command{
@@ -54,7 +51,6 @@ func init() {
 
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to configuration file")
-	rootCmd.PersistentFlags().StringVar(&policyConfigPath, "policy-config", "", "Path to policy configuration file")
 }
 
 func main() {

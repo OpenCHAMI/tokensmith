@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/openchami/tokensmith/pkg/keys"
-	"github.com/openchami/tokensmith/pkg/policy"
 	"github.com/openchami/tokensmith/pkg/tokenservice"
 	"github.com/spf13/cobra"
 )
@@ -24,12 +22,6 @@ var serveCmd = &cobra.Command{
 		fileConfig, err := tokenservice.LoadFileConfig(configPath)
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
-		}
-
-		// Create policy engine configuration
-		policyEngineConfig, err := createPolicyEngineConfig()
-		if err != nil {
-			return fmt.Errorf("failed to create policy engine config: %w", err)
 		}
 
 		// Get OIDC credentials from environment variables if not provided via flags
@@ -47,7 +39,6 @@ var serveCmd = &cobra.Command{
 			ClusterID:        clusterID,
 			OpenCHAMIID:      openCHAMIID,
 			NonEnforcing:     nonEnforcing,
-			PolicyEngine:     policyEngineConfig,
 			OIDCIssuerURL:    oidcIssuerURL,
 			OIDCClientID:     oidcClientID,
 			OIDCClientSecret: oidcClientSecret,
@@ -109,46 +100,5 @@ func init() {
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")
 
-	// Policy engine flags
-	serveCmd.Flags().StringVar(&policyEngineType, "policy-engine", "static", "Policy engine type (static, file-based)")
-	serveCmd.Flags().StringVar(&policyConfigPath, "policy-config", "", "Path to policy configuration file (for file-based engine)")
-
 	rootCmd.AddCommand(serveCmd)
-}
-
-// createPolicyEngineConfig creates a policy engine configuration based on command-line flags
-func createPolicyEngineConfig() (*tokenservice.PolicyEngineConfig, error) {
-	switch policyEngineType {
-	case "static":
-		return &tokenservice.PolicyEngineConfig{
-			Type: tokenservice.PolicyEngineTypeStatic,
-			Static: &policy.StaticEngineConfig{
-				Name:          "tokensmith-static-engine",
-				Version:       "1.0.0",
-				Scopes:        []string{"read", "write"},
-				Audiences:     []string{"smd", "bss", "cloud-init"},
-				Permissions:   []string{"read:basic", "write:basic"},
-				TokenLifetime: func() *time.Duration { d := time.Hour; return &d }(),
-				AdditionalClaims: map[string]interface{}{
-					"policy_engine": "static",
-					"version":       "1.0.0",
-				},
-			},
-		}, nil
-	case "file-based":
-		if policyConfigPath == "" {
-			return nil, fmt.Errorf("policy-config path is required for file-based policy engine")
-		}
-		return &tokenservice.PolicyEngineConfig{
-			Type: tokenservice.PolicyEngineTypeFileBased,
-			FileBased: &policy.FileBasedEngineConfig{
-				Name:           "tokensmith-file-engine",
-				Version:        "1.0.0",
-				ConfigPath:     policyConfigPath,
-				ReloadInterval: func() *time.Duration { d := 5 * time.Minute; return &d }(),
-			},
-		}, nil
-	default:
-		return nil, fmt.Errorf("unsupported policy engine type: %s", policyEngineType)
-	}
 }
