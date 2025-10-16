@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MicahParks/keyfunc"
+	"github.com/casbin/casbin/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/token"
@@ -47,18 +48,24 @@ type MiddlewareOptions struct {
 	JWKSRefreshInterval time.Duration
 	// NonEnforcing allows the middleware to skip validation checks.  It still logs errors.
 	NonEnforcing bool
+	// PolicyModelFile sets the path to an access model file used by Casbin
+	PolicyModelFile string
+	// PolicyPermissionsFile sets the path to an user permission file used by Casbin
+	PolicyPermissionsFile string
 }
 
 // DefaultMiddlewareOptions returns the default middleware options
 func DefaultMiddlewareOptions() *MiddlewareOptions {
 	return &MiddlewareOptions{
-		AllowEmptyToken:     false,
-		ValidateExpiration:  true,
-		ValidateIssuer:      true,
-		ValidateAudience:    true,
-		RequiredClaims:      []string{"sub", "iss", "aud"},
-		JWKSRefreshInterval: 1 * time.Hour,
-		NonEnforcing:        false,
+		AllowEmptyToken:       false,
+		ValidateExpiration:    true,
+		ValidateIssuer:        true,
+		ValidateAudience:      true,
+		RequiredClaims:        []string{"sub", "iss", "aud"},
+		JWKSRefreshInterval:   1 * time.Hour,
+		NonEnforcing:          false,
+		PolicyModelFile:       "",
+		PolicyPermissionsFile: "",
 	}
 }
 
@@ -174,6 +181,28 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 						// For custom claims, use reflection or mapstructure if needed
 					}
 				}
+			}
+
+			enforcer, err := casbin.NewEnforcer(opts.PolicyModelFile, opts.PolicyPermissionsFile)
+			if err != nil {
+				http.Error(w, "failed to created new policy enforcer", http.StatusInternalServerError)
+				return
+			}
+
+			sub := "alice" // the user that wants to access a resource.
+			obj := "data1" // the resource that is going to be accessed.
+			act := "read"  // the operation that the user performs on the resource.
+
+			ok, err := enforcer.Enforce(sub, obj, act)
+			if err != nil {
+				http.Error(w, "subject not allow to access object", http.StatusUnauthorized)
+				return
+			}
+
+			// Subject is not allow access based on policy
+			if !ok {
+				http.Error(w, "subject not allow to access object", http.StatusUnauthorized)
+				return
 			}
 
 			// Add claims to context
