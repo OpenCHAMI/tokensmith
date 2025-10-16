@@ -10,6 +10,8 @@ import (
 	"crypto/rsa"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -51,6 +53,37 @@ func (m *MockTokenService) UpdateGroupScopes(ctx context.Context, group string, 
 }
 
 func TestAuthMiddleware(t *testing.T) {
+	// Create temporary policy model and permission files
+	tempDir := t.TempDir()
+	modelPath := filepath.Join(tempDir, "model.conf")
+	policyPath := filepath.Join(tempDir, "policy.csv")
+
+	modelData := `
+[request_definition]
+r = sub, obj, act
+
+[policy_definition]
+p = sub, obj, act
+
+[policy_effect]
+e = some(where (p.eft == allow))
+
+[matchers]
+m = r.sub == p.sub && r.obj == p.obj && r.act == p.act
+`
+
+	policyData := `
+user1, data1, read
+user2, data1, write
+	`
+
+	if err := os.WriteFile(modelPath, []byte(modelData), 0644); err != nil {
+		t.Fatalf("Failed to write model file: %v", err)
+	}
+	if err := os.WriteFile(policyPath, []byte(policyData), 0644); err != nil {
+		t.Fatalf("Failed to write policy file: %v", err)
+	}
+
 	// Generate a test RSA key pair
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -150,6 +183,8 @@ func TestAuthMiddleware(t *testing.T) {
 			opts.ValidateIssuer = true
 			opts.ValidateAudience = true
 			opts.RequiredClaims = []string{"sub", "iss", "aud"}
+			opts.PolicyModelFile = modelPath
+			opts.PolicyPermissionsFile = policyPath
 			auth := JWTMiddleware(&privateKey.PublicKey, opts)
 
 			// Create test request
@@ -176,6 +211,37 @@ func TestAuthMiddleware(t *testing.T) {
 }
 
 func TestAuthMiddleware_WithScopes(t *testing.T) {
+	// Create temporary policy model and permission files
+	tempDir := t.TempDir()
+	modelPath := filepath.Join(tempDir, "model.conf")
+	policyPath := filepath.Join(tempDir, "policy.csv")
+
+	modelData := `
+[request_definition]
+r = sub, obj, act
+
+[policy_definition]
+p = sub, obj, act
+
+[policy_effect]
+e = some(where (p.eft == allow))
+
+[matchers]
+m = r.sub == p.sub && r.obj == p.obj && r.act == p.act
+`
+
+	policyData := `
+user1, data1, read
+user2, data1, write
+	`
+
+	if err := os.WriteFile(modelPath, []byte(modelData), 0644); err != nil {
+		t.Fatalf("Failed to write model file: %v", err)
+	}
+	if err := os.WriteFile(policyPath, []byte(policyData), 0644); err != nil {
+		t.Fatalf("Failed to write policy file: %v", err)
+	}
+
 	// Generate a test RSA key pair
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -269,6 +335,8 @@ func TestAuthMiddleware_WithScopes(t *testing.T) {
 			opts.ValidateIssuer = true
 			opts.ValidateAudience = true
 			opts.RequiredClaims = []string{"sub", "iss", "aud"}
+			opts.PolicyModelFile = modelPath
+			opts.PolicyPermissionsFile = policyPath
 			auth := JWTMiddleware(&privateKey.PublicKey, opts)
 
 			// Create test request
