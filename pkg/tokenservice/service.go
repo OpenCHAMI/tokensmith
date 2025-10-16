@@ -22,7 +22,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
-	"github.com/openchami/tokensmith/pkg/policy"
 	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -37,8 +36,7 @@ type Config struct {
 	ClusterID    string
 	OpenCHAMIID  string
 	NonEnforcing bool // Skip validation checks and only log errors
-	// Policy engine configuration
-	PolicyEngine *PolicyEngineConfig
+
 	// OIDC provider configuration
 	OIDCIssuerURL    string
 	OIDCClientID     string
@@ -54,7 +52,6 @@ type TokenService struct {
 	ClusterID    string
 	OpenCHAMIID  string
 	OIDCProvider oidc.Provider
-	PolicyEngine policy.Engine
 	mu           sync.RWMutex
 }
 
@@ -76,12 +73,6 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		config.OIDCClientSecret,
 	)
 
-	// Initialize the policy engine
-	policyEngine, err := NewPolicyEngine(config.PolicyEngine)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize policy engine: %w", err)
-	}
-
 	return &TokenService{
 		TokenManager: tokenManager,
 		Config:       config,
@@ -90,7 +81,6 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		ClusterID:    config.ClusterID,
 		OpenCHAMIID:  config.OpenCHAMIID,
 		OIDCProvider: oidcProvider,
-		PolicyEngine: policyEngine,
 	}, nil
 }
 
@@ -108,21 +98,6 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 
 	if !introspection.Active {
 		return "", errors.New("token is not active")
-	}
-
-	// Create policy context for policy evaluation
-	policyCtx := &policy.PolicyContext{
-		Username:    introspection.Username,
-		Groups:      extractGroupsFromClaims(introspection.Claims),
-		Claims:      introspection.Claims,
-		ClusterID:   s.ClusterID,
-		OpenCHAMIID: s.OpenCHAMIID,
-	}
-
-	// Evaluate policy to determine scopes, audiences, and permissions
-	policyDecision, err := s.PolicyEngine.EvaluatePolicy(ctx, policyCtx)
-	if err != nil {
-		return "", fmt.Errorf("policy evaluation failed: %w", err)
 	}
 
 	// Create OpenCHAMI claims
@@ -198,12 +173,6 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		// For now, we'll skip them as TSClaims doesn't have a generic additional claims field
 		_ = k
 		_ = v
-	}
-
-	// Set token lifetime if specified by policy
-	if policyDecision.TokenLifetime != nil {
-		expiresAt := time.Now().Add(*policyDecision.TokenLifetime)
-		claims.ExpiresAt = jwt.NewNumericDate(expiresAt)
 	}
 
 	// Generate token
