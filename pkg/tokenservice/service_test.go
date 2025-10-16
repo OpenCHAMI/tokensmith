@@ -8,16 +8,15 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
-	"github.com/openchami/tokensmith/pkg/policy"
 	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -90,49 +89,36 @@ func TestTokenService(t *testing.T) {
 		},
 	}
 
-	// Create a file-based policy engine for testing that can differentiate between users
-	// We'll create a temporary config file for the test
+	// Create and load temporary policy model and permission files
 	tempDir := t.TempDir()
-	configPath := fmt.Sprintf("%s/policy.json", tempDir)
+	modelPath := filepath.Join(tempDir, "model.conf")
+	policyPath := filepath.Join(tempDir, "policy.csv")
 
-	policyConfig := &policy.FileBasedConfig{
-		Version: "1.0.0",
-		DefaultPolicy: &policy.PolicyDecision{
-			Scopes:      []string{"read"},
-			Audiences:   []string{"smd", "bss", "cloud-init"},
-			Permissions: []string{"read:basic"},
-		},
-		Roles: map[string]*policy.RolePolicy{
-			"admin": {
-				Name:        "Administrator",
-				Scopes:      []string{"read", "write", "admin"},
-				Audiences:   []string{"smd", "bss", "cloud-init"},
-				Permissions: []string{"read:all", "write:all", "admin:all"},
-			},
-			"operator": {
-				Name:        "Operator",
-				Scopes:      []string{"read", "write"},
-				Audiences:   []string{"smd", "bss", "cloud-init"},
-				Permissions: []string{"read:system", "write:system"},
-			},
-		},
-		GroupRoleMappings: map[string][]string{
-			"admin":    {"admin"},
-			"operator": {"operator"},
-		},
+	modelData := `
+[request_definition]
+r = sub, obj, act
+
+[policy_definition]
+p = sub, obj, act
+
+[policy_effect]
+e = some(where (p.eft == allow))
+
+[matchers]
+m = r.sub == p.sub && r.obj == p.obj && r.act == p.act
+`
+
+	policyData := `
+user1, data1, read
+user2, data1, write
+	`
+
+	if err := os.WriteFile(modelPath, []byte(modelData), 0644); err != nil {
+		t.Fatalf("Failed to write model file: %v", err)
 	}
-
-	configData, err := json.MarshalIndent(policyConfig, "", "  ")
-	require.NoError(t, err)
-	err = os.WriteFile(configPath, configData, 0644)
-	require.NoError(t, err)
-
-	policyEngine, err := policy.NewFileBasedEngine(&policy.FileBasedEngineConfig{
-		Name:       "test-file-engine",
-		Version:    "1.0.0",
-		ConfigPath: configPath,
-	})
-	require.NoError(t, err)
+	if err := os.WriteFile(policyPath, []byte(policyData), 0644); err != nil {
+		t.Fatalf("Failed to write policy file: %v", err)
+	}
 
 	// Create service
 	service := &TokenService{
@@ -143,7 +129,6 @@ func TestTokenService(t *testing.T) {
 		OpenCHAMIID:  config.OpenCHAMIID,
 		OIDCProvider: mockProvider,
 		GroupScopes:  config.GroupScopes,
-		PolicyEngine: policyEngine,
 	}
 
 	t.Run("Token Exchange - Admin User", func(t *testing.T) {
@@ -417,15 +402,6 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a static policy engine for testing
-			policyEngine, err := policy.NewStaticEngine(&policy.StaticEngineConfig{
-				Name:        "test-policy-engine",
-				Version:     "1.0.0",
-				Scopes:      []string{"read", "write", "admin"},
-				Audiences:   []string{"smd", "bss", "cloud-init"},
-				Permissions: []string{"read:basic", "write:basic", "admin:all"},
-			})
-			require.NoError(t, err)
 
 			// Create token service
 			service := &TokenService{
@@ -434,7 +410,6 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,
 				OpenCHAMIID:  tt.config.OpenCHAMIID,
-				PolicyEngine: policyEngine,
 			}
 
 			// Generate service token
@@ -513,15 +488,6 @@ func TestTokenService_ValidateToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a static policy engine for testing
-			policyEngine, err := policy.NewStaticEngine(&policy.StaticEngineConfig{
-				Name:        "test-policy-engine",
-				Version:     "1.0.0",
-				Scopes:      []string{"read", "write", "admin"},
-				Audiences:   []string{"smd", "bss", "cloud-init"},
-				Permissions: []string{"read:basic", "write:basic", "admin:all"},
-			})
-			require.NoError(t, err)
 
 			// Create token service
 			service := &TokenService{
@@ -530,7 +496,6 @@ func TestTokenService_ValidateToken(t *testing.T) {
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,
 				OpenCHAMIID:  tt.config.OpenCHAMIID,
-				PolicyEngine: policyEngine,
 			}
 
 			// Generate a valid token for the valid token test case
