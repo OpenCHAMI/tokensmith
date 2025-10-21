@@ -18,6 +18,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/token"
+	"github.com/rs/zerolog/log"
 )
 
 // ContextKey is the key used to store the claims in the context
@@ -183,26 +184,38 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 				}
 			}
 
-			enforcer, err := casbin.NewEnforcer(opts.PolicyModelFile, opts.PolicyPermissionsFile)
-			if err != nil {
-				http.Error(w, "failed to created new policy enforcer", http.StatusInternalServerError)
-				return
-			}
+			// Only check policy if both model and permission file are provided
+			if opts.PolicyModelFile != "" && opts.PolicyPermissionsFile != "" {
+				enforcer, err := casbin.NewEnforcer(opts.PolicyModelFile, opts.PolicyPermissionsFile)
+				if err != nil {
+					http.Error(w, fmt.Sprintf("failed to created new policy enforcer: %v", err), http.StatusInternalServerError)
+					return
+				}
 
-			sub := "alice" // the user that wants to access a resource.
-			obj := "data1" // the resource that is going to be accessed.
-			act := "read"  // the operation that the user performs on the resource.
+				sub, _ := idtoken.Claims.GetSubject()  // the user that wants to access a resource.
+				aud, _ := idtoken.Claims.GetAudience() // the resource that is going to be accessed.
 
-			ok, err := enforcer.Enforce(sub, obj, act)
-			if err != nil {
-				http.Error(w, "subject not allow to access object", http.StatusUnauthorized)
-				return
-			}
+				// Check if the user has permission to access resource
+				var ok bool
+				for _, obj := range aud {
+					for _, act := range claims.Scope {
+						ok, err = enforcer.Enforce(sub, obj, act)
+						if err != nil {
+							http.Error(w, "failed to enforce policy", http.StatusInternalServerError)
+							return
+						}
+						if ok {
+							log.Debug().Msg("found valid policy for subject")
+							break
+						}
+					}
+				}
 
-			// Subject is not allow access based on policy
-			if !ok {
-				http.Error(w, "subject not allow to access object", http.StatusUnauthorized)
-				return
+				// Subject is not allow access based on policy
+				if !ok {
+					http.Error(w, "subject not allow to access object", http.StatusUnauthorized)
+					return
+				}
 			}
 
 			// Add claims to context
@@ -275,7 +288,7 @@ func RequireScope(requiredScope string) func(http.Handler) http.Handler {
 			}
 
 			if !hasScope {
-				http.Error(w, "insufficient scope", http.StatusForbidden)
+				http.Error(w, "insufficient scope", http.StatusUnauthorized)
 				return
 			}
 
@@ -304,7 +317,7 @@ func RequireScopes(requiredScopes []string) func(http.Handler) http.Handler {
 					}
 				}
 				if !hasScope {
-					http.Error(w, "insufficient scope", http.StatusForbidden)
+					http.Error(w, "insufficient scope", http.StatusUnauthorized)
 					return
 				}
 			}
