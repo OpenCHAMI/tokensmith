@@ -103,15 +103,19 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	// Create OpenCHAMI claims
 	claims := &token.TSClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    s.Issuer,
-			Subject:   introspection.Username,
-			Audience:  policyDecision.Audiences,
+			Issuer:  s.Issuer,
+			Subject: introspection.Username,
+			// FIXME: It would probably make more sense if the "Audience" is set
+			// by the service itself somewhere.
+			// Audience:  introspection...,
 			ExpiresAt: jwt.NewNumericDate(time.Unix(introspection.ExpiresAt, 0)),
 			IssuedAt:  jwt.NewNumericDate(time.Unix(introspection.IssuedAt, 0)),
 		},
 		ClusterID:   s.ClusterID,
 		OpenCHAMIID: s.OpenCHAMIID,
-		Scope:       policyDecision.Scopes,
+		// FIXME: I don't think it makes much sense to take the scope from the
+		// external OIDC provider without being able to map the claims.
+		// Scope:       introspection.Scope,
 	}
 
 	// Extract additional claims from introspection
@@ -165,14 +169,6 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		}
 	} else {
 		return "", fmt.Errorf("missing required claim: auth_events")
-	}
-
-	// Add additional claims from policy decision
-	for k, v := range policyDecision.AdditionalClaims {
-		// Note: We could add these to a custom claims field in TSClaims
-		// For now, we'll skip them as TSClaims doesn't have a generic additional claims field
-		_ = k
-		_ = v
 	}
 
 	// Generate token
