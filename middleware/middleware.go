@@ -145,6 +145,16 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 				return key, nil
 			}
 
+			var callNextHandler = func() {
+				// Add claims to context
+				ctx := context.WithValue(r.Context(), ClaimsContextKey, claims)
+				// Add raw claims to context (as map[string]interface{})
+				if mapClaims, ok := idtoken.Claims.(*token.TSClaims); ok {
+					ctx = context.WithValue(ctx, RawClaimsContextKey, mapClaims)
+				}
+				next.ServeHTTP(w, r.WithContext(ctx))
+			}
+
 			idtoken, err = jwt.ParseWithClaims(tokenString, claims, keyFunc)
 			if err != nil || !idtoken.Valid {
 				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
@@ -192,20 +202,25 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 					return
 				}
 
-				sub, _ := idtoken.Claims.GetSubject()  // the user that wants to access a resource.
-				aud, _ := idtoken.Claims.GetAudience() // the resource that is going to be accessed.
-
 				// Check if the user has permission to access resource
-				var ok bool
+				var (
+					sub, _ = idtoken.Claims.GetSubject()  // the user that wants to access a resource.
+					aud, _ = idtoken.Claims.GetAudience() // the resource that is going to be accessed.
+					ok     bool
+					policy []string
+				)
 				for _, obj := range aud {
 					for _, act := range claims.Scope {
-						ok, err = enforcer.Enforce(sub, obj, act)
+						ok, policy, err = enforcer.EnforceEx(sub, obj, act)
 						if err != nil {
 							http.Error(w, "failed to enforce policy", http.StatusInternalServerError)
 							return
 						}
+						_ = policy
+
 						if ok {
-							log.Debug().Msg("found valid policy for subject")
+							log.Debug().Msgf("found valid permissions for subject '%s'", sub)
+							callNextHandler()
 							break
 						}
 					}
@@ -213,18 +228,15 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 
 				// Subject is not allow access based on policy
 				if !ok {
-					http.Error(w, "subject not allow to access object", http.StatusUnauthorized)
+					http.Error(
+						w,
+						fmt.Sprintf("subject '%s' not allowed '%s' for resource(s) '%s'", sub, strings.Join(claims.Scope, ", "), strings.Join(aud, ", ")),
+						http.StatusUnauthorized,
+					)
 					return
 				}
 			}
-
-			// Add claims to context
-			ctx := context.WithValue(r.Context(), ClaimsContextKey, claims)
-			// Add raw claims to context (as map[string]interface{})
-			if mapClaims, ok := idtoken.Claims.(*token.TSClaims); ok {
-				ctx = context.WithValue(ctx, RawClaimsContextKey, mapClaims)
-			}
-			next.ServeHTTP(w, r.WithContext(ctx))
+			callNextHandler()
 		})
 	}
 }
