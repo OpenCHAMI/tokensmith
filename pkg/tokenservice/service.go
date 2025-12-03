@@ -101,21 +101,16 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	}
 
 	// Create OpenCHAMI claims
+	// Create OpenCHAMI claims
 	claims := &token.TSClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:  s.Issuer,
-			Subject: introspection.Username,
-			// FIXME: It would probably make more sense if the "Audience" is set
-			// by the service itself somewhere.
-			// Audience:  introspection...,
+			Issuer:    s.Issuer,
+			Subject:   introspection.Username,
 			ExpiresAt: jwt.NewNumericDate(time.Unix(introspection.ExpiresAt, 0)),
 			IssuedAt:  jwt.NewNumericDate(time.Unix(introspection.IssuedAt, 0)),
 		},
 		ClusterID:   s.ClusterID,
 		OpenCHAMIID: s.OpenCHAMIID,
-		// FIXME: I don't think it makes much sense to take the scope from the
-		// external OIDC provider without being able to map the claims.
-		// Scope:       introspection.Scope,
 	}
 
 	// Extract additional claims from introspection
@@ -169,6 +164,14 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		}
 	} else {
 		return "", fmt.Errorf("missing required claim: auth_events")
+	}
+
+	// Get the scope and audience from the context
+	if scope, ok := ctx.Value("scope").([]string); ok {
+		claims.Scope = scope
+	}
+	if targetService, ok := ctx.Value("target_audience").(string); !ok {
+		claims.Audience = []string{targetService}
 	}
 
 	// Generate token
@@ -311,8 +314,22 @@ func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Get the scope and audience from request payload
+	var payload struct {
+		Scope         []string `json:"scope"`
+		TargetService string   `json:"target_service"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&payload)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	ctx := context.WithValue(r.Context(), "scope", payload.Scope)
+	ctx = context.WithValue(ctx, "target_service", payload.TargetService)
+
 	// Exchange token
-	token, err := s.ExchangeToken(r.Context(), parts[1])
+	token, err := s.ExchangeToken(ctx, parts[1])
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
