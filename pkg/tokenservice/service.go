@@ -29,6 +29,11 @@ import (
 	openchami_logger "github.com/openchami/chi-middleware/log"
 )
 
+const (
+	ScopeContextKey         = "scope"
+	TargetServiceContextKey = "target_service"
+)
+
 // Config holds the configuration for the token service
 type Config struct {
 	Issuer       string
@@ -325,8 +330,8 @@ func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	ctx := context.WithValue(r.Context(), "scope", payload.Scope)
-	ctx = context.WithValue(ctx, "target_service", payload.TargetService)
+	ctx := context.WithValue(r.Context(), ScopeContextKey, payload.Scope)
+	ctx = context.WithValue(ctx, TargetServiceContextKey, payload.TargetService)
 
 	// Exchange token
 	token, err := s.ExchangeToken(ctx, parts[1])
