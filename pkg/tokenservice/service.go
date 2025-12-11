@@ -22,12 +22,18 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
-	"github.com/openchami/tokensmith/pkg/policy"
 	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
 	openchami_logger "github.com/openchami/chi-middleware/log"
+)
+
+type contextKey string
+
+const (
+	ScopeContextKey         contextKey = "scope"
+	TargetServiceContextKey contextKey = "target_service"
 )
 
 // Config holds the configuration for the token service
@@ -37,8 +43,7 @@ type Config struct {
 	ClusterID    string
 	OpenCHAMIID  string
 	NonEnforcing bool // Skip validation checks and only log errors
-	// Policy engine configuration
-	PolicyEngine *PolicyEngineConfig
+
 	// OIDC provider configuration
 	OIDCIssuerURL    string
 	OIDCClientID     string
@@ -54,7 +59,6 @@ type TokenService struct {
 	ClusterID    string
 	OpenCHAMIID  string
 	OIDCProvider oidc.Provider
-	PolicyEngine policy.Engine
 	mu           sync.RWMutex
 }
 
@@ -76,12 +80,6 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		config.OIDCClientSecret,
 	)
 
-	// Initialize the policy engine
-	policyEngine, err := NewPolicyEngine(config.PolicyEngine)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize policy engine: %w", err)
-	}
-
 	return &TokenService{
 		TokenManager: tokenManager,
 		Config:       config,
@@ -90,7 +88,6 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		ClusterID:    config.ClusterID,
 		OpenCHAMIID:  config.OpenCHAMIID,
 		OIDCProvider: oidcProvider,
-		PolicyEngine: policyEngine,
 	}, nil
 }
 
@@ -110,33 +107,17 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		return "", errors.New("token is not active")
 	}
 
-	// Create policy context for policy evaluation
-	policyCtx := &policy.PolicyContext{
-		Username:    introspection.Username,
-		Groups:      extractGroupsFromClaims(introspection.Claims),
-		Claims:      introspection.Claims,
-		ClusterID:   s.ClusterID,
-		OpenCHAMIID: s.OpenCHAMIID,
-	}
-
-	// Evaluate policy to determine scopes, audiences, and permissions
-	policyDecision, err := s.PolicyEngine.EvaluatePolicy(ctx, policyCtx)
-	if err != nil {
-		return "", fmt.Errorf("policy evaluation failed: %w", err)
-	}
-
+	// Create OpenCHAMI claims
 	// Create OpenCHAMI claims
 	claims := &token.TSClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.Issuer,
 			Subject:   introspection.Username,
-			Audience:  policyDecision.Audiences,
 			ExpiresAt: jwt.NewNumericDate(time.Unix(introspection.ExpiresAt, 0)),
 			IssuedAt:  jwt.NewNumericDate(time.Unix(introspection.IssuedAt, 0)),
 		},
 		ClusterID:   s.ClusterID,
 		OpenCHAMIID: s.OpenCHAMIID,
-		Scope:       policyDecision.Scopes,
 	}
 
 	// Extract additional claims from introspection
@@ -192,18 +173,12 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		return "", fmt.Errorf("missing required claim: auth_events")
 	}
 
-	// Add additional claims from policy decision
-	for k, v := range policyDecision.AdditionalClaims {
-		// Note: We could add these to a custom claims field in TSClaims
-		// For now, we'll skip them as TSClaims doesn't have a generic additional claims field
-		_ = k
-		_ = v
+	// Get the scope and audience from the context
+	if scope, ok := ctx.Value("scope").([]string); ok {
+		claims.Scope = scope
 	}
-
-	// Set token lifetime if specified by policy
-	if policyDecision.TokenLifetime != nil {
-		expiresAt := time.Now().Add(*policyDecision.TokenLifetime)
-		claims.ExpiresAt = jwt.NewNumericDate(expiresAt)
+	if targetService, ok := ctx.Value("target_audience").(string); !ok {
+		claims.Audience = []string{targetService}
 	}
 
 	// Generate token
@@ -230,11 +205,6 @@ func extractStringArrayFromClaims(claims map[string]interface{}, key string) []s
 	}
 
 	return strings
-}
-
-// extractGroupsFromClaims extracts groups from the introspection claims
-func extractGroupsFromClaims(claims map[string]interface{}) []string {
-	return extractStringArrayFromClaims(claims, "groups")
 }
 
 // GenerateServiceToken generates a service-to-service token
@@ -346,8 +316,22 @@ func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Get the scope and audience from request payload
+	var payload struct {
+		Scope         []string `json:"scope"`
+		TargetService string   `json:"target_service"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&payload)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	ctx := context.WithValue(r.Context(), ScopeContextKey, payload.Scope)
+	ctx = context.WithValue(ctx, TargetServiceContextKey, payload.TargetService)
+
 	// Exchange token
-	token, err := s.ExchangeToken(r.Context(), parts[1])
+	token, err := s.ExchangeToken(ctx, parts[1])
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return

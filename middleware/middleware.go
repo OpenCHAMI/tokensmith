@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/MicahParks/keyfunc"
+	"github.com/casbin/casbin/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/token"
+	"github.com/rs/zerolog/log"
 )
 
 // ContextKey is the key used to store the claims in the context
@@ -47,18 +49,24 @@ type MiddlewareOptions struct {
 	JWKSRefreshInterval time.Duration
 	// NonEnforcing allows the middleware to skip validation checks.  It still logs errors.
 	NonEnforcing bool
+	// PolicyModelFile sets the path to an access model file used by Casbin
+	PolicyModelFile string
+	// PolicyPermissionsFile sets the path to an user permission file used by Casbin
+	PolicyPermissionsFile string
 }
 
 // DefaultMiddlewareOptions returns the default middleware options
 func DefaultMiddlewareOptions() *MiddlewareOptions {
 	return &MiddlewareOptions{
-		AllowEmptyToken:     false,
-		ValidateExpiration:  true,
-		ValidateIssuer:      true,
-		ValidateAudience:    true,
-		RequiredClaims:      []string{"sub", "iss", "aud"},
-		JWKSRefreshInterval: 1 * time.Hour,
-		NonEnforcing:        false,
+		AllowEmptyToken:       false,
+		ValidateExpiration:    true,
+		ValidateIssuer:        true,
+		ValidateAudience:      true,
+		RequiredClaims:        []string{"sub", "iss", "aud"},
+		JWKSRefreshInterval:   1 * time.Hour,
+		NonEnforcing:          false,
+		PolicyModelFile:       "",
+		PolicyPermissionsFile: "",
 	}
 }
 
@@ -137,6 +145,16 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 				return key, nil
 			}
 
+			var callNextHandler = func() {
+				// Add claims to context
+				ctx := context.WithValue(r.Context(), ClaimsContextKey, claims)
+				// Add raw claims to context (as map[string]interface{})
+				if mapClaims, ok := idtoken.Claims.(*token.TSClaims); ok {
+					ctx = context.WithValue(ctx, RawClaimsContextKey, mapClaims)
+				}
+				next.ServeHTTP(w, r.WithContext(ctx))
+			}
+
 			idtoken, err = jwt.ParseWithClaims(tokenString, claims, keyFunc)
 			if err != nil || !idtoken.Valid {
 				http.Error(w, "invalid token: "+err.Error(), http.StatusUnauthorized)
@@ -176,13 +194,49 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 				}
 			}
 
-			// Add claims to context
-			ctx := context.WithValue(r.Context(), ClaimsContextKey, claims)
-			// Add raw claims to context (as map[string]interface{})
-			if mapClaims, ok := idtoken.Claims.(*token.TSClaims); ok {
-				ctx = context.WithValue(ctx, RawClaimsContextKey, mapClaims)
+			// Only check policy if both model and permission file are provided
+			if opts.PolicyModelFile != "" && opts.PolicyPermissionsFile != "" {
+				enforcer, err := casbin.NewEnforcer(opts.PolicyModelFile, opts.PolicyPermissionsFile)
+				if err != nil {
+					http.Error(w, fmt.Sprintf("failed to created new policy enforcer: %v", err), http.StatusInternalServerError)
+					return
+				}
+
+				// Check if the user has permission to access resource
+				var (
+					sub, _ = idtoken.Claims.GetSubject()  // the user that wants to access a resource.
+					aud, _ = idtoken.Claims.GetAudience() // the resource that is going to be accessed.
+					ok     bool
+					policy []string
+				)
+				for _, obj := range aud {
+					for _, act := range claims.Scope {
+						ok, policy, err = enforcer.EnforceEx(sub, obj, act)
+						if err != nil {
+							http.Error(w, "failed to enforce policy", http.StatusInternalServerError)
+							return
+						}
+						_ = policy
+
+						if ok {
+							log.Debug().Msgf("found valid permissions for subject '%s'", sub)
+							callNextHandler()
+							break
+						}
+					}
+				}
+
+				// Subject is not allow access based on policy
+				if !ok {
+					http.Error(
+						w,
+						fmt.Sprintf("subject '%s' not allowed '%s' for resource(s) '%s'", sub, strings.Join(claims.Scope, ", "), strings.Join(aud, ", ")),
+						http.StatusUnauthorized,
+					)
+					return
+				}
 			}
-			next.ServeHTTP(w, r.WithContext(ctx))
+			callNextHandler()
 		})
 	}
 }
@@ -246,7 +300,7 @@ func RequireScope(requiredScope string) func(http.Handler) http.Handler {
 			}
 
 			if !hasScope {
-				http.Error(w, "insufficient scope", http.StatusForbidden)
+				http.Error(w, "insufficient scope", http.StatusUnauthorized)
 				return
 			}
 
@@ -275,7 +329,7 @@ func RequireScopes(requiredScopes []string) func(http.Handler) http.Handler {
 					}
 				}
 				if !hasScope {
-					http.Error(w, "insufficient scope", http.StatusForbidden)
+					http.Error(w, "insufficient scope", http.StatusUnauthorized)
 					return
 				}
 			}
