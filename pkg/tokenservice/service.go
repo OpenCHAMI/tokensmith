@@ -29,9 +29,11 @@ import (
 	openchami_logger "github.com/openchami/chi-middleware/log"
 )
 
+type contextKey string
+
 const (
-	ScopeContextKey         = "scope"
-	TargetServiceContextKey = "target_service"
+	ScopeContextKey         contextKey = "scope"
+	TargetServiceContextKey contextKey = "target_service"
 )
 
 // Config holds the configuration for the token service
@@ -203,11 +205,6 @@ func extractStringArrayFromClaims(claims map[string]interface{}, key string) []s
 	}
 
 	return strings
-}
-
-// extractGroupsFromClaims extracts groups from the introspection claims
-func extractGroupsFromClaims(claims map[string]interface{}) []string {
-	return extractStringArrayFromClaims(claims, "groups")
 }
 
 // GenerateServiceToken generates a service-to-service token
