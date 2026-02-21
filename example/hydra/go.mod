@@ -9,15 +9,32 @@ go 1.24.0
 toolchain go1.24.4
 
 require (
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/openchami/tokensmith v0.0.0
 	github.com/openchami/tokensmith/middleware v0.0.0
 )
 
 require (
 	github.com/MicahParks/keyfunc v1.9.0 // indirect
+	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
+	github.com/casbin/casbin/v2 v2.128.0 // indirect
+	github.com/casbin/govaluate v1.3.0 // indirect
+	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.4.2 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
+	github.com/golang/protobuf v1.5.2 // indirect
+	github.com/google/uuid v1.6.0 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/prometheus/client_golang v1.14.0 // indirect
+	github.com/prometheus/client_model v0.3.0 // indirect
+	github.com/prometheus/common v0.37.0 // indirect
+	github.com/prometheus/procfs v0.8.0 // indirect
+	github.com/rs/zerolog v1.34.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	google.golang.org/protobuf v1.28.1 // indirect
 )
 
 replace github.com/openchami/tokensmith => ../../

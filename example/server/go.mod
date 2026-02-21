@@ -9,12 +9,12 @@ go 1.24.0
 toolchain go1.24.4
 
 require (
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/openchami/tokensmith v0.0.0
 )
 
 require (
-	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/openchami/chi-middleware/log v0.0.0-20240812224658-b16b83c70700 // indirect

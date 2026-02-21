@@ -108,7 +108,6 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	}
 
 	// Create OpenCHAMI claims
-	// Create OpenCHAMI claims
 	claims := &token.TSClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.Issuer,
@@ -174,11 +173,29 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	}
 
 	// Get the scope and audience from the context
-	if scope, ok := ctx.Value("scope").([]string); ok {
-		claims.Scope = scope
+	scopeSet := make(map[string]struct{})
+	if scope, ok := ctx.Value(ScopeContextKey).([]string); ok {
+		claims.Scope = appendUniqueStrings(claims.Scope, scopeSet, scope)
+	} else if scope, ok := ctx.Value("scope").([]string); ok {
+		claims.Scope = appendUniqueStrings(claims.Scope, scopeSet, scope)
 	}
-	if targetService, ok := ctx.Value("target_audience").(string); !ok {
+
+	if targetService, ok := ctx.Value("target_audience").(string); ok {
 		claims.Audience = []string{targetService}
+	}
+	if len(claims.Audience) == 0 {
+		if audience := extractStringArrayFromClaims(introspection.Claims, "aud"); len(audience) > 0 {
+			claims.Audience = audience
+		}
+	}
+
+	groups := extractStringArrayFromClaims(introspection.Claims, "groups")
+	if len(groups) > 0 && len(s.GroupScopes) > 0 {
+		s.mu.RLock()
+		for _, group := range groups {
+			claims.Scope = appendUniqueStrings(claims.Scope, scopeSet, s.GroupScopes[group])
+		}
+		s.mu.RUnlock()
 	}
 
 	// Generate token
@@ -192,19 +209,38 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 
 // extractStringArrayFromClaims extracts string array from claims with given key
 func extractStringArrayFromClaims(claims map[string]interface{}, key string) []string {
-	array, ok := claims[key].([]interface{})
-	if !ok || len(array) == 0 {
-		return []string{}
-	}
-
-	strings := make([]string, 0, len(array))
-	for _, item := range array {
-		if str, ok := item.(string); ok {
-			strings = append(strings, str)
+	if raw, ok := claims[key]; ok {
+		switch v := raw.(type) {
+		case string:
+			return []string{v}
+		case []string:
+			return append([]string{}, v...)
+		case []interface{}:
+			values := make([]string, 0, len(v))
+			for _, item := range v {
+				if str, ok := item.(string); ok {
+					values = append(values, str)
+				}
+			}
+			return values
 		}
 	}
 
-	return strings
+	return []string{}
+}
+
+func appendUniqueStrings(dst []string, seen map[string]struct{}, values []string) []string {
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		dst = append(dst, value)
+	}
+	return dst
 }
 
 // GenerateServiceToken generates a service-to-service token

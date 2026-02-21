@@ -72,6 +72,11 @@ sequenceDiagram
   - Authelia integration
   - Extensible provider interface
 
+- **Policy-based Authorization (Casbin)**
+  - File-backed Casbin enforcer with optional auto-reload
+  - Fail-fast and permissive fallbacks for operational resilience
+  - Pluggable subject/object/action mappers for flexible JWT shapes
+
 ## Container Deployment
 
 TokenSmith can be deployed using Docker. The following environment variables can be used to configure the service:
@@ -234,6 +239,177 @@ Configuration options:
 ```bash
 go get github.com/openchami/tokensmith/middleware
 ```
+
+## Authorization (Casbin)
+
+TokenSmith ships with an opinionated Casbin-based authorization helper to make it easy to enforce fine-grained access control based on JWT claims. The implementation provides a file-backed Casbin enforcer factory, a chi middleware wrapper, and reasonable defaults that fit HPC-style resource management scenarios.
+
+Key environment variables and defaults
+
+- TOKENSMITH_CASBIN_MODEL_PATH (default: ./casbin_model.conf)
+- TOKENSMITH_CASBIN_POLICY_PATH (default: ./casbin_policy.csv)
+- TOKENSMITH_CASBIN_AUTOLOAD_SECONDS (default: 0, disabled)
+
+These environment variables are consulted by CreateEnforcer when an explicit path is not provided via EnforcerOptions.
+
+CreateEnforcer behavior
+
+The factory function has signature:
+
+- CreateEnforcer(ctx context.Context, opts *EnforcerOptions) (*casbin.Enforcer, error)
+
+EnforcerOptions fields:
+- ModelPath, PolicyPath: override the default model/policy file locations
+- AutoLoadSeconds: if >0, the enforcer will call StartAutoLoadPolicy with the specified interval
+- FailFast: when true (default when opts==nil) CreateEnforcer returns an error if the model or policy cannot be loaded
+- Permissive: used only when FailFast is false; if Permissive==true CreateEnforcer returns an enforcer that always allows (useful for degraded/maintenance modes); if Permissive==false CreateEnforcer returns an enforcer that always denies
+
+Operation summary:
+- If model/policy load succeeds, the enforcer is returned and AutoLoadSeconds (if set) starts a background reload ticker.
+- If load fails and FailFast==true, CreateEnforcer returns an error (recommended for production to avoid silently allowing access).
+- If load fails and FailFast==false, CreateEnforcer returns either a permissive (allow-all) or deny-all enforcer depending on Permissive.
+
+Wiring the Authz middleware
+
+The chi middleware wrapper has signature:
+
+- AuthzMiddleware(enforcer *casbin.Enforcer, opts *AuthzOptions) func(http.Handler) http.Handler
+
+AuthzOptions allows you to configure:
+- ExemptPaths []string: list of paths to skip authorization checks (supports exact match and prefix match using a trailing "*")
+- ContextKey string: context key where JWT claims are stored by the JWT middleware (default: "jwt_claims")
+- FailOpen bool: when true, errors returned from enforcer.Enforce() will allow the request instead of denying it (default false)
+- SubjectMapper, ObjectMapper, ActionMapper: optional functions to map the request+claims into Casbin subject(s), object and action strings
+
+Example (chi wiring)
+
+```go
+import (
+    "context"
+    "log"
+    "net/http"
+
+    "github.com/go-chi/chi/v5"
+    "github.com/openchami/tokensmith/middleware"
+)
+
+func main() {
+    // Create enforcer (reads env vars if paths not provided)
+    enf, err := middleware.CreateEnforcer(context.Background(), &middleware.EnforcerOptions{})
+    if err != nil {
+        log.Fatalf("failed to create enforcer: %v", err)
+    }
+
+    r := chi.NewRouter()
+
+    // Ensure your JWT verification middleware runs before the Authz middleware
+    // r.Use(JWTVerificationMiddleware)
+
+    r.Use(middleware.AuthzMiddleware(enf, &middleware.AuthzOptions{
+        ExemptPaths: []string{"/health", "/metrics*"},
+        FailOpen:    false,
+    }))
+
+    r.Get("/hpc/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
+        w.Write([]byte("job details"))
+    })
+
+    http.ListenAndServe(":8080", r)
+}
+```
+
+Subject mapping rules
+
+The default SubjectMapper follows this priority (so you do not normally need to provide a custom mapper):
+1. If the JWT claims contain a Keycloak-style `realm_access.roles` array, each role becomes `role:<role>` (e.g. `role:admin`).
+2. Else, if the JWT contains a top-level `roles` array, each entry becomes `role:<role>`.
+3. Else, if claims are of type `*token.TSClaims` the mapper will use `user:<sub>` where `<sub>` is the token subject.
+4. Else, if the claims are a generic map and contain a `sub` claim, the mapper falls back to `user:<sub>`.
+
+Examples (JWT payloads -> derived subjects):
+
+- Keycloak-style roles payload
+```json
+{
+  "sub": "alice",
+  "realm_access": { "roles": ["admin", "operator"] }
+}
+```
+derived subjects: ["role:admin", "role:operator"]
+
+- Top-level roles array
+```json
+{
+  "sub": "bob",
+  "roles": ["user"]
+}
+```
+derived subjects: ["role:user"]
+
+- TSClaims or plain subject fallback
+```json
+{
+  "sub": "carol"
+}
+```
+derived subjects: ["user:carol"]
+
+If your application uses a different JWT shape you may provide a custom SubjectMapper in AuthzOptions. The mapper receives the *http.Request and the raw claims value placed into the request context by the JWT middleware, and must return a list of subject strings that match your Casbin policy subjects (for example: "role:admin" or "user:alice").
+
+Test helpers
+
+The repository includes test-only helpers to make authorization unit tests deterministic:
+- middleware/jwt_test_helper_test.go: helpers to create ephemeral signing keys and sign tokens (RS/ECDSA). These helpers live in _test.go files and should only be used from test code.
+- middleware/claim_injector_test.go: a test-only middleware that injects arbitrary claims into the request context (useful for testing AuthzMiddleware behavior without signature verification). It is intentionally unsafe and compiled only for tests.
+
+Use these helpers in your service tests to build tokens or inject claims so you can assert allow/deny behavior of the middleware.
+
+Where policies live and how to override
+
+By default TokenSmith looks for the Casbin model and policy files at:
+- ./casbin_model.conf
+- ./casbin_policy.csv
+
+You can override these locations via environment variables or EnforcerOptions:
+- TOKENSMITH_CASBIN_MODEL_PATH -> custom model file
+- TOKENSMITH_CASBIN_POLICY_PATH -> custom policy file
+
+Operational notes (hot-reload vs non-hot-reload)
+
+- Hot-reload: set TOKENSMITH_CASBIN_AUTOLOAD_SECONDS (or EnforcerOptions.AutoLoadSeconds) to a positive integer to enable automatic periodic reload of policies from the backing adapter. This allows policy changes on disk to be picked up without restarting services (file adapter is supported). If the auto-load fails to start it will be logged but the enforcer may still operate with the loaded policy.
+
+- Non-hot-reload: use the default (0) if you prefer policy changes to require a service restart. This is simpler and avoids potential runtime race/consistency concerns in distributed environments.
+
+- FailFast vs FailOpen/Permissive: In production we recommend FailFast==true so that an inability to load model/policy results in startup failure rather than silently allowing access. For maintenance or staging you can set FailFast==false and Permissive==true to allow requests while policies are unavailable.
+
+Sample policy snippets (HPC scenarios)
+
+Model and policy files are plain Casbin model and CSV policy. Example policy lines demonstrating HPC semantics:
+
+# allow admins all actions on HPC resources
+p, role:admin, /hpc/*, *
+
+# operators can submit jobs and read job lists
+p, role:operator, /hpc/jobs, post
+p, role:operator, /hpc/jobs, get
+
+# regular users can view their own job details (object matching uses prefix or regex in model)
+p, role:user, /hpc/jobs/{id}, get
+
+# a specific user override (user-level exception)
+p, user:alice, /hpc/queue/priority, post
+
+# bind users to roles (grouping) - the subject strings must match your SubjectMapper output
+g, user:alice, role:operator
+
+These CSV lines are illustrative; your model may use regexMatch or other matchers to support parameterized object matching.
+
+Putting it together: service wiring example
+
+- On service startup, create the enforcer (using env vars or explicit paths) and mount the AuthzMiddleware after your JWT verification middleware.
+- Provide custom mappers only if the default subject/object/action derivation doesn't match your JWT shapes or resource model.
+- Use TestClaimInjector and jwt_test_helper_test.go in unit tests to exercise authorization logic deterministically.
+
 
 ## Development
 

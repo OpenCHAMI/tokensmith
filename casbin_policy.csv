@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 OpenCHAMI Contributors
+# SPDX-License-Identifier: MIT
+
+# Sample Casbin policy for HPC use cases
+# Policy format: p, sub, obj, act
+# Role bindings: g, user, role
+
+# role:admin can perform any action on cluster and nodes
+p, role:admin, ^/clusters/.*, *
+
+# role:operator can read and perform operational actions (boot) on cluster nodes
+p, role:operator, ^/clusters/[^/]+/nodes$, get
+p, role:operator, ^/clusters/[^/]+/nodes/[^/]+$, get
+p, role:operator, ^/clusters/[^/]+/nodes/[^/]+/boot$, post
+
+# role:user can read basic cluster/node information
+p, role:user, ^/clusters/[^/]+$, get
+p, role:user, ^/clusters/[^/]+/nodes$, get
+
+# Specific user override: alice can boot node 123 in cluster A
+p, user:alice, ^/clusters/clusterA/nodes/node123/boot$, post
+
+# Role inheritance examples (g lines)
+# alice is an operator
+g, user:alice, role:operator
+# bob is a viewer (role:user)
+g, user:bob, role:user
