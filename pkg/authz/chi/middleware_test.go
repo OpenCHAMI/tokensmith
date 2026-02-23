@@ -13,16 +13,29 @@ import (
 
 type testMetrics struct {
 	calls []struct {
-		decision       authz.Decision
-		object, action string
+		decision                 authz.Decision
+		object, action, mode, pV string
+		errStage, errMode, errPV string
+		hasError                 bool
 	}
 }
 
-func (m *testMetrics) IncAuthzDecision(d authz.Decision, object, action string) {
+func (m *testMetrics) IncAuthzDecision(d authz.Decision, object, action, mode, policyVersion string) {
 	m.calls = append(m.calls, struct {
-		decision       authz.Decision
-		object, action string
-	}{d, object, action})
+		decision                 authz.Decision
+		object, action, mode, pV string
+		errStage, errMode, errPV string
+		hasError                 bool
+	}{decision: d, object: object, action: action, mode: mode, pV: policyVersion})
+}
+
+func (m *testMetrics) IncAuthzError(stage, mode, policyVersion string) {
+	m.calls = append(m.calls, struct {
+		decision                 authz.Decision
+		object, action, mode, pV string
+		errStage, errMode, errPV string
+		hasError                 bool
+	}{errStage: stage, errMode: mode, errPV: policyVersion, hasError: true})
 }
 
 func mustAuthorizer(t *testing.T) *authz.Authorizer {
@@ -82,6 +95,12 @@ func TestDenyByDefault_NoRequireOrPublic(t *testing.T) {
 	}
 	if metrics.calls[0].decision != authz.DecisionIndeterminate {
 		t.Fatalf("expected indeterminate, got %s", metrics.calls[0].decision)
+	}
+	if metrics.calls[0].mode != string(authz.ModeEnforce) {
+		t.Fatalf("expected mode enforce, got %q", metrics.calls[0].mode)
+	}
+	if metrics.calls[0].pV != "pv-test" {
+		t.Fatalf("expected policy version pv-test, got %q", metrics.calls[0].pV)
 	}
 }
 
@@ -150,6 +169,12 @@ func TestRequire_Allowed(t *testing.T) {
 	}
 	if metrics.calls[0].object != "metadata:nodes" || metrics.calls[0].action != "read" {
 		t.Fatalf("expected labels metadata:nodes/read, got %s/%s", metrics.calls[0].object, metrics.calls[0].action)
+	}
+	if metrics.calls[0].mode != string(authz.ModeEnforce) {
+		t.Fatalf("expected mode enforce, got %q", metrics.calls[0].mode)
+	}
+	if metrics.calls[0].pV != "pv-test" {
+		t.Fatalf("expected policy version pv-test, got %q", metrics.calls[0].pV)
 	}
 }
 

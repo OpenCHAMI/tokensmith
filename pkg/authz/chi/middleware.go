@@ -30,12 +30,14 @@ type ctxKeyRequirement struct{}
 type ctxKeySkipAuthz struct{}
 
 type Metrics interface {
-	IncAuthzDecision(decision authz.Decision, object, action string)
+	IncAuthzDecision(decision authz.Decision, object, action, mode, policyVersion string)
+	IncAuthzError(stage, mode, policyVersion string)
 }
 
 type nopMetrics struct{}
 
-func (nopMetrics) IncAuthzDecision(_ authz.Decision, _, _ string) {}
+func (nopMetrics) IncAuthzDecision(_ authz.Decision, _, _, _, _ string) {}
+func (nopMetrics) IncAuthzError(_, _, _ string)                         {}
 
 // PrincipalFromContext returns the principal previously set into ctx by
 // SetPrincipal() or by service-specific AuthN middleware.
@@ -90,6 +92,7 @@ type Middleware struct {
 	mode          authz.Mode
 	metrics       Metrics
 	requestIDFunc func(context.Context) string
+	policySource  PolicySource
 	// okMissingPrincipal allows services to make certain endpoints public with no AuthN
 	// while still installing AuthZ middleware globally. If false, missing principal
 	// results in 401 unless route is SkipAuthz.
@@ -100,6 +103,11 @@ type Middleware struct {
 }
 
 type Option func(*Middleware)
+
+// WithPolicySource sets the policy source annotation for diagnostics.
+func WithPolicySource(source PolicySource) Option {
+	return func(m *Middleware) { m.policySource = source }
+}
 
 // WithMode sets the authorization mode.
 func WithMode(mode authz.Mode) Option {
@@ -147,6 +155,7 @@ func New(authorizer *authz.Authorizer, opts ...Option) *Middleware {
 		mode:          authz.ModeEnforce,
 		metrics:       nopMetrics{},
 		requestIDFunc: func(context.Context) string { return "" },
+		policySource:  PolicySourceBaselineOnly,
 	}
 	for _, o := range opts {
 		o(m)
@@ -175,7 +184,7 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		req, ok := r.Context().Value(ctxKeyRequirement{}).(requirement)
 		if !ok || req.object == "" || req.action == "" {
 			// Deny-by-default when installed.
-			m.metrics.IncAuthzDecision(authz.DecisionIndeterminate, "", "")
+			m.metrics.IncAuthzDecision(authz.DecisionIndeterminate, "", "", string(m.mode), m.policyVersion())
 			m.deny(w, r, authz.DecisionIndeterminate, "missing authz requirement")
 			return
 		}
@@ -187,13 +196,14 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 				http.Error(w, "missing principal", http.StatusUnauthorized)
 				return
 			}
-			m.metrics.IncAuthzDecision(authz.DecisionIndeterminate, req.object, req.action)
+			m.metrics.IncAuthzDecision(authz.DecisionIndeterminate, req.object, req.action, string(m.mode), m.policyVersion())
 			m.deny(w, r, authz.DecisionIndeterminate, "missing principal")
 			return
 		}
 
 		decision, res := m.authz.Authorize(r.Context(), *principal, req.object, req.action)
-		m.metrics.IncAuthzDecision(decision, req.object, req.action)
+		_ = res
+		m.metrics.IncAuthzDecision(decision, req.object, req.action, string(m.mode), m.policyVersion())
 
 		switch m.mode {
 		case authz.ModeShadow:
@@ -205,16 +215,23 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			_ = res
 			m.enforcedDenials.Add(1)
 			m.deny(w, r, decision, "access denied")
 			return
 		default:
 			// Unknown mode => safe default.
+			m.metrics.IncAuthzError("mode", string(m.mode), m.policyVersion())
 			m.deny(w, r, authz.DecisionError, "invalid authz mode")
 			return
 		}
 	})
+}
+
+func (m *Middleware) policyVersion() string {
+	if m == nil || m.authz == nil {
+		return ""
+	}
+	return m.authz.PolicyVersion()
 }
 
 func (m *Middleware) deny(w http.ResponseWriter, r *http.Request, decision authz.Decision, msg string) {
@@ -226,10 +243,7 @@ func (m *Middleware) deny(w http.ResponseWriter, r *http.Request, decision authz
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)
 
-	policyVersion := ""
-	if m.authz != nil {
-		policyVersion = m.authz.PolicyVersion()
-	}
+	policyVersion := m.policyVersion()
 
 	_ = json.NewEncoder(w).Encode(authz.ErrorResponse{
 		Code:          codeForDecision(decision),
