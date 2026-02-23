@@ -17,6 +17,13 @@ Deployments **MAY** extend the baseline with **policy fragments** (Casbin policy
 
 If no policy directory is configured, TokenSmith loads the baseline only.
 
+## Policy load lifecycle (v1)
+
+TokenSmith loads its policy at **process startup**.
+
+- **Hot reload is not supported in v1.**
+- If you change the effective policy (baseline is updated by upgrading TokenSmith, or fragments are changed on disk), you **MUST restart** the service to pick up changes.
+
 ## Policy fragments (filesystem)
 
 ### Enable fragment loading

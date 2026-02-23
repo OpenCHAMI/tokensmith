@@ -10,6 +10,7 @@ require (
 	github.com/casbin/casbin/v2 v2.135.0
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.11.1
 )
