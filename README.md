@@ -175,6 +175,15 @@ go get github.com/openchami/tokensmith/middleware
 
 See the [middleware documentation](middleware/README.md) for detailed usage instructions.
 
+## Test utilities (for downstream integration tests)
+
+TokenSmith exposes a small public `pkg/testutil` package intended for **service integration tests**.
+
+Compatibility policy:
+- Best-effort stability within a major version of TokenSmith.
+- No guarantees are made about internal structures or unexported behavior.
+- Do not use these helpers in production code.
+
 ## Usage
 
 ### Token Service
