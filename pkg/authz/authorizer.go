@@ -109,6 +109,15 @@ func WithDecisionCacheFromEnv() AuthorizerOption {
 // Authorize evaluates whether principal may perform action on object.
 //
 // Services should typically call this from HTTP middleware.
+// PolicyVersion returns the policy version hash (deterministic identity) for
+// the effective policy loaded into this authorizer.
+func (a *Authorizer) PolicyVersion() string {
+	if a == nil {
+		return ""
+	}
+	return a.policyVersion
+}
+
 func (a *Authorizer) Authorize(ctx context.Context, principal Principal, object, action string) (Decision, *AuthzResult) {
 	_ = ctx
 
