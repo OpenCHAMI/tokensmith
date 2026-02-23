@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Authorization contract: normative AuthZ contract doc (modes off|shadow|enforce, decision taxonomy allow|deny|indeterminate|error, deny-by-default route model, stable JSON error schema, and deterministic policy hash requirement).
+- Public Go AuthZ contract types/constants in `pkg/authz`.
+
+### Added
 - **Pluggable Policy Engine System**: Introduced a flexible policy engine architecture for determining scopes, audiences, and permissions in access tokens.
   - **Static Policy Engine**: Simple hardcoded policy engine with configurable scopes, audiences, and permissions.
   - **File-Based Policy Engine**: Dynamic policy engine that reads configuration from JSON files with role-based access control (RBAC).
