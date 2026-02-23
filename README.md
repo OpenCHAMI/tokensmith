@@ -175,6 +175,59 @@ go get github.com/openchami/tokensmith/middleware
 
 See the [middleware documentation](middleware/README.md) for detailed usage instructions.
 
+## Authorization (Casbin RBAC)
+
+The **normative** reference for TokenSmith authorization behavior is:
+
+- [`docs/authz_contract.md`](docs/authz_contract.md)
+
+Operational policy loading details are in:
+
+- [`docs/authz_policy.md`](docs/authz_policy.md)
+- [`docs/authz_operations.md`](docs/authz_operations.md)
+
+### Embedded baseline policy
+
+TokenSmith embeds a baseline Casbin model + policy that implements the minimum OpenCHAMI RBAC roles:
+
+- `admin`: full CRUD on all resources across all services
+- `operator`: read/write on boot + metadata + SMD state; **no delete**
+- `viewer`: read-only access to all resources
+- `service`: service-to-service calls (e.g., boot-service reading metadata)
+
+Services can run with only the embedded baseline policy, or extend it with filesystem policy fragments.
+
+### Policy lifecycle
+
+- Policies are loaded at **process startup**.
+- **No hot reload** in v1: changing policy fragments requires a **restart**.
+
+### Modes (off → shadow → enforce)
+
+Services SHOULD roll out authorization in stages:
+
+1. **off**: authorization disabled
+2. **shadow**: evaluate and emit metrics/logs, but do not block requests
+3. **enforce**: block denied requests (HTTP 403 with the TokenSmith error body)
+
+### Observability: policy version hash
+
+TokenSmith computes a deterministic policy hash (`policy_version`) for the effective policy set.
+
+Operators should confirm `policy_version` in:
+
+- service startup logs (policy load)
+- AuthZ decision logs/metrics (shadow/enforce)
+- the 403 JSON error body returned by the AuthZ middleware in `enforce` mode
+
+This makes it possible to confirm exactly which policy is in effect across a fleet.
+
+### Troubleshooting checklist
+
+- If you changed policy fragments but behavior did not change: you likely need a **restart** (no hot reload).
+- Compare `policy_version` across pods to ensure the same policy is mounted everywhere.
+- In shadow mode, look for *shadow denials* in AuthZ decision metrics/logs to identify what will break when switching to enforce.
+
 ## Test utilities (for downstream integration tests)
 
 TokenSmith exposes a small public `pkg/testutil` package intended for **service integration tests**.
