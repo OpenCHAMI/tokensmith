@@ -98,7 +98,7 @@ func (c *jwksCache) refresh(ctx context.Context, now time.Time, jwksURL string, 
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("jwks fetch failed: status=%d", resp.StatusCode)
 	}

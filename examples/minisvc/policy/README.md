@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 OpenCHAMI Contributors
+
+SPDX-License-Identifier: MIT
+-->
+
 # minisvc policy
 
 This directory contains **standard Casbin artifacts** used by `examples/minisvc`.

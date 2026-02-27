@@ -241,7 +241,7 @@ func (m *Middleware) handleDecision(next http.Handler, w http.ResponseWriter, r 
 	}
 
 	decision, _ := m.Authorizer.Authorize(r.Context(), p, rd.Object, rd.Action)
-	finalReason := ReasonPolicyDenied
+	var finalReason Reason
 	switch decision {
 	case DecisionAllow:
 		finalReason = ""
