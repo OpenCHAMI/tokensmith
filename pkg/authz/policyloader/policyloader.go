@@ -75,7 +75,7 @@ func (l *Loader) Load(policyDir string) (*casbin.Enforcer, error) {
 		}
 
 		// Update policy version to include the additional fragments.
-		pv := policyHash(baselineModelText, append([]byte(nil), baselinePolicyText...), policyBytes)
+		pv := policyVersionHashV1(baselineModelText, append([]byte(nil), baselinePolicyText...), policyBytes)
 		l.mu.Lock()
 		l.policyVersion = pv
 		l.mu.Unlock()

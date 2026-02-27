@@ -17,8 +17,6 @@ package policyloader
 import (
 	"bufio"
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -125,7 +123,7 @@ func (l *Loader) LoadSource(src Source) (*casbin.Enforcer, error) {
 		return nil, fmt.Errorf("load grouping: %w", err)
 	}
 
-	pv := policyHash(modelText, policyBytes, groupingBytes)
+	pv := policyVersionHashV1(modelText, policyBytes, groupingBytes)
 	l.mu.Lock()
 	l.policyVersion = pv
 	l.mu.Unlock()
@@ -368,19 +366,6 @@ func stripUTF8BOM(b []byte) []byte {
 
 func normalizeUTF8BOMString(s string) string {
 	return string(stripUTF8BOM([]byte(s)))
-}
-
-func policyHash(modelText string, policyBytes, groupingBytes []byte) string {
-	mt := strings.ReplaceAll(modelText, "\r\n", "\n")
-	mt = strings.TrimSpace(mt) + "\n"
-
-	h := sha256.New()
-	h.Write([]byte(mt))
-	h.Write([]byte("\n--policy--\n"))
-	h.Write(policyBytes)
-	h.Write([]byte("\n--grouping--\n"))
-	h.Write(groupingBytes)
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Ensure we don't accidentally depend on os.DirFS semantics in callers.
