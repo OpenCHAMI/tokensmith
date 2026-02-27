@@ -74,6 +74,20 @@ spec:
           name: boot-service-authz-policy
 ```
 
+## Casbin enforcer hook (escape hatch)
+
+TokenSmith provides an explicit escape hatch for advanced Casbin usage: a **construction-time** enforcer hook.
+
+- The hook runs **only during authorizer construction** (startup).
+- After construction, the enforcer must be treated as **immutable**. Do not add/remove policies, grouping, model, or functions at runtime.
+  - Rationale: Casbin enforcers are mutable; runtime mutation can cause thread-safety and consistency surprises.
+
+See `pkg/authz/engine`:
+
+- `Builder.WithCasbinEnforcerHook(func(e *casbin.Enforcer) error { ... })`
+
+This enables custom matcher functions, adapters, watchers, etc., while keeping Casbin optional for most consumers.
+
 ## Policy version hash (policy_version)
 
 TokenSmith computes a deterministic SHA-256 hash (`policy_version`) over the **effective Casbin artifacts**:
