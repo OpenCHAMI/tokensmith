@@ -63,6 +63,14 @@ type Middleware struct {
 	PublicRegexps        []func(string) bool
 	RequestIDFromContext func(context.Context) string
 
+	// Observability hook (optional). Called once per evaluated request in SHADOW
+	// and ENFORCE.
+	OnDecision OnDecisionHook
+
+	// IncludeRolesInDecisionRecord controls whether DecisionRecord contains the
+	// role names. If false, only RolesCount is set.
+	IncludeRolesInDecisionRecord bool
+
 	DenyWriter DenyWriter
 }
 
@@ -86,14 +94,27 @@ func WithRequestIDFromContext(f func(context.Context) string) MiddlewareOption {
 	return func(m *Middleware) { m.RequestIDFromContext = f }
 }
 
+// WithOnDecision installs an optional observability hook invoked once per
+// evaluated request in SHADOW and ENFORCE (not in OFF and not for public bypass).
+func WithOnDecision(h OnDecisionHook) MiddlewareOption {
+	return func(m *Middleware) { m.OnDecision = h }
+}
+
+// WithIncludeRolesInDecisionRecord controls whether DecisionRecord includes role
+// names in addition to RolesCount.
+func WithIncludeRolesInDecisionRecord(include bool) MiddlewareOption {
+	return func(m *Middleware) { m.IncludeRolesInDecisionRecord = include }
+}
+
 // NewMiddleware constructs authz middleware.
 func NewMiddleware(authorizer *Authorizer, mapper RouteMapper, opts ...MiddlewareOption) *Middleware {
 	m := &Middleware{
 		Authorizer:           authorizer,
 		Mapper:               mapper,
 		Mode:                 ModeEnforce,
-		RequestIDFromContext: func(context.Context) string { return "" },
+		RequestIDFromContext: DefaultRequestIDFromContext,
 		DenyWriter:           DenyWriter{},
+		OnDecision:           nil,
 	}
 	for _, o := range opts {
 		o(m)
@@ -119,19 +140,18 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		p, ok := PrincipalFromContext(r.Context())
 		if !ok {
 			if m.RequireAuthn {
+				requestID := m.requestIDFrom(r.Context())
+				policyVersion := m.policyVersion()
+				m.emitDecision(r.Context(), Principal{}, Input{Object: "", Action: "", Domain: ""}, DecisionDeny, ReasonNoPrincipal, requestID, policyVersion)
 				m.deny(w, r, http.StatusUnauthorized, DenyResponseV1{
-					Code:     DenyCodeAuthNRequired,
-					Message:  "authentication required",
-					Decision: DecisionDeny,
-					Reason:   ReasonNoPrincipal,
-					Mode:     string(m.Mode),
-					Request:  RequestSummary{Method: r.Method, Path: r.URL.Path},
-					RequestID: func() string {
-						if m.RequestIDFromContext == nil {
-							return ""
-						}
-						return m.RequestIDFromContext(r.Context())
-					}(),
+					Code:          DenyCodeAuthNRequired,
+					Message:       "authentication required",
+					Decision:      DecisionDeny,
+					Reason:        ReasonNoPrincipal,
+					Mode:          string(m.Mode),
+					Request:       RequestSummary{Method: r.Method, Path: r.URL.Path},
+					PolicyVersion: policyVersion,
+					RequestID:     requestID,
 				})
 				return
 			}
@@ -139,6 +159,9 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			// an empty principal.
 			p = &Principal{}
 		}
+
+		// Attach request for downstream observability.
+		r = r.WithContext(ContextWithHTTPRequest(r.Context(), r))
 
 		if m.Mapper == nil {
 			m.handleDecision(next, w, r, *p, RouteDecision{Mapped: false}, nil)
@@ -153,6 +176,9 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 func (m *Middleware) handleDecision(next http.Handler, w http.ResponseWriter, r *http.Request, p Principal, rd RouteDecision, mapErr error) {
 	input := Input{Object: rd.Object, Action: rd.Action, Domain: rd.Domain}
 
+	requestID := m.requestIDFrom(r.Context())
+	policyVersion := m.policyVersion()
+
 	if mapErr != nil {
 		status := http.StatusInternalServerError
 		code := DenyCodeAuthzEngineErr
@@ -164,6 +190,9 @@ func (m *Middleware) handleDecision(next http.Handler, w http.ResponseWriter, r 
 			reason = ReasonBadRequest
 			msg = mapErr.Error()
 		}
+
+		m.emitDecision(r.Context(), p, input, DecisionError, reason, requestID, policyVersion)
+
 		m.deny(w, r, status, DenyResponseV1{
 			Code:     code,
 			Message:  msg,
@@ -176,9 +205,9 @@ func (m *Middleware) handleDecision(next http.Handler, w http.ResponseWriter, r 
 				Roles: append([]string(nil), p.Roles...),
 			},
 			Input:         input,
-			PolicyVersion: m.policyVersion(),
+			PolicyVersion: policyVersion,
 			Request:       RequestSummary{Method: r.Method, Path: r.URL.Path},
-			RequestID:     m.requestIDFrom(r.Context()),
+			RequestID:     requestID,
 			Details:       map[string]any{"error": "mapper"},
 		})
 		return
@@ -186,6 +215,7 @@ func (m *Middleware) handleDecision(next http.Handler, w http.ResponseWriter, r 
 
 	if !rd.Mapped {
 		if m.Mode == ModeEnforce && !m.AllowUnmapped {
+			m.emitDecision(r.Context(), p, input, DecisionDeny, ReasonUnmappedRoute, requestID, policyVersion)
 			m.deny(w, r, http.StatusForbidden, DenyResponseV1{
 				Code:     DenyCodeAuthzUnmapped,
 				Message:  "unmapped route",
@@ -198,18 +228,32 @@ func (m *Middleware) handleDecision(next http.Handler, w http.ResponseWriter, r 
 					Roles: append([]string(nil), p.Roles...),
 				},
 				Input:         input,
-				PolicyVersion: m.policyVersion(),
+				PolicyVersion: policyVersion,
 				Request:       RequestSummary{Method: r.Method, Path: r.URL.Path},
-				RequestID:     m.requestIDFrom(r.Context()),
+				RequestID:     requestID,
 			})
 			return
 		}
-		// shadow always allows; enforce allows if AllowUnmapped.
+		// Unmapped allowed (shadow always allows; enforce allows if AllowUnmapped).
+		m.emitDecision(r.Context(), p, input, DecisionAllow, ReasonUnmappedRoute, requestID, policyVersion)
 		next.ServeHTTP(w, r)
 		return
 	}
 
 	decision, _ := m.Authorizer.Authorize(r.Context(), p, rd.Object, rd.Action)
+	finalReason := ReasonPolicyDenied
+	switch decision {
+	case DecisionAllow:
+		finalReason = ""
+	case DecisionError:
+		finalReason = ReasonEngineError
+	case DecisionDeny:
+		finalReason = ReasonPolicyDenied
+	default:
+		finalReason = ReasonEngineError
+	}
+	m.emitDecision(r.Context(), p, input, decision, finalReason, requestID, policyVersion)
+
 	if m.Mode == ModeShadow {
 		next.ServeHTTP(w, r)
 		return
@@ -233,9 +277,9 @@ func (m *Middleware) handleDecision(next http.Handler, w http.ResponseWriter, r 
 				Roles: append([]string(nil), p.Roles...),
 			},
 			Input:         input,
-			PolicyVersion: m.policyVersion(),
+			PolicyVersion: policyVersion,
 			Request:       RequestSummary{Method: r.Method, Path: r.URL.Path},
-			RequestID:     m.requestIDFrom(r.Context()),
+			RequestID:     requestID,
 		})
 		return
 	}
@@ -252,14 +296,52 @@ func (m *Middleware) handleDecision(next http.Handler, w http.ResponseWriter, r 
 			Roles: append([]string(nil), p.Roles...),
 		},
 		Input:         input,
-		PolicyVersion: m.policyVersion(),
+		PolicyVersion: policyVersion,
 		Request:       RequestSummary{Method: r.Method, Path: r.URL.Path},
-		RequestID:     m.requestIDFrom(r.Context()),
+		RequestID:     requestID,
 	})
 }
 
 func (m *Middleware) deny(w http.ResponseWriter, r *http.Request, status int, resp DenyResponseV1) {
 	_ = m.DenyWriter.Write(w, r, status, resp)
+}
+
+func (m *Middleware) emitDecision(ctx context.Context, p Principal, in Input, decision Decision, reason Reason, requestID, policyVersion string) {
+	if m == nil || m.OnDecision == nil {
+		return
+	}
+	if m.Mode == ModeOff {
+		return
+	}
+
+	rec := DecisionRecord{
+		Method:        "",
+		Path:          "",
+		PrincipalID:   p.ID,
+		PrincipalType: "",
+		Object:        in.Object,
+		Action:        in.Action,
+		Domain:        in.Domain,
+		Decision:      decision,
+		Reason:        reason,
+		Mode:          m.Mode,
+		PolicyVersion: policyVersion,
+		RequestID:     requestID,
+	}
+
+	if req, ok := ctx.Value(ctxKeyHTTPRequest{}).(*http.Request); ok && req != nil {
+		rec.Method = req.Method
+		if req.URL != nil {
+			rec.Path = req.URL.Path
+		}
+	}
+
+	if m.IncludeRolesInDecisionRecord {
+		rec.Roles = append([]string(nil), p.Roles...)
+	}
+	rec.RolesCount = len(p.Roles)
+
+	m.OnDecision(ctx, rec)
 }
 
 func (m *Middleware) policyVersion() string {
