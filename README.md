@@ -175,16 +175,44 @@ go get github.com/openchami/tokensmith/middleware
 
 See the [middleware documentation](middleware/README.md) for detailed usage instructions.
 
-## Authorization (Casbin RBAC)
+## Testing (local developer guidance)
 
-The **normative** reference for TokenSmith authorization behavior is:
+Recommended local verification (CI may not run all of these):
+
+```sh
+go test ./...
+go test -race ./...
+go vet ./...
+```
+
+## Authorization (Casbin-first)
+
+TokenSmith AuthZ is **Casbin-first**: `model.conf` + `policy.csv` + `grouping.csv` are the external interface.
+
+Start here:
+
+- Casbin-first guide: [`docs/casbin-first-guide.md`](docs/casbin-first-guide.md)
+
+Normative (frozen) wire behavior:
+
+- [`docs/authz-spec.md`](docs/authz-spec.md)
+
+Additional normative contract text:
 
 - [`docs/authz_contract.md`](docs/authz_contract.md)
 
-Operational policy loading details are in:
+Operational policy loading details:
 
 - [`docs/authz_policy.md`](docs/authz_policy.md)
 - [`docs/authz_operations.md`](docs/authz_operations.md)
+
+Security/threat model notes:
+
+- [`docs/security-notes.md`](docs/security-notes.md)
+
+Fabrica integration guidance:
+
+- [`docs/fabrica.md`](docs/fabrica.md)
 
 ### Embedded baseline policy
 

@@ -26,6 +26,16 @@ TokenSmith loads its policy at **process startup**.
 
 ## Policy fragments (filesystem)
 
+### Symlink behavior
+
+TokenSmith policy discovery is **symlink-aware** and deterministic.
+
+- Symlinks are allowed.
+- Symlinks are resolved and canonicalized so the same effective set of files produces the same `policy_version`.
+- Symlinks that resolve outside the configured policy root may be rejected depending on loader configuration.
+
+Rationale: predictable behavior across container runtimes and to reduce confusion when policy is composed via mounted directories.
+
 ### Enable fragment loading
 
 Set one of:
