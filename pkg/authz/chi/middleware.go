@@ -146,6 +146,11 @@ func WithAllowMissingPrincipal(allow bool) Option {
 // New returns a chi-compatible authorization middleware enforcing the TokenSmith
 // AuthZ contract.
 //
+// Wire contract:
+//
+// This middleware's deny response schema and HTTP semantics are frozen by
+// docs/authz-spec.md ("TokenSmith AuthN/AuthZ Wire Contract Spec (Frozen)").
+//
 // Ordering contract:
 //
 //	request-id (optional) -> authn (JWT validation) -> authz
