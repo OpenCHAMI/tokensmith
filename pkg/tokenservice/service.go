@@ -121,19 +121,6 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	}
 
 	// Extract additional claims from introspection
-	if aud, ok := introspection.Claims["aud"].([]string); ok && len(aud) > 0 {
-		claims.Audience = aud
-	} else if audI, ok := introspection.Claims["aud"].([]interface{}); ok && len(audI) > 0 {
-		out := make([]string, 0, len(audI))
-		for _, v := range audI {
-			if s, ok := v.(string); ok {
-				out = append(out, s)
-			}
-		}
-		if len(out) > 0 {
-			claims.Audience = out
-		}
-	}
 	if name, ok := introspection.Claims["name"].(string); ok {
 		claims.Name = name
 	}
@@ -186,46 +173,11 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		return "", fmt.Errorf("missing required claim: auth_events")
 	}
 
-	// Derive TokenSmith-internal scopes from upstream groups.
-	//
-	// NOTE: This is separate from AuthZ RBAC for OpenCHAMI services; this is only
-	// about what scopes to embed in the exchanged token.
-	if groupsRaw, ok := introspection.Claims["groups"]; ok {
-		scopes := make([]string, 0)
-		scopesSet := make(map[string]struct{})
-
-		// groups may arrive as []string or []interface{} depending on provider.
-		switch v := groupsRaw.(type) {
-		case []string:
-			for _, g := range v {
-				for _, s := range s.GroupScopes[g] {
-					scopesSet[s] = struct{}{}
-				}
-			}
-		case []interface{}:
-			for _, gi := range v {
-				g, ok := gi.(string)
-				if !ok {
-					continue
-				}
-				for _, sc := range s.GroupScopes[g] {
-					scopesSet[sc] = struct{}{}
-				}
-			}
-		}
-
-		for sc := range scopesSet {
-			scopes = append(scopes, sc)
-		}
-		claims.Scope = scopes
-	}
-
-	// Get the scope and target service audience from the request context (set by
-	// TokenExchangeHandler). These SHOULD override derived values when present.
-	if scope, ok := ctx.Value(ScopeContextKey).([]string); ok {
+	// Get the scope and audience from the context
+	if scope, ok := ctx.Value("scope").([]string); ok {
 		claims.Scope = scope
 	}
-	if targetService, ok := ctx.Value(TargetServiceContextKey).(string); ok && targetService != "" {
+	if targetService, ok := ctx.Value("target_audience").(string); !ok {
 		claims.Audience = []string{targetService}
 	}
 

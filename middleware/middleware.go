@@ -271,10 +271,7 @@ func GetClaimsFromContext(ctx context.Context) (*token.TSClaims, error) {
 	return claims, nil
 }
 
-// GetRawClaimsFromContext retrieves the raw JWT claims from the request context.
-//
-// Deprecated: prefer mapping verified claims into an authz.Principal and storing
-// it in context for use by AuthZ middleware.
+// GetRawClaimsFromContext retrieves the raw JWT claims from the request context
 func GetRawClaimsFromContext(ctx context.Context) (*token.TSClaims, error) {
 	claims, ok := ctx.Value(RawClaimsContextKey).(*token.TSClaims)
 	if !ok {
