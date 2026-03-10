@@ -1,6 +1,0 @@
-# Optional grouping examples.
-# In this minisvc, JWT roles are typically provided directly in the Principal.
-# These lines demonstrate standard Casbin grouping syntax.
-
-g, user1, viewer
-g, user2, operator
