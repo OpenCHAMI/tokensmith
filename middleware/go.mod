@@ -8,7 +8,7 @@ go 1.24.0
 
 require (
 	github.com/MicahParks/keyfunc v1.9.0
-	github.com/casbin/casbin/v2 v2.128.0
+	github.com/casbin/casbin/v2 v2.135.0
 	github.com/openchami/tokensmith v0.0.0
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.11.1
