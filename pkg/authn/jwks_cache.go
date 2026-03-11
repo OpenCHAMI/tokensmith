@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/MicahParks/keyfunc/v3"
 )
 
 var errNoCachedKeys = errors.New("no cached JWKS keys")
@@ -117,28 +119,15 @@ func (c *jwksCache) refresh(ctx context.Context, now time.Time, jwksURL string, 
 
 	newKeys := make(map[string]crypto.PublicKey)
 	for _, rk := range raw.Keys {
-		var hdr struct {
-			KID string `json:"kid"`
-			KTY string `json:"kty"`
-			ALG string `json:"alg"`
-		}
-		_ = json.Unmarshal(rk, &hdr)
-		if hdr.KID == "" {
-			continue
-		}
-		if hdr.ALG != "" {
-			if _, ok := opt.allowedAlgs[hdr.ALG]; !ok {
-				continue
-			}
-		}
-
-		pub, err := parseJWKSKey(rk)
+		keysForJWK, err := parseKeyfuncJWKSet(ctx, rk, opt.allowedAlgs)
 		if err != nil {
 			continue
 		}
-		switch pub.(type) {
-		case *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
-			newKeys[hdr.KID] = pub
+		for kid, key := range keysForJWK {
+			switch key.(type) {
+			case *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
+				newKeys[kid] = key
+			}
 		}
 	}
 
@@ -154,37 +143,46 @@ func (c *jwksCache) refresh(ctx context.Context, now time.Time, jwksURL string, 
 	return nil
 }
 
-func parseJWKSKey(raw json.RawMessage) (crypto.PublicKey, error) {
-	var base struct {
-		KTY string `json:"kty"`
-	}
-	if err := json.Unmarshal(raw, &base); err != nil {
+func parseKeyfuncJWKSet(ctx context.Context, rawJWK json.RawMessage, allowedAlgs map[string]struct{}) (map[string]crypto.PublicKey, error) {
+	setJSON, err := json.Marshal(struct {
+		Keys []json.RawMessage `json:"keys"`
+	}{Keys: []json.RawMessage{rawJWK}})
+	if err != nil {
 		return nil, err
 	}
 
-	switch base.KTY {
-	case "RSA":
-		var jwk struct {
-			KTY string `json:"kty"`
-			N   string `json:"n"`
-			E   string `json:"e"`
-		}
-		if err := json.Unmarshal(raw, &jwk); err != nil {
-			return nil, err
-		}
-		return rsaPublicKeyFromJWK(jwk.N, jwk.E)
-	case "EC":
-		var jwk struct {
-			KTY string `json:"kty"`
-			CRV string `json:"crv"`
-			X   string `json:"x"`
-			Y   string `json:"y"`
-		}
-		if err := json.Unmarshal(raw, &jwk); err != nil {
-			return nil, err
-		}
-		return ecdsaPublicKeyFromJWK(jwk.CRV, jwk.X, jwk.Y)
-	default:
-		return nil, fmt.Errorf("unsupported kty %q", base.KTY)
+	kf, err := keyfunc.NewJWKSetJSON(setJSON)
+	if err != nil {
+		return nil, err
 	}
+
+	jwksKeys, err := kf.Storage().KeyReadAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	keysByKID := make(map[string]crypto.PublicKey)
+	for _, jwk := range jwksKeys {
+		m := jwk.Marshal()
+		if m.KID == "" {
+			continue
+		}
+		if m.ALG != "" {
+			if _, ok := allowedAlgs[string(m.ALG)]; !ok {
+				continue
+			}
+		}
+
+		pub, ok := jwk.Key().(crypto.PublicKey)
+		if !ok {
+			continue
+		}
+		keysByKID[m.KID] = pub
+	}
+
+	if len(keysByKID) == 0 {
+		return nil, errors.New("no usable keys in jwk")
+	}
+
+	return keysByKID, nil
 }
