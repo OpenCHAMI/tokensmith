@@ -98,6 +98,24 @@ This is ideal when:
 
 See `examples/minisvc` for both styles.
 
+## Why both `policy.csv` and `grouping.csv`
+
+Casbin RBAC separates **permissions** from **membership**:
+
+- `policy.csv` contains permission rules (`p` lines), typically:
+   - `p, <role-or-subject>, <object>, <action>`
+- `grouping.csv` contains grouping rules (`g` lines), typically:
+   - `g, <subject>, <role>`
+
+In practice:
+
+- Keep authorization intent in `policy.csv` (what can be done).
+- Keep subject/role assignment in `grouping.csv` (who gets which role).
+
+`grouping.csv` is optional if your AuthN/mapper already injects roles directly into the principal and your matcher/policy uses those role strings directly. Even then, keeping grouping in Casbin can improve operator clarity and troubleshooting.
+
+Both effective policy and grouping content are included in `policy_version` hashing.
+
 ## Policy layout, discovery, merge order
 
 TokenSmith can load policy from:

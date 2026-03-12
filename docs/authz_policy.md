@@ -50,6 +50,21 @@ to a directory containing policy fragment files.
 - TokenSmith loads files matching `*.csv` (including `*.policy.csv`) from the directory.
 - Fragments are loaded in **lexical order** by filename.
 
+### `policy.csv` vs `grouping.csv`
+
+TokenSmith/Casbin consume both kinds of CSV content:
+
+- **Policy rules** (`p` lines): permissions such as `p, role:viewer, boot:status, read`.
+- **Grouping rules** (`g` lines): role membership such as `g, alice, role:viewer`.
+
+Operational recommendation:
+
+- keep permission fragments separate from grouping fragments for readability,
+- use deterministic filename prefixes (for example `10-policy.csv`, `20-grouping.csv`),
+- and treat both as part of the effective authorization state.
+
+Both merged policy and merged grouping bytes are included in `policy_version`.
+
 ### Example Kubernetes deployment
 
 Mount a ConfigMap containing CSV fragments:
