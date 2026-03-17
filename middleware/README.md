@@ -8,6 +8,10 @@ SPDX-License-Identifier: MIT
 
 A flexible and feature-rich JWT middleware for Go applications that supports token validation, scope checking, and service-to-service authentication.
 
+> For new OpenCHAMI service integrations, start with the Casbin-first AuthN/AuthZ flow in `../docs/getting-started.md` and `../docs/casbin-first-guide.md`.
+>
+> This package remains available for compatibility with existing integrations.
+
 ## Features
 
 - JWT token validation with support for:

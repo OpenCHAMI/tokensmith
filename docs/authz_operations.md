@@ -36,7 +36,7 @@ Use filesystem policy fragments when you need to:
 
 Mount a directory into each service (e.g., via Kubernetes ConfigMap/Secret/volume), and point the service at it via:
 
-- `TOKENS_MITH_POLICY_DIR` (preferred)
+- `TOKENSMITH_POLICY_DIR` (preferred)
 - `AUTHZ_POLICY_DIR` (compat)
 
 TokenSmith loads `*.csv` fragments in **lexical order** by filename.
@@ -73,7 +73,7 @@ spec:
       containers:
       - name: metadata-service
         env:
-        - name: TOKENS_MITH_POLICY_DIR
+        - name: TOKENSMITH_POLICY_DIR
           value: /etc/tokensmith/authz
         volumeMounts:
         - name: authz-policy
@@ -120,6 +120,63 @@ Where to find `policy_version`:
 
 If different pods show different `policy_version` values, verify that the same fragments are mounted everywhere and that pods were restarted.
 
+## Diagnostics endpoint (recommended)
+
+For services using `pkg/authz/chi`, expose a diagnostics endpoint so operators can quickly confirm mode and effective policy source/version.
+
+Suggested route:
+
+- `GET /authz/diagnostics`
+
+Suggested wiring:
+
+```go
+import (
+    "net/http"
+
+    authzchi "github.com/openchami/tokensmith/pkg/authz/chi"
+)
+
+func registerDiagnostics(mux *http.ServeMux, mode string, policyVersion string, source authzchi.PolicySource) {
+    mux.Handle("/authz/diagnostics", authzchi.DiagnosticsHandler(mode, policyVersion, source))
+}
+```
+
+At startup, log mode + policy details once:
+
+```go
+authzchi.LogStartupDiagnostics(mode, authorizer.PolicyVersion(), authzchi.PolicySourceBaselineFragments)
+```
+
+Expected response shape:
+
+```json
+{
+  "mode": "enforce",
+  "policy_version": "<sha256>",
+  "policy_source": "baseline+fragments"
+}
+```
+
+Use this endpoint during rollouts to detect mismatched pods quickly.
+
+## Rollout verification playbook
+
+Use this sequence for every policy or mode change:
+
+1. Deploy with mode `shadow`.
+2. Verify each pod returns the same `policy_version` from diagnostics.
+3. Confirm shadow denials align with expected unmapped/denied paths.
+4. Fix principal mapping or policy fragments until shadow denials are understood.
+5. Switch mode to `enforce`.
+6. Re-check diagnostics and startup logs after rollout.
+
+If any pod reports a different `policy_version`, stop rollout and verify:
+
+- mounted policy directory content,
+- env var (`TOKENSMITH_POLICY_DIR` or `AUTHZ_POLICY_DIR`),
+- pod restart completion.
+
 ## Troubleshooting
 
 ### Symptom: policy changes have no effect
@@ -128,7 +185,7 @@ Most common causes:
 
 - Service not restarted (no hot reload).
 - Fragment not mounted at the expected path.
-- Wrong env var set (`TOKENS_MITH_POLICY_DIR` vs `AUTHZ_POLICY_DIR`).
+- Wrong env var set (`TOKENSMITH_POLICY_DIR` vs `AUTHZ_POLICY_DIR`).
 - Filename does not match `*.csv` or has unexpected ordering.
 
 ### Symptom: requests are unexpectedly denied in enforce mode
@@ -150,6 +207,16 @@ Use shadow denials to:
 - identify missing role/group mappings,
 - identify missing policy grants for legitimate workflows,
 - estimate impact before switching to enforce.
+
+### Symptom: diagnostics endpoint shows unexpected mode or source
+
+Checklist:
+
+- Confirm runtime config sets the intended mode (`off`, `shadow`, `enforce`).
+- Confirm service startup logs contain the same mode and `policy_version` as diagnostics.
+- Confirm policy source matches deployment intent:
+  - `baseline-only` if no policy dir is mounted,
+  - `baseline+fragments` when policy fragments are configured.
 
 ## Example policy snippets (roles and service principals)
 

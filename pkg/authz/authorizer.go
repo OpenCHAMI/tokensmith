@@ -22,7 +22,7 @@ import (
 const (
 	// EnvAuthzCacheSize configures the maximum number of cached authorization
 	// decisions. Cache is disabled by default.
-	EnvAuthzCacheSize = "TOKENS_MITH_AUTHZ_CACHE_SIZE"
+	EnvAuthzCacheSize = "TOKENSMITH_AUTHZ_CACHE_SIZE"
 )
 
 // AuthzResult provides additional details about an authorization decision.
@@ -90,7 +90,7 @@ func WithDecisionCache(size int) AuthorizerOption {
 	}
 }
 
-// WithDecisionCacheFromEnv enables cache when TOKENS_MITH_AUTHZ_CACHE_SIZE is a
+// WithDecisionCacheFromEnv enables cache when TOKENSMITH_AUTHZ_CACHE_SIZE is a
 // positive integer.
 func WithDecisionCacheFromEnv() AuthorizerOption {
 	return func(a *Authorizer) {

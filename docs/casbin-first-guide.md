@@ -54,7 +54,7 @@ If you are troubleshooting, these search terms apply directly:
 ## AuthZ modes
 
 | Mode | Evaluate Casbin? | Deny requests? | Intended use |
-|------|------------------|----------------|--------------|
+| --- | --- | --- | --- |
 | OFF | no | no | initial wiring / break-glass |
 | SHADOW | yes (when mapped) | no | observe impact before enforcing |
 | ENFORCE | yes (when mapped) | yes | normal secured operation |
@@ -103,9 +103,9 @@ See `examples/minisvc` for both styles.
 Casbin RBAC separates **permissions** from **membership**:
 
 - `policy.csv` contains permission rules (`p` lines), typically:
-   - `p, <role-or-subject>, <object>, <action>`
+  - `p, <role-or-subject>, <object>, <action>`
 - `grouping.csv` contains grouping rules (`g` lines), typically:
-   - `g, <subject>, <role>`
+  - `g, <subject>, <role>`
 
 In practice:
 
@@ -159,7 +159,9 @@ TokenSmith computes a deterministic SHA-256 hash over:
    - id/type/roles (do not expect raw JWT claims)
 4. Compare `policy_version`:
    - if it differs across pods, you likely have inconsistent mounts or missing restarts
-5. For Casbin evaluation issues:
+5. Verify diagnostics output (`/authz/diagnostics` when exposed):
+   - mode, `policy_version`, and `policy_source` should match startup expectations
+6. For Casbin evaluation issues:
    - enable SHADOW mode + decision logging
    - use standard Casbin troubleshooting patterns (validate model, matcher, policy format)
 
@@ -169,5 +171,7 @@ TokenSmith computes a deterministic SHA-256 hash over:
 - AuthZ contract (normative): `docs/authz_contract.md`
 - Policy loading + `policy_version`: `docs/authz_policy.md`
 - Ops guide: `docs/authz_operations.md`
+- Diagnostics setup: `docs/authz_operations.md#diagnostics-endpoint-recommended`
+- Rollout checks: `docs/authz_operations.md#rollout-verification-playbook`
 - Examples:
   - `examples/minisvc`

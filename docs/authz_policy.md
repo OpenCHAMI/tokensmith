@@ -40,7 +40,7 @@ Rationale: predictable behavior across container runtimes and to reduce confusio
 
 Set one of:
 
-- `TOKENS_MITH_POLICY_DIR` (preferred)
+- `TOKENSMITH_POLICY_DIR` (preferred)
 - `AUTHZ_POLICY_DIR` (compat)
 
 to a directory containing policy fragment files.
@@ -87,7 +87,7 @@ spec:
       containers:
       - name: boot-service
         env:
-        - name: TOKENS_MITH_POLICY_DIR
+        - name: TOKENSMITH_POLICY_DIR
           value: /etc/tokensmith/authz
         volumeMounts:
         - name: authz-policy
@@ -124,6 +124,11 @@ TokenSmith computes a deterministic SHA-256 hash (`policy_version`) over the **e
 The merge order for fragment directories is deterministic (lexicographic path order), so `policy_version` is stable across restarts even when filesystem enumeration order differs.
 
 `policy_version` is intended for logs/metrics and troubleshooting.
+
+For endpoint wiring and rollout validation using `policy_version`, see:
+
+- `docs/authz_operations.md#diagnostics-endpoint-recommended`
+- `docs/authz_operations.md#rollout-verification-playbook`
 
 It does **not** represent runtime authorization behavior by itself:
 

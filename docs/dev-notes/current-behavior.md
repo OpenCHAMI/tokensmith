@@ -99,7 +99,7 @@ Compatibility constraints:
 
 - Loads embedded baseline model (`baseline_model.conf`) + baseline policy (`baseline_policy.csv`).
 - Optional fragments loaded from a directory:
-  - env: `TOKENS_MITH_POLICY_DIR` (preferred) or `AUTHZ_POLICY_DIR` (compat).
+  - env: `TOKENSMITH_POLICY_DIR` (preferred) or `AUTHZ_POLICY_DIR` (compat).
   - load order: lexical order by filename.
   - accepts `*.csv` or `*.policy.csv`.
 - Computes `policy_version` as sha256 over:

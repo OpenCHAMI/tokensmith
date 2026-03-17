@@ -46,7 +46,7 @@ If we must change behavior, prefer additive changes (new packages/options) and k
 ## Package `pkg/authz/policyloader`
 
 - Constants:
-  - `EnvPolicyDir = "TOKENS_MITH_POLICY_DIR"`
+  - `EnvPolicyDir = "TOKENSMITH_POLICY_DIR"`
   - `EnvPolicyDirCompat = "AUTHZ_POLICY_DIR"`
 - Types:
   - `type Loader struct { ... }`

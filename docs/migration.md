@@ -78,6 +78,34 @@ If AuthZ runs and no principal is present:
 
 See `docs/authz-spec.md` for the normative wire contract.
 
+## Practical adoption checklist
+
+Use this sequence to migrate an existing service with minimal risk.
+
+1. Keep existing AuthN in place.
+2. Start writing principals with `tokensmith.SetPrincipal(ctx, p)` in AuthN.
+3. Update authorization call-sites to read `tokensmith.PrincipalFromContext(ctx)`.
+4. Keep legacy claims reads only where still required by older handlers.
+5. Run in AuthZ `shadow` mode first and review decision logs/metrics.
+6. Move to `enforce` after policy and principal shape are validated.
+
+## Middleware ordering failure modes
+
+| Ordering issue | Typical outcome | Recommended fix |
+| --- | --- | --- |
+| AuthZ before AuthN | Missing principal; request may fail as `401` or compatibility `403` depending on configuration | Ensure AuthN middleware runs before AuthZ |
+| AuthN runs but does not set principal | AuthZ cannot evaluate intended subject/roles | Map verified JWT claims to `authz.Principal` and store with `tokensmith.SetPrincipal` |
+| Route not mapped and not public in enforce mode | Deny-by-default `403` | Add explicit mapping or mark route public by policy/design |
+| Policy changed without restart | Old policy still active | Restart service (no hot reload in v1) |
+
+## What to remove last
+
+Do not remove legacy `middleware.GetClaimsFromContext` usage until:
+
+- all authorization decision paths read principals,
+- downstream handlers no longer rely on direct legacy claim structs,
+- shadow-mode observations show no unexpected denials.
+
 ## Deprecations
 
 The following legacy helpers remain but are deprecated for new consumers:

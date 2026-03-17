@@ -19,7 +19,7 @@ import (
 const (
 	// EnvPolicyDir is the preferred env var pointing to a directory containing
 	// Casbin policy fragment CSV files.
-	EnvPolicyDir = "TOKENS_MITH_POLICY_DIR"
+	EnvPolicyDir = "TOKENSMITH_POLICY_DIR"
 
 	// EnvPolicyDirCompat is an alternate env var name used by some deployments.
 	EnvPolicyDirCompat = "AUTHZ_POLICY_DIR"
@@ -32,7 +32,7 @@ var baselineModelText string
 var baselinePolicyText string
 
 // LoadFromEnv loads baseline model+policy plus optional policy fragments from
-// the directory specified by TOKENS_MITH_POLICY_DIR or AUTHZ_POLICY_DIR.
+// the directory specified by TOKENSMITH_POLICY_DIR or AUTHZ_POLICY_DIR.
 //
 // Grouping policy is not loaded by this legacy helper.
 func (l *Loader) LoadFromEnv() (*casbin.Enforcer, error) {
