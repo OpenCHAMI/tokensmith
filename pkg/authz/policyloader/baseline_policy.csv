@@ -1,0 +1,86 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+
+# Baseline RBAC policy for TokenSmith AuthZ.
+#
+# This is a safe default policy embedded in TokenSmith. Deployments may extend
+# or override behavior by mounting additional policy fragments; see
+# docs/authz_policy.md.
+
+# Role bindings
+# Use "user:<id>" or "service:<name>" if you want principal-specific bindings.
+g, role:admin, role:admin
+g, role:operator, role:operator
+g, role:viewer, role:viewer
+g, role:service, role:service
+
+# admin: full CRUD on all resources
+p, role:admin, boot:configs, create
+p, role:admin, boot:configs, read
+p, role:admin, boot:configs, update
+p, role:admin, boot:configs, delete
+p, role:admin, boot:scripts, create
+p, role:admin, boot:scripts, read
+p, role:admin, boot:scripts, update
+p, role:admin, boot:scripts, delete
+p, role:admin, boot:parameters, create
+p, role:admin, boot:parameters, read
+p, role:admin, boot:parameters, update
+p, role:admin, boot:parameters, delete
+
+p, role:admin, metadata:nodes, create
+p, role:admin, metadata:nodes, read
+p, role:admin, metadata:nodes, update
+p, role:admin, metadata:nodes, delete
+p, role:admin, metadata:groups, create
+p, role:admin, metadata:groups, read
+p, role:admin, metadata:groups, update
+p, role:admin, metadata:groups, delete
+
+p, role:admin, smd:hardware, create
+p, role:admin, smd:hardware, read
+p, role:admin, smd:hardware, update
+p, role:admin, smd:hardware, delete
+p, role:admin, smd:components, create
+p, role:admin, smd:components, read
+p, role:admin, smd:components, update
+p, role:admin, smd:components, delete
+
+# operator: read + write; no delete
+p, role:operator, boot:configs, create
+p, role:operator, boot:configs, read
+p, role:operator, boot:configs, update
+p, role:operator, boot:scripts, create
+p, role:operator, boot:scripts, read
+p, role:operator, boot:scripts, update
+p, role:operator, boot:parameters, create
+p, role:operator, boot:parameters, read
+p, role:operator, boot:parameters, update
+
+p, role:operator, metadata:nodes, create
+p, role:operator, metadata:nodes, read
+p, role:operator, metadata:nodes, update
+p, role:operator, metadata:groups, create
+p, role:operator, metadata:groups, read
+p, role:operator, metadata:groups, update
+
+p, role:operator, smd:hardware, create
+p, role:operator, smd:hardware, read
+p, role:operator, smd:hardware, update
+p, role:operator, smd:components, create
+p, role:operator, smd:components, read
+p, role:operator, smd:components, update
+
+# viewer: read-only
+p, role:viewer, boot:configs, read
+p, role:viewer, boot:scripts, read
+p, role:viewer, boot:parameters, read
+p, role:viewer, metadata:nodes, read
+p, role:viewer, metadata:groups, read
+p, role:viewer, smd:hardware, read
+p, role:viewer, smd:components, read
+
+# service: service-to-service read-only (can be extended per deployment)
+p, role:service, metadata:nodes, read
+p, role:service, metadata:groups, read

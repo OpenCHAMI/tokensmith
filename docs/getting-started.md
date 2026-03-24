@@ -1,0 +1,109 @@
+<!--
+Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+
+SPDX-License-Identifier: MIT
+-->
+
+# TokenSmith getting started
+
+This guide is the fastest path to running TokenSmith and integrating AuthN/AuthZ in a service.
+
+If you need normative behavior details, see:
+
+- `docs/authz-spec.md`
+- `docs/authz_contract.md`
+
+## 1) Start the token service
+
+Generate a default config file:
+
+```bash
+tokensmith generate-config --config ./config.json
+```
+
+Start TokenSmith:
+
+```bash
+tokensmith serve \
+  --config ./config.json \
+  --key-dir ./keys \
+  --oidc-issuer https://issuer.example \
+  --oidc-client-id your-client-id
+```
+
+If `--oidc-client-id` or `--oidc-client-secret` are not provided, TokenSmith falls back to `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+
+See full command options in `docs/cli-reference.md`.
+
+## 2) Pick an AuthZ integration style
+
+TokenSmith supports two common patterns:
+
+1. **Explicit route mapping** (`object`, `action`) via `authz.RouteMapper`
+2. **Path/method style** using Casbin matchers such as `keyMatch2`
+
+The smallest working example that includes both styles is:
+
+- `examples/minisvc/main.go`
+- `examples/minisvc/policy/model.conf`
+- `examples/minisvc/policy/policy.csv`
+- `examples/minisvc/policy/grouping.csv`
+
+Reference guide:
+
+- `docs/casbin-first-guide.md`
+
+## 3) Configure policy loading
+
+By default, TokenSmith uses an embedded baseline Casbin model and policy.
+
+To add policy fragments from disk, set one of:
+
+- `TOKENSMITH_POLICY_DIR` (preferred)
+- `AUTHZ_POLICY_DIR` (compatibility)
+
+Policy fragments are loaded at process startup in lexical filename order. Hot reload is not supported in v1.
+
+Details:
+
+- `docs/authz_policy.md`
+
+## 4) Roll out safely: off -> shadow -> enforce
+
+Recommended rollout sequence per service:
+
+1. `off`: verify middleware wiring and principal extraction
+2. `shadow`: evaluate policy without blocking requests
+3. `enforce`: block denied requests with stable TokenSmith error response
+
+Operational guidance:
+
+- `docs/authz_operations.md`
+
+## 5) Verify what is running
+
+Track `policy_version` from startup logs and deny responses to confirm policy consistency across replicas.
+
+If you use chi-specific middleware diagnostics, expose:
+
+- `chi.DiagnosticsHandler(mode, policyVersion, policySource)`
+
+from:
+
+- `pkg/authz/chi/diagnostics.go`
+
+Recommended operator workflow (including endpoint wiring and rollout checks):
+
+- `docs/authz_operations.md#diagnostics-endpoint-recommended`
+- `docs/authz_operations.md#rollout-verification-playbook`
+
+## 6) Migrate from legacy context claims
+
+For new services, use canonical principal helpers:
+
+- `tokensmith.SetPrincipal(ctx, p)`
+- `tokensmith.PrincipalFromContext(ctx)`
+
+Migration details:
+
+- `docs/migration.md`
