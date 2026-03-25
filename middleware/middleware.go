@@ -6,14 +6,16 @@ package middleware
 
 import (
 	"context"
+	"crypto"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/MicahParks/keyfunc"
+	"github.com/MicahParks/keyfunc/v3"
 	"github.com/casbin/casbin/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
@@ -243,17 +245,48 @@ func JWTMiddleware(key interface{}, opts *MiddlewareOptions) func(http.Handler) 
 
 // refresh fetches and updates the JWKS cache (expects JWKS as a map of kid to key)
 func (c *keySetCache) refresh(url string) error {
-	jwks, err := keyfunc.Get(url, keyfunc.Options{})
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("jwks fetch failed: status=%d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+
+	kf, err := keyfunc.NewJWKSetJSON(body)
+	if err != nil {
+		return err
+	}
+
+	jwksKeys, err := kf.Storage().KeyReadAll(context.Background())
 	if err != nil {
 		return err
 	}
 
 	newKeySet := make(map[string]interface{})
-	for kid, key := range jwks.ReadOnlyKeys() {
-		if key == nil {
+	for _, jwk := range jwksKeys {
+		m := jwk.Marshal()
+		if m.KID == "" {
 			continue
 		}
-		newKeySet[kid] = key
+
+		pub, ok := jwk.Key().(crypto.PublicKey)
+		if !ok {
+			continue
+		}
+
+		newKeySet[m.KID] = pub
 	}
 
 	c.mu.Lock()
