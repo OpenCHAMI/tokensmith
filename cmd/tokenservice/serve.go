@@ -31,17 +31,21 @@ var serveCmd = &cobra.Command{
 		if oidcClientSecret == "" {
 			oidcClientSecret = os.Getenv("OIDC_CLIENT_SECRET")
 		}
+		if bootstrapJTIStorePath == "" {
+			bootstrapJTIStorePath = os.Getenv("TOKENSMITH_BOOTSTRAP_JTI_STORE")
+		}
 
 		// Create token service configuration
 		serviceConfig := tokenservice.Config{
-			Issuer:           issuer,
-			GroupScopes:      fileConfig.GroupScopes, // Keep for backward compatibility
-			ClusterID:        clusterID,
-			OpenCHAMIID:      openCHAMIID,
-			NonEnforcing:     nonEnforcing,
-			OIDCIssuerURL:    oidcIssuerURL,
-			OIDCClientID:     oidcClientID,
-			OIDCClientSecret: oidcClientSecret,
+			Issuer:                issuer,
+			GroupScopes:           fileConfig.GroupScopes, // Keep for backward compatibility
+			ClusterID:             clusterID,
+			OpenCHAMIID:           openCHAMIID,
+			NonEnforcing:          nonEnforcing,
+			BootstrapJTIStorePath: bootstrapJTIStorePath,
+			OIDCIssuerURL:         oidcIssuerURL,
+			OIDCClientID:          oidcClientID,
+			OIDCClientSecret:      oidcClientSecret,
 		}
 
 		// Create key manager
@@ -77,7 +81,7 @@ var serveCmd = &cobra.Command{
 		}
 
 		// Create token service
-		service, err := tokenservice.NewTokenService(nil, serviceConfig)
+		service, err := tokenservice.NewTokenService(keyManager, serviceConfig)
 		if err != nil {
 			return fmt.Errorf("failed to create token service: %w", err)
 		}
@@ -98,6 +102,7 @@ func init() {
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
+	serveCmd.Flags().StringVar(&bootstrapJTIStorePath, "bootstrap-jti-store", "", "Path to file-backed consumed bootstrap JTI store (or set TOKENSMITH_BOOTSTRAP_JTI_STORE)")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")
 
 	rootCmd.AddCommand(serveCmd)

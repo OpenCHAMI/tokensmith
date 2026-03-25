@@ -5,10 +5,14 @@
 package tokenservice
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -534,4 +538,128 @@ func TestTokenService_ValidateToken(t *testing.T) {
 			tt.validateClaims(t, claims)
 		})
 	}
+}
+
+func TestTokenService_ServiceTokenHandler_BootstrapExchange(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	keyManager := keys.NewKeyManager()
+	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
+	require.NoError(t, err)
+
+	service, err := NewTokenService(keyManager, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+	})
+	require.NoError(t, err)
+
+	bootstrapToken, err := service.MintBootstrapToken(context.Background(), "svc-a", "svc-b", []string{"read", "write"}, 5*time.Minute)
+	require.NoError(t, err)
+
+	reqBody := ServiceTokenRequest{
+		BootstrapToken: bootstrapToken,
+		TargetService:  "svc-b",
+		Scopes:         []string{"read"},
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(bodyBytes))
+	w := httptest.NewRecorder()
+
+	service.ServiceTokenHandler(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var tokenResp ServiceTokenResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&tokenResp))
+	require.NotEmpty(t, tokenResp.Token)
+	require.False(t, tokenResp.ExpiresAt.IsZero())
+
+	claims, _, err := service.TokenManager.ParseToken(tokenResp.Token)
+	require.NoError(t, err)
+	assert.Equal(t, "svc-a", claims.Subject)
+	assert.Equal(t, []string{"svc-b"}, []string(claims.Audience))
+	assert.Equal(t, []string{"read"}, claims.Scope)
+}
+
+func TestTokenService_ServiceTokenHandler_BootstrapTokenReuseDenied(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	keyManager := keys.NewKeyManager()
+	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
+	require.NoError(t, err)
+
+	service, err := NewTokenService(keyManager, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+	})
+	require.NoError(t, err)
+
+	bootstrapToken, err := service.MintBootstrapToken(context.Background(), "svc-a", "svc-b", []string{"read"}, 5*time.Minute)
+	require.NoError(t, err)
+
+	body, err := json.Marshal(ServiceTokenRequest{BootstrapToken: bootstrapToken})
+	require.NoError(t, err)
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(body))
+	firstW := httptest.NewRecorder()
+	service.ServiceTokenHandler(firstW, firstReq)
+	require.Equal(t, http.StatusOK, firstW.Result().StatusCode)
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(body))
+	secondW := httptest.NewRecorder()
+	service.ServiceTokenHandler(secondW, secondReq)
+	require.Equal(t, http.StatusUnauthorized, secondW.Result().StatusCode)
+}
+
+func TestTokenService_ServiceTokenHandler_BootstrapTokenReuseDeniedAfterRestart(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	storePath := filepath.Join(t.TempDir(), "bootstrap-used-jti.json")
+
+	keyManagerA := keys.NewKeyManager()
+	err = keyManagerA.SetKeyPair(privateKey, &privateKey.PublicKey)
+	require.NoError(t, err)
+
+	serviceA, err := NewTokenService(keyManagerA, Config{
+		Issuer:                "http://tokensmith.test",
+		ClusterID:             "cluster-a",
+		OpenCHAMIID:           "openchami-a",
+		BootstrapJTIStorePath: storePath,
+	})
+	require.NoError(t, err)
+
+	bootstrapToken, err := serviceA.MintBootstrapToken(context.Background(), "svc-a", "svc-b", []string{"read"}, 5*time.Minute)
+	require.NoError(t, err)
+
+	body, err := json.Marshal(ServiceTokenRequest{BootstrapToken: bootstrapToken})
+	require.NoError(t, err)
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(body))
+	firstW := httptest.NewRecorder()
+	serviceA.ServiceTokenHandler(firstW, firstReq)
+	require.Equal(t, http.StatusOK, firstW.Result().StatusCode)
+
+	keyManagerB := keys.NewKeyManager()
+	err = keyManagerB.SetKeyPair(privateKey, &privateKey.PublicKey)
+	require.NoError(t, err)
+
+	serviceB, err := NewTokenService(keyManagerB, Config{
+		Issuer:                "http://tokensmith.test",
+		ClusterID:             "cluster-a",
+		OpenCHAMIID:           "openchami-a",
+		BootstrapJTIStorePath: storePath,
+	})
+	require.NoError(t, err)
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(body))
+	secondW := httptest.NewRecorder()
+	serviceB.ServiceTokenHandler(secondW, secondReq)
+	require.Equal(t, http.StatusUnauthorized, secondW.Result().StatusCode)
 }

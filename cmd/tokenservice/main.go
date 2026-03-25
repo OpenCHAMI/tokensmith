@@ -13,17 +13,18 @@ import (
 )
 
 var (
-	issuer           string
-	port             int
-	clusterID        string
-	openCHAMIID      string
-	oidcIssuerURL    string
-	oidcClientID     string
-	oidcClientSecret string
-	configPath       string
-	keyFile          string
-	keyDir           string
-	nonEnforcing     bool // Skip validation checks and only log errors
+	issuer                string
+	port                  int
+	clusterID             string
+	openCHAMIID           string
+	oidcIssuerURL         string
+	oidcClientID          string
+	oidcClientSecret      string
+	configPath            string
+	keyFile               string
+	keyDir                string
+	bootstrapJTIStorePath string
+	nonEnforcing          bool // Skip validation checks and only log errors
 )
 
 var rootCmd = &cobra.Command{

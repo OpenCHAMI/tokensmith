@@ -11,6 +11,7 @@ This page documents the current `tokensmith` command surface in `cmd/tokenservic
 ## Commands
 
 - `tokensmith generate-config`
+- `tokensmith mint-bootstrap-token`
 - `tokensmith serve`
 
 Global flag:
@@ -46,6 +47,7 @@ Starts the token service.
 | `--oidc-client-secret` | OIDC client secret (or `OIDC_CLIENT_SECRET`) | `""` |
 | `--key-file` | Existing private key path | `""` |
 | `--key-dir` | Directory where generated keys are saved | `""` |
+| `--bootstrap-jti-store` | File path for consumed bootstrap-token JTIs (or `TOKENSMITH_BOOTSTRAP_JTI_STORE`) | `""` |
 | `--non-enforcing` | Skip strict validation checks and log errors | `false` |
 | `--config` | Path to JSON config file | `""` |
 
@@ -63,6 +65,38 @@ tokensmith serve \
   --key-dir ./keys \
   --oidc-issuer https://issuer.example \
   --oidc-client-id your-client-id
+```
+
+## `tokensmith mint-bootstrap-token`
+
+Mints a short-lived one-time bootstrap token for a caller service.
+
+This token is intended to be injected into a caller service process via environment variable and redeemed once at TokenSmith `/service/token` to obtain a regular service JWT.
+
+Reusing the same bootstrap token is denied. To obtain another service JWT later, mint and provision a new bootstrap token.
+
+### Flags
+
+| Flag | Description | Default |
+| --- | --- | --- |
+| `--key-file` | RSA private key path used to sign bootstrap token | `""` (required) |
+| `--service-id` | Caller service identity (`sub`) | `""` (required) |
+| `--target-service` | Allowed target service for exchange | `""` (required) |
+| `--scopes` | Comma-separated allowed scopes | `""` |
+| `--ttl` | Bootstrap token lifetime | `5m` |
+| `--issuer` | Bootstrap token issuer | `http://tokensmith:8080` |
+| `--cluster-id` | Cluster identifier claim | `cl-F00F00F00` |
+| `--openchami-id` | OpenCHAMI identifier claim | `oc-F00F00F00` |
+
+### Example
+
+```bash
+BOOTSTRAP_TOKEN=$(tokensmith mint-bootstrap-token \
+  --key-file ./keys/private.pem \
+  --service-id example-service-1 \
+  --target-service metadata-service \
+  --scopes read \
+  --ttl 5m)
 ```
 
 ## Configuration file schema

@@ -5,11 +5,13 @@
 package tokenservice
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -49,16 +51,22 @@ func (c *ServiceClient) GetServiceToken() *ServiceToken {
 
 // GetToken obtains a new service token from tokensmith
 func (c *ServiceClient) GetToken(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/v1/service/token", c.tokensmithURL), nil)
+	bodyBytes, err := json.Marshal(ServiceTokenRequest{
+		BootstrapToken: os.Getenv(BootstrapTokenEnvVar),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to encode token request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/service/token", c.tokensmithURL), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
+	req.Header.Set("Content-Type", "application/json")
 
-	// Add service authentication headers
-	req.Header.Set("X-Service-Name", c.serviceName)
-	req.Header.Set("X-Service-ID", c.serviceID)
-	req.Header.Set("X-Instance-ID", c.instanceID)
-	req.Header.Set("X-Cluster-ID", c.clusterID)
+	if os.Getenv(BootstrapTokenEnvVar) == "" {
+		return fmt.Errorf("missing %s environment variable", BootstrapTokenEnvVar)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -73,12 +81,12 @@ func (c *ServiceClient) GetToken(ctx context.Context) error {
 		return fmt.Errorf("failed to get token: status=%d, body=%s", resp.StatusCode, string(body))
 	}
 
-	var token ServiceToken
+	var token ServiceTokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
 		return fmt.Errorf("failed to decode token response: %w", err)
 	}
 
-	c.token = &token
+	c.token = &ServiceToken{Token: token.Token, ExpiresAt: token.ExpiresAt}
 	return nil
 }
 
