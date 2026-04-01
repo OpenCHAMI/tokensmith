@@ -74,7 +74,7 @@ jobs:
           if [[ "${{ inputs.pr_number }}" != "" ]]; then
             PR_NUM="${{ inputs.pr_number }}"
           fi
-          git tag -f -a v0.0.0-pr-${PR_NUM} -m "PR Release"
+          git tag -f -a pr-${PR_NUM} -m "PR Release"
 
       - name: Build/Push container with goreleaser
         uses: goreleaser/goreleaser-action@v6
