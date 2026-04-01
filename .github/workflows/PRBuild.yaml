@@ -76,13 +76,13 @@ jobs:
           fi
           git tag -f -a v0.0.0-pr-${PR_NUM} -m "PR Release"
 
-      - name: Release with goreleaser
+      - name: Build/Push container with goreleaser
         uses: goreleaser/goreleaser-action@v6
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           version: '~> 2'
-          args: release --clean --skip=announce --skip=validate
+          args: release --clean --skip=announce,validate,archive
         id: goreleaser
 
       - name: Attest Binaries
