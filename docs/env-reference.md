@@ -14,6 +14,7 @@ This page lists environment variables currently used by TokenSmith code paths.
 | --- | --- | --- |
 | `OIDC_CLIENT_ID` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-client-id` |
 | `OIDC_CLIENT_SECRET` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-client-secret` |
+| `TOKENSMITH_BOOTSTRAP_JTI_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--bootstrap-jti-store` path |
 
 Precedence:
 
@@ -39,6 +40,12 @@ Notes:
 
 - Cache behavior and policy semantics are still determined by mode and route mapping.
 - `policy_version` remains the authoritative hash of effective model/policy/grouping inputs.
+
+## Service-client variables
+
+| Variable | Used by | Description |
+| --- | --- | --- |
+| `TOKENSMITH_BOOTSTRAP_TOKEN` | `pkg/tokenservice/client.go` | One-time startup bootstrap token redeemed at `POST /service/token` |
 
 ## Example-only variables
 

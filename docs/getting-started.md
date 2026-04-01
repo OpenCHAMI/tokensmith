@@ -35,6 +35,36 @@ If `--oidc-client-id` or `--oidc-client-secret` are not provided, TokenSmith fal
 
 See full command options in `docs/cli-reference.md`.
 
+## 1.5) Internal service-to-service only (no external user token exchange)
+
+Standalone quick guide:
+
+- `docs/internal-service-auth.md`
+
+If your service only needs internal service-to-service AuthN/AuthZ, you can skip user token exchange flows and use this path:
+
+1. Mint a one-time bootstrap token before service startup using `tokensmith mint-bootstrap-token`.
+2. Pass bootstrap token via `TOKENSMITH_BOOTSTRAP_TOKEN` to the caller service process.
+3. Have the caller service redeem bootstrap token(s) for service JWTs using:
+  - `pkg/tokenservice` (library), or
+  - `example/serviceauth` (end-to-end client example).
+4. In the target service, install TokenSmith AuthN middleware to validate JWTs and build a verified principal.
+5. Install TokenSmith AuthZ middleware and map routes using either:
+  - explicit `authz.RouteMapper`, or
+  - path/method style (`authz.PathMethodMapper` + Casbin matchers).
+6. Ensure service principals map to the `service` role in policy/grouping.
+
+Current examples:
+
+- `example/serviceauth` (service token acquisition/refresh)
+- `examples/minisvc/main.go` (AuthN + AuthZ middleware wiring)
+- `examples/minisvc/policy/` (Casbin model/policy/grouping)
+
+Normative requirements for service principals:
+
+- `docs/authz_contract.md#service-principal-requirements`
+- `docs/authz_contract.md#integration-checklist-services`
+
 ## 2) Pick an AuthZ integration style
 
 TokenSmith supports two common patterns:

@@ -7,9 +7,8 @@ SPDX-License-Identifier: MIT
 # Service Authentication Example
 
 This example demonstrates how to implement service-to-service authentication using the tokensmith service. It shows how a service can:
-1. Obtain a service token from tokensmith
-2. Automatically refresh the token when needed
-3. Use the token to authenticate with other services
+1. Redeem a startup bootstrap token for a service token from TokenSmith
+2. Use the token to authenticate with other services
 
 ## Prerequisites
 
@@ -22,7 +21,11 @@ This example demonstrates how to implement service-to-service authentication usi
 Before running the example, you need to:
 
 1. Ensure the tokensmith service is running and accessible
-2. Update the following constants in `main.go` if needed:
+2. Export a bootstrap token:
+   ```bash
+   export TOKENSMITH_BOOTSTRAP_TOKEN="<one-time-bootstrap-jwt>"
+   ```
+3. Update the following constants in `main.go` if needed:
    ```go
    const (
        tokensmithURL = "http://localhost:8080" // Your tokensmith service URL
@@ -30,7 +33,7 @@ Before running the example, you need to:
        serviceID     = "example-service-1"      // Your service ID
    )
    ```
-3. Update the `targetURL` in the main function to point to your target service:
+4. Update the `targetURL` in the main function to point to your target service:
    ```go
    targetURL := "http://localhost:8081/protected-endpoint"
    ```
@@ -48,22 +51,22 @@ Before running the example, you need to:
    ```
 
 The example will:
-1. Get an initial service token from tokensmith with OpenCHAMI-specific claims
+1. Redeem the bootstrap token and get an initial service token from tokensmith
 2. Display the token expiration time
-3. Demonstrate token refresh functionality
+3. Demonstrate refresh check behavior
 4. Use the token to call another service
 
 ## OpenCHAMI Integration
 
-This example uses the `tokenservice` package from tokensmith to handle service authentication. The service tokens include OpenCHAMI-specific custom claims:
+This example uses the `tokenservice` package from tokensmith to handle service authentication. The service tokens include OpenCHAMI-specific custom claims configured on the TokenSmith server:
 
-- `instance_id`: The OpenCHAMI instance identifier
+- `openchami_id`: The OpenCHAMI instance identifier
 - `cluster_id`: The OpenCHAMI cluster identifier
 - `iss`: The tokensmith service URI as the issuer
 
-These claims are passed via headers:
-- `X-Instance-ID`: OpenCHAMI instance identifier
-- `X-Cluster-ID`: OpenCHAMI cluster identifier
+The startup bootstrap token is passed via environment variable:
+
+- `TOKENSMITH_BOOTSTRAP_TOKEN`: one-time bootstrap JWT redeemed at `POST /service/token`
 
 The tokensmith service will include these claims in the generated JWT tokens, which can be used for:
 - Service identification within OpenCHAMI
@@ -86,13 +89,13 @@ The example uses the `tokenservice` package from tokensmith, which provides:
    ```
 
 2. **Token Management**
-   - `GetToken()`: Obtains a new service token
-   - `RefreshTokenIfNeeded()`: Automatically refreshes the token when close to expiration
+   - `GetToken()`: Redeems the current bootstrap token and obtains a service token
+   - `RefreshTokenIfNeeded()`: Checks token lifetime and attempts to fetch a new token when close to expiration (requires a newly provisioned bootstrap token after one-time consumption)
    - `GetServiceToken()`: Retrieves the current service token
 
 3. **Service Communication**
    - `CallTargetService()`: Makes authenticated requests to other services
-   - Automatic token refresh before making requests
+   - Token lifetime check before making requests
    - Proper error handling and context management
 
 ## Error Handling
@@ -106,7 +109,7 @@ The example includes comprehensive error handling for:
 
 ## Security Considerations
 
-- Tokens are automatically refreshed when they're close to expiration
+- Bootstrap tokens are one-time use; after redemption, obtaining another service token requires provisioning a new bootstrap token
 - All HTTP requests use HTTPS in production (update URLs accordingly)
 - Context timeouts are used to prevent hanging requests
 - Service credentials are managed securely through the tokenservice package

@@ -46,6 +46,8 @@ sequenceDiagram
 TokenSmith now supports both token exchange and Casbin-first AuthN/AuthZ middleware.
 
 - New adopters: [`docs/getting-started.md`](docs/getting-started.md)
+- Internal-only service-to-service setup: [`docs/getting-started.md#15-internal-service-to-service-only-no-external-user-token-exchange`](docs/getting-started.md#15-internal-service-to-service-only-no-external-user-token-exchange)
+- Internal-only service-to-service quick guide: [`docs/internal-service-auth.md`](docs/internal-service-auth.md)
 - Casbin model and policy workflow: [`docs/casbin-first-guide.md`](docs/casbin-first-guide.md)
 - Policy loading and `policy_version`: [`docs/authz_policy.md`](docs/authz_policy.md)
 - Operations and rollout modes: [`docs/authz_operations.md`](docs/authz_operations.md)
