@@ -87,13 +87,15 @@ func (km *KeyManager) LoadPublicKey(keyPath string) error {
 
 // generate KID from public key
 func (km *KeyManager) generateKIDFromPublicKey() error {
-	der, err := x509.MarshalPKIXPublicKey(km.publicKey)
+	// unmarshal pubkey independent of RSA or EC
+	pub, err := x509.MarshalPKIXPublicKey(km.publicKey)
 	if err != nil {
 		return fmt.Errorf("marshal public key: %w", err)
 	}
 
+	// combine timestamp and sha256 of serialized pub key
 	timestamp := time.Now().UnixNano()
-	sum := sha256.Sum256(der)
+	sum := sha256.Sum256(pub)
 	km.kid = fmt.Sprintf("openchami-%x-%d", sum[:16], timestamp)
 	return nil
 }

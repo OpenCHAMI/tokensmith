@@ -377,6 +377,7 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get kid value of public key
 	kid, err := s.TokenManager.GetKeyManager().GetKid()
 	if err != nil {
 		http.Error(w, "kid is not set", http.StatusInternalServerError)
