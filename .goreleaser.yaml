@@ -67,6 +67,7 @@ dockers:
       - LICENSE
       - CHANGELOG.md
       - README.md
+      - entrypoint.sh
     goarch: arm64
 
 docker_manifests:
@@ -104,6 +105,7 @@ archives:
       - LICENSE
       - CHANGELOG.md
       - README.md
+      - entrypoint.sh
 
 checksum:
   name_template: 'checksums.txt'
