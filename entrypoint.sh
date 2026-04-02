@@ -1,3 +1,6 @@
+# Copyright © 2025 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
 #!/bin/sh
 exec /usr/local/bin/tokensmith serve \
   --oidc-issuer="$TOKENSMITH_OIDC_PROVIDER" \
