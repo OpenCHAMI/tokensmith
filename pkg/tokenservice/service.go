@@ -6,9 +6,11 @@ package tokenservice
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"crypto/rsa"
+	"crypto/sha256"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -375,10 +378,11 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate a unique key ID based on timestamp and a hash of the public key's modulus
-	timestamp := time.Now().UnixNano()
-	keyHash := fmt.Sprintf("%x", publicKey.N.Bytes()[:8]) // Use first 8 bytes of modulus for uniqueness
-	kid := fmt.Sprintf("openchami-%s-%d", keyHash, timestamp)
+	// Generate a unique key ID based on the hash of the public key's modulus
+	nBytes := publicKey.N.Bytes()
+	eBytes := big.NewInt(int64(publicKey.E)).Bytes()
+	sum := sha256.Sum256(append(nBytes, eBytes...))
+	kid := fmt.Sprintf("openchami-%x", sum[:16])
 
 	// Create JWKS manually
 	jwks := map[string]interface{}{
@@ -388,8 +392,8 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 				"use": "sig",
 				"alg": "RS256",
 				"kid": kid,
-				"n":   publicKey.N.String(),
-				"e":   publicKey.E,
+				"n":   base64.RawURLEncoding.EncodeToString(publicKey.N.Bytes()),
+				"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(publicKey.E)).Bytes()),
 			},
 		},
 	}
