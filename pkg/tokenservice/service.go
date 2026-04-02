@@ -378,11 +378,11 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate a unique key ID based on timestamp and a hash of the public key's modulus
+	// Generate a unique key ID based on the hash of the public key's modulus
 	nBytes := publicKey.N.Bytes()
 	eBytes := big.NewInt(int64(publicKey.E)).Bytes()
 	sum := sha256.Sum256(append(nBytes, eBytes...))
-	kid := fmt.Sprintf("openchami-%x", sum[:8])
+	kid := fmt.Sprintf("openchami-%x", sum[:16])
 
 	// Create JWKS manually
 	jwks := map[string]interface{}{
