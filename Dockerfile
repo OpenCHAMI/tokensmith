@@ -29,18 +29,11 @@ VOLUME /tokensmith/config
 
 # Get the tokensmith service from the goreleaser build.
 COPY tokensmith /usr/local/bin/
+# Copy entrypoint and update perms
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # nobody 65534:65534
 USER 65534:65534
 
-# Set up the command to start the service.
-CMD ["/usr/local/bin/tokensmith", "serve", \
---oidc-issuer=${TOKENSMITH_OIDC_PROVIDER}, \
---issuer=${TOKENSMITH_ISSUER}, \
---port=${TOKENSMITH_PORT}, \
---cluster-id=${TOKENSMITH_CLUSTER_ID}, \
---openchami-id=${TOKENSMITH_OPENCHAMI_ID}, \
---config=${TOKENSMITH_CONFIG}, \
---key-dir=${TOKENSMITH_KEY_DIR}]
-
-ENTRYPOINT ["/sbin/tini", "--"]
+ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
