@@ -212,14 +212,6 @@ func (km *KeyManager) GetKid() (string, error) {
 	return km.kid, nil
 }
 
-// GetAlg returns algorithm uses to generate key
-func (km *KeyManager) GetAlg() (string, error) {
-	if km.alg == "" {
-		return "", fmt.Errorf("alg not set")
-	}
-	return km.alg, nil
-}
-
 // SetKeyPair sets the RSA key pair
 func (km *KeyManager) SetKeyPair(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) error {
 	// Validate key size
