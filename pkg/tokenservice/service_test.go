@@ -583,6 +583,42 @@ func TestTokenService_ServiceTokenHandler_BootstrapExchange(t *testing.T) {
 	assert.Equal(t, "svc-a", claims.Subject)
 	assert.Equal(t, []string{"svc-b"}, []string(claims.Audience))
 	assert.Equal(t, []string{"read"}, claims.Scope)
+
+	parsedToken, _, err := jwt.NewParser().ParseUnverified(tokenResp.Token, jwt.MapClaims{})
+	require.NoError(t, err)
+	assert.Equal(t, service.TokenManager.GetSigningAlgorithm(), parsedToken.Method.Alg())
+}
+
+func TestTokenService_JWKSHandlerPublishesActiveSigningAlgorithm(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	keyManager := keys.NewKeyManager()
+	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
+	require.NoError(t, err)
+
+	service, err := NewTokenService(keyManager, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+	w := httptest.NewRecorder()
+
+	service.JWKSHandler(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var jwks struct {
+		Keys []struct {
+			Algorithm string `json:"alg"`
+		} `json:"keys"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&jwks))
+	require.Len(t, jwks.Keys, 1)
+	assert.Equal(t, service.TokenManager.GetSigningAlgorithm(), jwks.Keys[0].Algorithm)
 }
 
 func TestTokenService_ServiceTokenHandler_BootstrapTokenReuseDenied(t *testing.T) {

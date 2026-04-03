@@ -385,12 +385,13 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create JWKS manually
+	alg := s.TokenManager.GetSigningAlgorithm()
 	jwks := map[string]interface{}{
 		"keys": []map[string]interface{}{
 			{
 				"kty": "RSA",
 				"use": "sig",
-				"alg": "RS256",
+				"alg": alg,
 				"kid": kid,
 				"n":   base64.RawURLEncoding.EncodeToString(publicKey.N.Bytes()),
 				"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(publicKey.E)).Bytes()),
