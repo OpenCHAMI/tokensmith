@@ -372,6 +372,10 @@ func (s *TokenService) UpdateGroupScopes(groupScopes map[string][]string) {
 }
 
 func ResolveSigningAlgorithm(keyManager *keys.KeyManager, jwtConfig *JWTConfig) (string, error) {
+	if keyManager == nil {
+		return "", fmt.Errorf("keyManager is nil")
+	}
+
 	privateKey, err := keyManager.GetPrivateKey()
 	if err != nil {
 		return "", err
