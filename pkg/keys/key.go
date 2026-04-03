@@ -9,11 +9,13 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // FIPS-compliant key sizes
@@ -26,6 +28,7 @@ const (
 type KeyManager struct {
 	privateKey interface{}
 	publicKey  interface{}
+	kid        string
 }
 
 // NewKeyManager creates a new KeyManager instance
@@ -82,6 +85,21 @@ func (km *KeyManager) LoadPublicKey(keyPath string) error {
 	return nil
 }
 
+// generate KID from public key
+func (km *KeyManager) generateKIDFromPublicKey() error {
+	// unmarshal pubkey independent of RSA or EC
+	pub, err := x509.MarshalPKIXPublicKey(km.publicKey)
+	if err != nil {
+		return fmt.Errorf("marshal public key: %w", err)
+	}
+
+	// combine timestamp and sha256 of serialized pub key
+	timestamp := time.Now().UnixNano()
+	sum := sha256.Sum256(pub)
+	km.kid = fmt.Sprintf("openchami-%x-%d", sum[:16], timestamp)
+	return nil
+}
+
 // GenerateKeyPair generates a new RSA key pair with FIPS-compliant key size
 func (km *KeyManager) GenerateRSAKeyPair() error {
 	// Generate RSA key pair with minimum 2048 bits (FIPS 186-4)
@@ -92,7 +110,7 @@ func (km *KeyManager) GenerateRSAKeyPair() error {
 
 	km.privateKey = privateKey
 	km.publicKey = &privateKey.PublicKey
-	return nil
+	return km.generateKIDFromPublicKey()
 }
 
 // GenerateECKeyPair generates a new ECDSA key pair using a FIPS-compliant curve
@@ -105,7 +123,7 @@ func (km *KeyManager) GenerateECKeyPair() error {
 
 	km.privateKey = privateKey
 	km.publicKey = &privateKey.PublicKey
-	return nil
+	return km.generateKIDFromPublicKey()
 }
 
 // SavePrivateKey saves the private key to a PEM file
@@ -186,6 +204,14 @@ func (km *KeyManager) GetPublicKey() (interface{}, error) {
 	return km.publicKey, nil
 }
 
+// GetKid returns kid value of public key
+func (km *KeyManager) GetKid() (string, error) {
+	if km.kid == "" {
+		return "", fmt.Errorf("kid not set")
+	}
+	return km.kid, nil
+}
+
 // SetKeyPair sets the RSA key pair
 func (km *KeyManager) SetKeyPair(privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey) error {
 	// Validate key size
@@ -195,7 +221,7 @@ func (km *KeyManager) SetKeyPair(privateKey *rsa.PrivateKey, publicKey *rsa.Publ
 
 	km.privateKey = privateKey
 	km.publicKey = publicKey
-	return nil
+	return km.generateKIDFromPublicKey()
 }
 
 // SetECKeyPair sets the ECDSA key pair
@@ -207,7 +233,7 @@ func (km *KeyManager) SetECKeyPair(privateKey *ecdsa.PrivateKey, publicKey *ecds
 
 	km.privateKey = privateKey
 	km.publicKey = publicKey
-	return nil
+	return km.generateKIDFromPublicKey()
 }
 
 // GetRSAPrivateKey returns the RSA private key
