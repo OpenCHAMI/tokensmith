@@ -5,7 +5,9 @@
 package token
 
 import (
+	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -34,15 +36,19 @@ type TokenManager struct {
 }
 
 // NewTokenManager creates a new TokenManager instance
-func NewTokenManager(keyManager *keys.KeyManager, issuer string, clusterID string, openchamiID string, enforce bool) *TokenManager {
+func NewTokenManager(keyManager *keys.KeyManager, issuer string, clusterID string, openchamiID string, enforce bool) (*TokenManager, error) {
+	alg, err := DefaultAlgorithmForKey(keyManager)
+	if err != nil {
+		return nil, err
+	}
 	return &TokenManager{
 		keyManager:  keyManager,
 		issuer:      issuer,
 		clusterID:   clusterID,
 		openchamiID: openchamiID,
 		enforce:     enforce,
-		algorithm:   DefaultSigningAlgorithm, // Use PS256 by default
-	}
+		algorithm:   alg, // Use PS256 by default
+	}, nil
 }
 
 // SetSigningAlgorithm sets the signing algorithm to use
@@ -293,4 +299,29 @@ func (tm *TokenManager) GenerateServiceToken(serviceID, targetService string, sc
 	}
 
 	return tm.GenerateTokenWithClaims(claims, claimsMap)
+}
+
+func DefaultAlgorithmForKey(keyManager *keys.KeyManager) (string, error) {
+	privateKey, err := keyManager.GetPrivateKey()
+	if err != nil {
+		return "", err
+	}
+
+	switch k := privateKey.(type) {
+	case *rsa.PrivateKey:
+		return "RS256", nil
+	case *ecdsa.PrivateKey:
+		switch k.Curve.Params().Name {
+		case "P-256":
+			return "ES256", nil
+		case "P-384":
+			return "ES384", nil
+		case "P-521":
+			return "ES512", nil
+		default:
+			return "", fmt.Errorf("unsupported EC curve: %s", k.Curve.Params().Name)
+		}
+	default:
+		return "", fmt.Errorf("unsupported private key type %T", privateKey)
+	}
 }

@@ -29,6 +29,7 @@ type KeyManager struct {
 	privateKey interface{}
 	publicKey  interface{}
 	kid        string
+	alg        string
 }
 
 // NewKeyManager creates a new KeyManager instance
@@ -110,6 +111,7 @@ func (km *KeyManager) GenerateRSAKeyPair() error {
 
 	km.privateKey = privateKey
 	km.publicKey = &privateKey.PublicKey
+	km.alg = "RS256"
 	return km.generateKIDFromPublicKey()
 }
 
@@ -123,6 +125,7 @@ func (km *KeyManager) GenerateECKeyPair() error {
 
 	km.privateKey = privateKey
 	km.publicKey = &privateKey.PublicKey
+	km.alg = "ES256"
 	return km.generateKIDFromPublicKey()
 }
 
@@ -210,6 +213,14 @@ func (km *KeyManager) GetKid() (string, error) {
 		return "", fmt.Errorf("kid not set")
 	}
 	return km.kid, nil
+}
+
+// GetAlg returns algorithm uses to generate key
+func (km *KeyManager) GetAlg() (string, error) {
+	if km.alg == "" {
+		return "", fmt.Errorf("alg not set")
+	}
+	return km.alg, nil
 }
 
 // SetKeyPair sets the RSA key pair

@@ -76,7 +76,7 @@ func TestTokenService(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create token manager
-	tokenManager := token.NewTokenManager(keyManager, "test-issuer", "test-cluster-id", "test-openchami-id", true)
+	tokenManager, err := token.NewTokenManager(keyManager, "test-issuer", "test-cluster-id", "test-openchami-id", true)
 
 	// Create configuration
 	config := &Config{
@@ -408,8 +408,9 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			// Create token service
+			token, err := token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true)
 			service := &TokenService{
-				TokenManager: token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true),
+				TokenManager: token,
 				Config:       tt.config,
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,
@@ -417,7 +418,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			}
 
 			// Generate service token
-			token, err := service.GenerateServiceToken(context.Background(), tt.serviceID, tt.targetService, tt.scopes)
+			stoken, err := service.GenerateServiceToken(context.Background(), tt.serviceID, tt.targetService, tt.scopes)
 			if tt.expectError {
 				assert.Error(t, err)
 				return
@@ -425,7 +426,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			assert.NoError(t, err)
 
 			// Parse and validate claims
-			claims, _, err := service.TokenManager.ParseToken(token)
+			claims, _, err := service.TokenManager.ParseToken(stoken)
 			assert.NoError(t, err)
 			tt.validateClaims(t, claims)
 		})
@@ -494,8 +495,9 @@ func TestTokenService_ValidateToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			// Create token service
+			ntoken, err := token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true)
 			service := &TokenService{
-				TokenManager: token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true),
+				TokenManager: ntoken,
 				Config:       tt.config,
 				Issuer:       tt.config.Issuer,
 				ClusterID:    tt.config.ClusterID,

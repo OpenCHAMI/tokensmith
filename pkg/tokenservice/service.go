@@ -71,13 +71,16 @@ type TokenService struct {
 // NewTokenService creates a new TokenService instance
 func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService, error) {
 	// Initialize the token manager
-	tokenManager := token.NewTokenManager(
+	tokenManager, err := token.NewTokenManager(
 		keyManager,
 		config.Issuer,
 		config.ClusterID,
 		config.OpenCHAMIID,
 		!config.NonEnforcing, // Enforce claims validation
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	// Initialize the simplified OIDC provider
 	oidcProvider := oidc.NewSimpleProvider(
@@ -383,6 +386,11 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "kid is not set", http.StatusInternalServerError)
 		return
 	}
+	alg, err := s.TokenManager.GetKeyManager().GetAlg()
+	if err != nil {
+		http.Error(w, "alg is not set", http.StatusInternalServerError)
+		return
+	}
 
 	// Create JWKS manually
 	jwks := map[string]interface{}{
@@ -390,7 +398,7 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 			{
 				"kty": "RSA",
 				"use": "sig",
-				"alg": "RS256",
+				"alg": alg,
 				"kid": kid,
 				"n":   base64.RawURLEncoding.EncodeToString(publicKey.N.Bytes()),
 				"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(publicKey.E)).Bytes()),
