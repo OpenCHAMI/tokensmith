@@ -383,12 +383,12 @@ func ResolveSigningAlgorithm(keyManager *keys.KeyManager, jwtConfig *JWTConfig) 
 
 	switch k := privateKey.(type) {
 	case *rsa.PrivateKey:
-		if jwtConfig.RSASigningAlgorithm != "" {
+		if jwtConfig != nil && jwtConfig.RSASigningAlgorithm != "" {
 			return jwtConfig.RSASigningAlgorithm, nil
 		}
 		return "RS256", nil
 	case *ecdsa.PrivateKey:
-		if jwtConfig.ECSigningAlgorithm != "" {
+		if jwtConfig != nil && jwtConfig.ECSigningAlgorithm != "" {
 			return jwtConfig.ECSigningAlgorithm, nil
 		}
 		switch k.Curve.Params().Name {
