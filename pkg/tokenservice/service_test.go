@@ -410,6 +410,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 
 			// Create token service
 			token, err := token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true, "")
+			require.NoError(t, err)
 			service := &TokenService{
 				TokenManager: token,
 				Config:       tt.config,
@@ -497,6 +498,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 
 			// Create token service
 			ntoken, err := token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true, "")
+			require.NoError(t, err)
 			service := &TokenService{
 				TokenManager: ntoken,
 				Config:       tt.config,
