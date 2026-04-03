@@ -336,7 +336,7 @@ func RequireScope(requiredScope string) func(http.Handler) http.Handler {
 			}
 
 			if !hasScope {
-				http.Error(w, "insufficient scope", http.StatusUnauthorized)
+				http.Error(w, "insufficient scope", http.StatusForbidden)
 				return
 			}
 
@@ -365,7 +365,7 @@ func RequireScopes(requiredScopes []string) func(http.Handler) http.Handler {
 					}
 				}
 				if !hasScope {
-					http.Error(w, "insufficient scope", http.StatusUnauthorized)
+					http.Error(w, "insufficient scope", http.StatusForbidden)
 					return
 				}
 			}

@@ -26,11 +26,16 @@ var errNoCachedKeys = errors.New("no cached JWKS keys")
 type jwksCache struct {
 	mu sync.RWMutex
 	// keysByKID is the most recently fetched key set.
-	keysByKID map[string]crypto.PublicKey
+	keysByKID map[string]jwksCachedKey
 	// softExpiry is when we prefer to refresh but may continue using cached keys.
 	softExpiry time.Time
 	// hardExpiry is when cached keys are considered unusable.
 	hardExpiry time.Time
+}
+
+type jwksCachedKey struct {
+	publicKey crypto.PublicKey
+	alg       string
 }
 
 type jwksCacheOptions struct {
@@ -73,14 +78,20 @@ func (c *jwksCache) shouldRefresh(now time.Time) bool {
 	return c.keysByKID == nil || now.After(c.softExpiry)
 }
 
-func (c *jwksCache) getKey(now time.Time, kid string) (crypto.PublicKey, bool) {
+func (c *jwksCache) getKey(now time.Time, kid, tokenAlg string) (crypto.PublicKey, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if c.keysByKID == nil || now.After(c.hardExpiry) {
 		return nil, false
 	}
 	k, ok := c.keysByKID[kid]
-	return k, ok
+	if !ok {
+		return nil, false
+	}
+	if k.alg != "" && tokenAlg != "" && k.alg != tokenAlg {
+		return nil, false
+	}
+	return k.publicKey, true
 }
 
 func (c *jwksCache) hasUsableKeys(now time.Time) bool {
@@ -117,14 +128,14 @@ func (c *jwksCache) refresh(ctx context.Context, now time.Time, jwksURL string, 
 		return err
 	}
 
-	newKeys := make(map[string]crypto.PublicKey)
+	newKeys := make(map[string]jwksCachedKey)
 	for _, rk := range raw.Keys {
 		keysForJWK, err := parseKeyfuncJWKSet(ctx, rk, opt.allowedAlgs)
 		if err != nil {
 			continue
 		}
 		for kid, key := range keysForJWK {
-			switch key.(type) {
+			switch key.publicKey.(type) {
 			case *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
 				newKeys[kid] = key
 			}
@@ -143,7 +154,7 @@ func (c *jwksCache) refresh(ctx context.Context, now time.Time, jwksURL string, 
 	return nil
 }
 
-func parseKeyfuncJWKSet(ctx context.Context, rawJWK json.RawMessage, allowedAlgs map[string]struct{}) (map[string]crypto.PublicKey, error) {
+func parseKeyfuncJWKSet(ctx context.Context, rawJWK json.RawMessage, allowedAlgs map[string]struct{}) (map[string]jwksCachedKey, error) {
 	setJSON, err := json.Marshal(struct {
 		Keys []json.RawMessage `json:"keys"`
 	}{Keys: []json.RawMessage{rawJWK}})
@@ -161,7 +172,7 @@ func parseKeyfuncJWKSet(ctx context.Context, rawJWK json.RawMessage, allowedAlgs
 		return nil, err
 	}
 
-	keysByKID := make(map[string]crypto.PublicKey)
+	keysByKID := make(map[string]jwksCachedKey)
 	for _, jwk := range jwksKeys {
 		m := jwk.Marshal()
 		if m.KID == "" {
@@ -177,7 +188,10 @@ func parseKeyfuncJWKSet(ctx context.Context, rawJWK json.RawMessage, allowedAlgs
 		if !ok {
 			continue
 		}
-		keysByKID[m.KID] = pub
+		keysByKID[m.KID] = jwksCachedKey{
+			publicKey: pub,
+			alg:       string(m.ALG),
+		}
 	}
 
 	if len(keysByKID) == 0 {

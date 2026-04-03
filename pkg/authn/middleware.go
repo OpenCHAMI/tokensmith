@@ -167,14 +167,14 @@ func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 				}
 
 				if kid != "" {
-					if k, ok := cache.getKey(now, kid); ok {
+					if k, ok := cache.getKey(now, kid, alg); ok {
 						return ensureAlgCompatibleKey(alg, k)
 					}
 
 					// Prefer cached keys; refresh opportunistically.
 					if len(opt.JWKSURLs) > 0 && cache.shouldRefresh(now) {
 						_ = refreshAllJWKS(r.Context(), cache, now, opt.JWKSURLs, jwksOpt)
-						if k, ok := cache.getKey(now, kid); ok {
+						if k, ok := cache.getKey(now, kid, alg); ok {
 							return ensureAlgCompatibleKey(alg, k)
 						}
 					}
@@ -194,7 +194,7 @@ func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 						return nil, err
 					}
 					if kid != "" {
-						if k, ok := cache.getKey(now, kid); ok {
+						if k, ok := cache.getKey(now, kid, alg); ok {
 							return ensureAlgCompatibleKey(alg, k)
 						}
 					}

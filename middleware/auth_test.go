@@ -246,9 +246,9 @@ func TestAuthMiddleware_WithScopes(t *testing.T) {
 			name:           "token missing required scopes",
 			token:          "Bearer " + tokenString,
 			requiredScopes: []string{"admin"},
-			expectedStatus: http.StatusUnauthorized,
+			expectedStatus: http.StatusForbidden,
 			validate: func(t *testing.T, w *httptest.ResponseRecorder) {
-				assert.Equal(t, http.StatusUnauthorized, w.Code)
+				assert.Equal(t, http.StatusForbidden, w.Code)
 				assert.Contains(t, w.Body.String(), "insufficient scope")
 			},
 		},
@@ -293,6 +293,85 @@ func TestAuthMiddleware_WithScopes(t *testing.T) {
 
 			// Validate response
 			tt.validate(t, w)
+		})
+	}
+}
+
+func TestRequireScopeReturnsForbiddenForMissingScope(t *testing.T) {
+	claims := &token.TSClaims{Scope: []string{"read"}}
+
+	tests := []struct {
+		name           string
+		ctx            context.Context
+		expectedStatus int
+	}{
+		{
+			name:           "missing claims returns unauthorized",
+			ctx:            context.Background(),
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "missing required scope returns forbidden",
+			ctx:            context.WithValue(context.Background(), ClaimsContextKey, claims),
+			expectedStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/test", nil).WithContext(tt.ctx)
+			w := httptest.NewRecorder()
+
+			handler := RequireScope("admin")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			handler.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+		})
+	}
+}
+
+func TestRequireScopesReturnsForbiddenForMissingAnyScope(t *testing.T) {
+	claims := &token.TSClaims{Scope: []string{"read", "write"}}
+
+	tests := []struct {
+		name           string
+		ctx            context.Context
+		requiredScopes []string
+		expectedStatus int
+	}{
+		{
+			name:           "all scopes present passes",
+			ctx:            context.WithValue(context.Background(), ClaimsContextKey, claims),
+			requiredScopes: []string{"read", "write"},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "missing claims returns unauthorized",
+			ctx:            context.Background(),
+			requiredScopes: []string{"read"},
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "missing one required scope returns forbidden",
+			ctx:            context.WithValue(context.Background(), ClaimsContextKey, claims),
+			requiredScopes: []string{"read", "admin"},
+			expectedStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/test", nil).WithContext(tt.ctx)
+			w := httptest.NewRecorder()
+
+			handler := RequireScopes(tt.requiredScopes)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			handler.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
 		})
 	}
 }
