@@ -77,6 +77,7 @@ func TestTokenService(t *testing.T) {
 
 	// Create token manager
 	tokenManager, err := token.NewTokenManager(keyManager, "test-issuer", "test-cluster-id", "test-openchami-id", true, "")
+	require.NoError(t, err)
 
 	// Create configuration
 	config := &Config{

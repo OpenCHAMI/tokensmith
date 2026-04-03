@@ -25,6 +25,7 @@ func TestTokenOperations(t *testing.T) {
 
 	// Create token manager
 	tm, err := NewTokenManager(km, "test-issuer", "test-cluster-id", "test-openchami-id", true, "")
+	require.NoError(t, err)
 	require.NotNil(t, tm)
 
 	// Get the RSA private key to verify it's the correct type
@@ -69,6 +70,7 @@ func TestTokenOperations(t *testing.T) {
 
 		// Create token manager with ECDSA keys
 		ecTm, err := NewTokenManager(ecKm, "test-issuer", "test-cluster-id", "test-openchami-id", true, "")
+		require.NoError(t, err)
 		require.NotNil(t, ecTm)
 
 		// Test ECDSA algorithms
