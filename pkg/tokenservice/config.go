@@ -11,9 +11,15 @@ import (
 	"path/filepath"
 )
 
+type JWTConfig struct {
+	RSASigningAlgorithm string `json:"RSASigningAlgorithm"`
+	ECSigningAlgorithm  string `json:"ECSigningAlgorithm"`
+}
+
 // FileConfig represents the configuration stored in a file
 type FileConfig struct {
 	GroupScopes map[string][]string `json:"groupScopes"`
+	JWT         *JWTConfig          `json:"jwt"`
 }
 
 // DefaultFileConfig returns a default file configuration

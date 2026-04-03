@@ -76,7 +76,7 @@ func TestTokenService(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create token manager
-	tokenManager, err := token.NewTokenManager(keyManager, "test-issuer", "test-cluster-id", "test-openchami-id", true)
+	tokenManager, err := token.NewTokenManager(keyManager, "test-issuer", "test-cluster-id", "test-openchami-id", true, "")
 
 	// Create configuration
 	config := &Config{
@@ -408,7 +408,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			// Create token service
-			token, err := token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true)
+			token, err := token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true, "")
 			service := &TokenService{
 				TokenManager: token,
 				Config:       tt.config,
@@ -495,7 +495,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 
 			// Create token service
-			ntoken, err := token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true)
+			ntoken, err := token.NewTokenManager(keyManager, tt.config.Issuer, tt.config.ClusterID, tt.config.OpenCHAMIID, true, "")
 			service := &TokenService{
 				TokenManager: ntoken,
 				Config:       tt.config,

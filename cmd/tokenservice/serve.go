@@ -39,6 +39,7 @@ var serveCmd = &cobra.Command{
 		serviceConfig := tokenservice.Config{
 			Issuer:                issuer,
 			GroupScopes:           fileConfig.GroupScopes, // Keep for backward compatibility
+			JWT:                   fileConfig.JWT,
 			ClusterID:             clusterID,
 			OpenCHAMIID:           openCHAMIID,
 			NonEnforcing:          nonEnforcing,

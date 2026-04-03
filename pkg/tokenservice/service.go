@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"crypto/ecdsa"
 	"crypto/rsa"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +44,7 @@ const (
 type Config struct {
 	Issuer                string
 	GroupScopes           map[string][]string
+	JWT                   *JWTConfig
 	ClusterID             string
 	OpenCHAMIID           string
 	NonEnforcing          bool // Skip validation checks and only log errors
@@ -70,6 +72,10 @@ type TokenService struct {
 
 // NewTokenService creates a new TokenService instance
 func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService, error) {
+	alg, err := ResolveSigningAlgorithm(keyManager, config.JWT)
+	if err != nil {
+		return nil, err
+	}
 	// Initialize the token manager
 	tokenManager, err := token.NewTokenManager(
 		keyManager,
@@ -77,6 +83,7 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		config.ClusterID,
 		config.OpenCHAMIID,
 		!config.NonEnforcing, // Enforce claims validation
+		alg,
 	)
 	if err != nil {
 		return nil, err
@@ -362,6 +369,37 @@ func (s *TokenService) UpdateGroupScopes(groupScopes map[string][]string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.GroupScopes = groupScopes
+}
+
+func ResolveSigningAlgorithm(keyManager *keys.KeyManager, jwtConfig *JWTConfig) (string, error) {
+	privateKey, err := keyManager.GetPrivateKey()
+	if err != nil {
+		return "", err
+	}
+
+	switch k := privateKey.(type) {
+	case *rsa.PrivateKey:
+		if jwtConfig.RSASigningAlgorithm != "" {
+			return jwtConfig.RSASigningAlgorithm, nil
+		}
+		return "RS256", nil
+	case *ecdsa.PrivateKey:
+		if jwtConfig.ECSigningAlgorithm != "" {
+			return jwtConfig.ECSigningAlgorithm, nil
+		}
+		switch k.Curve.Params().Name {
+		case "P-256":
+			return "ES256", nil
+		case "P-384":
+			return "ES384", nil
+		case "P-521":
+			return "ES512", nil
+		default:
+			return "", fmt.Errorf("unsupported EC curve: %s", k.Curve.Params().Name)
+		}
+	default:
+		return "", fmt.Errorf("unsupported private key type %T", privateKey)
+	}
 }
 
 // JWKSHandler handles JWKS requests

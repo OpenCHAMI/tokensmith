@@ -36,18 +36,27 @@ type TokenManager struct {
 }
 
 // NewTokenManager creates a new TokenManager instance
-func NewTokenManager(keyManager *keys.KeyManager, issuer string, clusterID string, openchamiID string, enforce bool) (*TokenManager, error) {
-	alg, err := DefaultAlgorithmForKey(keyManager)
-	if err != nil {
-		return nil, err
+func NewTokenManager(keyManager *keys.KeyManager, issuer string, clusterID string, openchamiID string, enforce bool, algorithm string) (*TokenManager, error) {
+	var (
+		alg string
+		err error
+	)
+	if algorithm == "" {
+		alg, err = DefaultAlgorithmForKey(keyManager)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		alg = algorithm
 	}
+
 	return &TokenManager{
 		keyManager:  keyManager,
 		issuer:      issuer,
 		clusterID:   clusterID,
 		openchamiID: openchamiID,
 		enforce:     enforce,
-		algorithm:   alg, // Use PS256 by default
+		algorithm:   alg,
 	}, nil
 }
 
