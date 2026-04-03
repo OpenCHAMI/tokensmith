@@ -29,7 +29,6 @@ type KeyManager struct {
 	privateKey interface{}
 	publicKey  interface{}
 	kid        string
-	alg        string
 }
 
 // NewKeyManager creates a new KeyManager instance
@@ -111,7 +110,6 @@ func (km *KeyManager) GenerateRSAKeyPair() error {
 
 	km.privateKey = privateKey
 	km.publicKey = &privateKey.PublicKey
-	km.alg = "RS256"
 	return km.generateKIDFromPublicKey()
 }
 
@@ -125,7 +123,6 @@ func (km *KeyManager) GenerateECKeyPair() error {
 
 	km.privateKey = privateKey
 	km.publicKey = &privateKey.PublicKey
-	km.alg = "ES256"
 	return km.generateKIDFromPublicKey()
 }
 

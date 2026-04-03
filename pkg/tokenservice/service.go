@@ -386,11 +386,8 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "kid is not set", http.StatusInternalServerError)
 		return
 	}
-	alg, err := s.TokenManager.GetKeyManager().GetAlg()
-	if err != nil {
-		http.Error(w, "alg is not set", http.StatusInternalServerError)
-		return
-	}
+
+	alg := s.TokenManager.GetSigningAlgorithm()
 
 	// Create JWKS manually
 	jwks := map[string]interface{}{
