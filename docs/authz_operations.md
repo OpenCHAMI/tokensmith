@@ -29,8 +29,8 @@ Policy loading mechanics are described in:
 Use filesystem policy fragments when you need to:
 
 - extend the baseline RBAC (e.g., add additional objects/actions),
-- add temporary allowances during a migration,
-- override/deny permissions by removing or avoiding grants.
+- add temporary allowances for staged rollout or incident response,
+- override or deny permissions by removing or avoiding grants.
 
 ### Directory + filename convention
 

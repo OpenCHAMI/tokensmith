@@ -10,7 +10,7 @@ This note captures the current middleware and authorization behavior in the repo
 
 ## Middleware architecture
 
-- AuthN: `pkg/authn` verifies JWTs, validates issuer/audience/time constraints, and maps verified claims into `authz.Principal`.
+- AuthN: `pkg/authn` verifies TokenSmith JWTs, validates issuer, audience, required time claims, and required TokenSmith claims, then maps verified claims into `authz.Principal`.
 - AuthZ: `pkg/authz` evaluates policy decisions and exposes middleware integrations (`pkg/authz/chi`).
 - Policy loading: `pkg/authz/policyloader` builds effective model and policy from embedded baseline plus optional filesystem fragments.
 
@@ -29,8 +29,9 @@ Recommended stack order:
 
 - Enforces FIPS-approved JWT methods.
 - Supports static key verification and JWKS-based key discovery.
-- Applies explicit clock skew and required time claims.
+- Applies explicit clock skew and requires `exp`, `iat`, and `nbf`.
 - Performs issuer and audience checks when enabled.
+- Requires TokenSmith claims including `auth_level`, `auth_factors`, `auth_methods`, `session_id`, `session_exp`, and `auth_events`.
 - Stores principal and verified claims in request context.
 - Emits structured auth failure logs with reason codes.
 

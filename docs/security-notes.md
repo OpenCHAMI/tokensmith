@@ -30,6 +30,8 @@ TokenSmith mitigations focus on:
 - deterministic normalization
 - minimizing sensitive data exposure in logs and responses
 
+AuthN in `pkg/authn` validates TokenSmith JWTs against the current TokenSmith claim contract. The required claim set includes `iss`, `sub`, `aud`, `exp`, `iat`, `nbf`, `auth_level`, `auth_factors`, `auth_methods`, `session_id`, `session_exp`, and `auth_events`.
+
 ## JWT handling: logging and redaction
 
 - TokenSmith **MUST NOT log raw JWTs**.

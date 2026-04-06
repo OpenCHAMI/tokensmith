@@ -26,7 +26,7 @@ This contract is owned by **TokenSmith**. Services integrate by calling TokenSmi
 
 ## 2. Definitions
 
-- **AuthN**: Authentication (verifying the caller identity; e.g., JWT signature, exp, aud, iss validation).
+- **AuthN**: Authentication (verifying the caller identity using TokenSmith JWT validation, including signature, issuer, audience, time claims, and required TokenSmith claims).
 - **AuthZ**: Authorization (verifying the caller may perform an action on an object).
 - **Principal**: The verified caller identity derived from an authenticated request.
 - **Object**: A server-defined resource identifier (not user-supplied).
@@ -127,7 +127,7 @@ Services MUST NOT accept `object` and/or `action` as user input.
 
 ### 8.1 Authentication prerequisite
 
-TokenSmith assumes JWT signature/exp/aud/iss validation is performed:
+TokenSmith assumes TokenSmith JWT validation is performed:
 
 - by TokenSmith AuthN middleware (preferred), OR
 - by an upstream middleware that populates an equivalent **verified principal** in request context using TokenSmith-defined types/keys.

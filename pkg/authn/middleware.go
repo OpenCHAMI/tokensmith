@@ -10,6 +10,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/authz"
 	"github.com/openchami/tokensmith/pkg/keys"
+	tstoken "github.com/openchami/tokensmith/pkg/token"
 	"github.com/rs/zerolog/log"
 )
 
@@ -159,8 +161,9 @@ func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 				jwt.WithTimeFunc(func() time.Time { return now }),
 			}
 			parser := jwt.NewParser(parserOpts...)
+			claims := &tstoken.TSClaims{}
 
-			token, err := parser.Parse(tokStr, func(t *jwt.Token) (any, error) {
+			token, err := parser.ParseWithClaims(tokStr, claims, func(t *jwt.Token) (any, error) {
 				kid, _ := t.Header["kid"].(string)
 				alg := t.Method.Alg()
 
@@ -209,9 +212,14 @@ func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return
 			}
+			if err := claims.ValidateAt(true, now); err != nil {
+				logAuthNFailure(r, "claims_validation_failed", err)
+				http.Error(w, "invalid token", http.StatusUnauthorized)
+				return
+			}
 
-			mapClaims, ok := token.Claims.(jwt.MapClaims)
-			if !ok {
+			mapClaims, err := tsClaimsToMapClaims(claims)
+			if err != nil {
 				logAuthNFailure(r, "invalid_token_claims_type", nil)
 				http.Error(w, "invalid token claims", http.StatusUnauthorized)
 				return
@@ -273,6 +281,18 @@ func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}, nil
+}
+
+func tsClaimsToMapClaims(claims *tstoken.TSClaims) (jwt.MapClaims, error) {
+	b, err := json.Marshal(claims)
+	if err != nil {
+		return nil, err
+	}
+	var out jwt.MapClaims
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func refreshAllJWKS(ctx context.Context, cache *jwksCache, now time.Time, urls []string, opt jwksCacheOptions) error {

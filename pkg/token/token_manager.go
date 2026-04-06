@@ -62,51 +62,12 @@ func (tm *TokenManager) GetSigningAlgorithm() string {
 
 // GenerateToken generates a new JWT token with the given claims
 func (tm *TokenManager) GenerateToken(claims *TSClaims) (string, error) {
-	if claims == nil {
-		claims = NewClaims()
-		claims.ClusterID = tm.clusterID
-		claims.OpenCHAMIID = tm.openchamiID
-	}
-
-	// Validate claims
-	if err := claims.Validate(tm.enforce); err != nil {
-		return "", fmt.Errorf("invalid claims: %w", err)
-	}
-
-	// Get private key for signing
-	privateKey, err := tm.keyManager.GetPrivateKey()
+	claims, err := tm.prepareClaims(claims)
 	if err != nil {
-		return "", fmt.Errorf("failed to get private key: %w", err)
+		return "", err
 	}
 
-	// Generate JTI and nonce
-	jti, err := generateUUID()
-	if err != nil {
-		return "", fmt.Errorf("failed to generate JTI: %w", err)
-	}
-	nonce, err := generateNonce()
-	if err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %w", err)
-	}
-
-	// Set JTI and nonce in claims
-	claims.ID = jti
-	claims.Nonce = nonce
-
-	// Get the appropriate signing method for the configured algorithm
-	signingMethod, err := keys.GetSigningMethod(tm.algorithm)
-	if err != nil {
-		return "", fmt.Errorf("invalid signing algorithm: %w", err)
-	}
-
-	// Create and sign token using TSClaims directly
-	token := jwt.NewWithClaims(signingMethod, claims)
-	signed, err := token.SignedString(privateKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to sign token: %w", err)
-	}
-
-	return signed, nil
+	return tm.signClaims(claims)
 }
 
 // ExtendedClaims extends TSClaims with additional custom claims
@@ -140,36 +101,10 @@ func (ec *ExtendedClaims) MarshalJSON() ([]byte, error) {
 
 // GenerateTokenWithClaims generates a new JWT token with the given claims and additional claims
 func (tm *TokenManager) GenerateTokenWithClaims(claims *TSClaims, additionalClaims map[string]interface{}) (string, error) {
-	if claims == nil {
-		claims = NewClaims()
-		claims.ClusterID = tm.clusterID
-		claims.OpenCHAMIID = tm.openchamiID
-	}
-
-	// Validate claims
-	if err := claims.Validate(tm.enforce); err != nil {
-		return "", fmt.Errorf("invalid claims: %w", err)
-	}
-
-	// Get private key for signing
-	privateKey, err := tm.keyManager.GetPrivateKey()
+	claims, err := tm.prepareClaims(claims)
 	if err != nil {
-		return "", fmt.Errorf("failed to get private key: %w", err)
+		return "", err
 	}
-
-	// Generate JTI and nonce
-	jti, err := generateUUID()
-	if err != nil {
-		return "", fmt.Errorf("failed to generate JTI: %w", err)
-	}
-	nonce, err := generateNonce()
-	if err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %w", err)
-	}
-
-	// Set JTI and nonce in claims
-	claims.ID = jti
-	claims.Nonce = nonce
 
 	// Create extended claims with additional claims
 	extendedClaims := &ExtendedClaims{
@@ -177,14 +112,74 @@ func (tm *TokenManager) GenerateTokenWithClaims(claims *TSClaims, additionalClai
 		AdditionalClaims: additionalClaims,
 	}
 
-	// Get the appropriate signing method for the configured algorithm
+	return tm.signClaims(extendedClaims)
+}
+
+func (tm *TokenManager) prepareClaims(claims *TSClaims) (*TSClaims, error) {
+	if claims == nil {
+		claims = NewClaims()
+		claims.ClusterID = tm.clusterID
+		claims.OpenCHAMIID = tm.openchamiID
+	}
+
+	now := time.Now()
+	if claims.IssuedAt == nil {
+		claims.IssuedAt = jwt.NewNumericDate(now)
+	}
+	if claims.NotBefore == nil {
+		claims.NotBefore = jwt.NewNumericDate(now)
+	}
+	if claims.ExpiresAt == nil {
+		claims.ExpiresAt = jwt.NewNumericDate(now.Add(time.Hour))
+	}
+	if claims.ClusterID == "" {
+		claims.ClusterID = tm.clusterID
+	}
+	if claims.OpenCHAMIID == "" {
+		claims.OpenCHAMIID = tm.openchamiID
+	}
+	if claims.ID == "" {
+		jti, err := generateUUID()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate JTI: %w", err)
+		}
+		claims.ID = jti
+	}
+	if claims.Nonce == "" {
+		nonce, err := generateNonce()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate nonce: %w", err)
+		}
+		claims.Nonce = nonce
+	}
+
+	if err := claims.Validate(tm.enforce); err != nil {
+		return nil, fmt.Errorf("invalid claims: %w", err)
+	}
+
+	return claims, nil
+}
+
+func (tm *TokenManager) signClaims(claims jwt.Claims) (string, error) {
+	privateKey, err := tm.keyManager.GetPrivateKey()
+	if err != nil {
+		return "", fmt.Errorf("failed to get private key: %w", err)
+	}
+
+	kid, err := tm.keyManager.GetKid()
+	if err != nil {
+		return "", fmt.Errorf("failed to get key id: %w", err)
+	}
+
 	signingMethod, err := keys.GetSigningMethod(tm.algorithm)
 	if err != nil {
 		return "", fmt.Errorf("invalid signing algorithm: %w", err)
 	}
 
-	// Create and sign token using ExtendedClaims
-	token := jwt.NewWithClaims(signingMethod, extendedClaims)
+	token := jwt.NewWithClaims(signingMethod, claims)
+	token.Header["kid"] = kid
+	token.Header["typ"] = "JWT"
+
 	signed, err := token.SignedString(privateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign token: %w", err)

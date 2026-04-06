@@ -19,17 +19,28 @@ import (
 	"github.com/openchami/tokensmith/pkg/authz"
 )
 
+func validTokenSmithClaims(iss string, aud []string) jwt.MapClaims {
+	now := time.Unix(100, 0)
+	return jwt.MapClaims{
+		"sub":          "u1",
+		"iss":          iss,
+		"aud":          aud,
+		"iat":          now.Unix(),
+		"nbf":          now.Unix(),
+		"exp":          now.Add(5 * time.Minute).Unix(),
+		"auth_level":   "IAL2",
+		"auth_factors": 2,
+		"auth_methods": []string{"service", "certificate"},
+		"session_id":   "service-u1-100",
+		"session_exp":  now.Add(24 * time.Hour).Unix(),
+		"auth_events":  []string{"service_auth"},
+	}
+}
+
 func TestAuthN_DefaultsRejectWrongIssuer(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 
-	claims := jwt.MapClaims{
-		"sub": "u1",
-		"iss": "wrong",
-		"aud": []string{"svc"},
-		"iat": time.Unix(100, 0).Unix(),
-		"nbf": time.Unix(100, 0).Unix(),
-		"exp": time.Unix(200, 0).Unix(),
-	}
+	claims := validTokenSmithClaims("wrong", []string{"svc"})
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	s, _ := tok.SignedString(priv)
 
@@ -67,14 +78,7 @@ func TestAuthN_DefaultsRejectWrongIssuer(t *testing.T) {
 func TestAuthN_DefaultsRejectWrongAudience(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 
-	claims := jwt.MapClaims{
-		"sub": "u1",
-		"iss": "iss",
-		"aud": []string{"other"},
-		"iat": time.Unix(100, 0).Unix(),
-		"nbf": time.Unix(100, 0).Unix(),
-		"exp": time.Unix(200, 0).Unix(),
-	}
+	claims := validTokenSmithClaims("iss", []string{"other"})
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	s, _ := tok.SignedString(priv)
 
@@ -102,14 +106,7 @@ func TestAuthN_DefaultsRejectWrongAudience(t *testing.T) {
 func TestAuthN_ValidTokenPassesAndSetsPrincipal(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 
-	claims := jwt.MapClaims{
-		"sub": "u1",
-		"iss": "iss",
-		"aud": []string{"svc"},
-		"iat": time.Unix(100, 0).Unix(),
-		"nbf": time.Unix(100, 0).Unix(),
-		"exp": time.Unix(100, 0).Add(5 * time.Minute).Unix(),
-	}
+	claims := validTokenSmithClaims("iss", []string{"svc"})
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	s, _ := tok.SignedString(priv)
 
@@ -151,14 +148,7 @@ func TestAuthN_ValidTokenPassesAndSetsPrincipal(t *testing.T) {
 func TestAuthN_JWKSFetchFailureFailsClosedWithoutCache(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 
-	claims := jwt.MapClaims{
-		"sub": "u1",
-		"iss": "iss",
-		"aud": []string{"svc"},
-		"iat": time.Unix(100, 0).Unix(),
-		"nbf": time.Unix(100, 0).Unix(),
-		"exp": time.Unix(200, 0).Unix(),
-	}
+	claims := validTokenSmithClaims("iss", []string{"svc"})
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	tok.Header["kid"] = "k1"
 	s, _ := tok.SignedString(priv)
@@ -193,14 +183,7 @@ func TestAuthN_JWKSFetchFailureFailsClosedWithoutCache(t *testing.T) {
 func TestAuthN_JWKSRejectsMismatchedJWKAlg(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 
-	claims := jwt.MapClaims{
-		"sub": "u1",
-		"iss": "iss",
-		"aud": []string{"svc"},
-		"iat": time.Unix(100, 0).Unix(),
-		"nbf": time.Unix(100, 0).Unix(),
-		"exp": time.Unix(200, 0).Unix(),
-	}
+	claims := validTokenSmithClaims("iss", []string{"svc"})
 	tok := jwt.NewWithClaims(jwt.SigningMethodPS256, claims)
 	tok.Header["kid"] = "k1"
 	s, _ := tok.SignedString(priv)
@@ -217,6 +200,43 @@ func TestAuthN_JWKSRejectsMismatchedJWKAlg(t *testing.T) {
 		Audiences:  []string{"svc"},
 		JWKSURLs:   []string{srv.URL},
 		HTTPClient: srv.Client(),
+		now:        func() time.Time { return time.Unix(150, 0) },
+	})
+	if err != nil {
+		t.Fatalf("middleware init: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	req.Header.Set("Authorization", "Bearer "+s)
+	rr := httptest.NewRecorder()
+
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("next should not be called")
+	}))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
+func TestAuthN_RejectsMissingTokenSmithClaims(t *testing.T) {
+	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+
+	claims := jwt.MapClaims{
+		"sub": "u1",
+		"iss": "iss",
+		"aud": []string{"svc"},
+		"iat": time.Unix(100, 0).Unix(),
+		"nbf": time.Unix(100, 0).Unix(),
+		"exp": time.Unix(200, 0).Unix(),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	s, _ := tok.SignedString(priv)
+
+	mw, err := Middleware(Options{
+		Issuers:    []string{"iss"},
+		Audiences:  []string{"svc"},
+		StaticKeys: []crypto.PublicKey{&priv.PublicKey},
 		now:        func() time.Time { return time.Unix(150, 0) },
 	})
 	if err != nil {

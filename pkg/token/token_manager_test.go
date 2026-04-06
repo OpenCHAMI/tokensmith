@@ -142,6 +142,68 @@ func TestTokenOperations(t *testing.T) {
 		// Verify JTI and nonce are present
 		assert.NotEmpty(t, rawClaims["jti"])
 		assert.NotEmpty(t, rawClaims["nonce"])
+		assert.NotNil(t, parsedClaims.NotBefore)
+
+		parsedToken, _, err := jwt.NewParser().ParseUnverified(token, jwt.MapClaims{})
+		require.NoError(t, err)
+		kid, err := tm.keyManager.GetKid()
+		require.NoError(t, err)
+		assert.Equal(t, "JWT", parsedToken.Header["typ"])
+		assert.Equal(t, kid, parsedToken.Header["kid"])
+	})
+
+	t.Run("GenerateToken fills missing registered time claims and kid header", func(t *testing.T) {
+		claims := &TSClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:   "test-issuer",
+				Subject:  "test-subject",
+				Audience: []string{"test-audience"},
+			},
+			AuthLevel:   "IAL2",
+			AuthFactors: 2,
+			AuthMethods: []string{"password", "mfa"},
+			SessionID:   "test-session",
+			SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+			AuthEvents:  []string{"login", "mfa"},
+		}
+
+		token, err := tm.GenerateToken(claims)
+		require.NoError(t, err)
+
+		parsedClaims, _, err := tm.ParseToken(token)
+		require.NoError(t, err)
+		assert.NotNil(t, parsedClaims.IssuedAt)
+		assert.NotNil(t, parsedClaims.NotBefore)
+		assert.NotNil(t, parsedClaims.ExpiresAt)
+
+		parsedToken, _, err := jwt.NewParser().ParseUnverified(token, jwt.MapClaims{})
+		require.NoError(t, err)
+		kid, err := tm.keyManager.GetKid()
+		require.NoError(t, err)
+		assert.Equal(t, kid, parsedToken.Header["kid"])
+	})
+
+	t.Run("ValidateAt uses provided time", func(t *testing.T) {
+		base := time.Unix(100, 0)
+		claims := &TSClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Subject:   "test-subject",
+				Audience:  []string{"test-audience"},
+				ExpiresAt: jwt.NewNumericDate(base.Add(5 * time.Minute)),
+				NotBefore: jwt.NewNumericDate(base),
+				IssuedAt:  jwt.NewNumericDate(base),
+			},
+			AuthLevel:   "IAL2",
+			AuthFactors: 2,
+			AuthMethods: []string{"password", "mfa"},
+			SessionID:   "test-session",
+			SessionExp:  base.Add(24 * time.Hour).Unix(),
+			AuthEvents:  []string{"login", "mfa"},
+		}
+
+		require.NoError(t, claims.ValidateAt(true, base.Add(10*time.Second)))
+		require.ErrorIs(t, claims.ValidateAt(true, base.Add(10*time.Minute)), ErrTokenExpired)
 	})
 
 	t.Run("GenerateTokenWithClaims with additional claims", func(t *testing.T) {

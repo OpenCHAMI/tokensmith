@@ -58,7 +58,7 @@ func (km *KeyManager) LoadPrivateKey(keyPath string) error {
 
 	km.privateKey = privateKey
 	km.publicKey = &privateKey.PublicKey
-	return nil
+	return km.generateKIDFromPublicKey()
 }
 
 // LoadPublicKey loads a public key from a PEM file
@@ -82,7 +82,7 @@ func (km *KeyManager) LoadPublicKey(keyPath string) error {
 	}
 
 	km.publicKey = publicKey
-	return nil
+	return km.generateKIDFromPublicKey()
 }
 
 // generate KID from public key

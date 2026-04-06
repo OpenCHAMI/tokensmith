@@ -12,7 +12,7 @@ Use this when:
 
 - clients are other trusted services (not end users)
 - caller services obtain service JWTs from TokenSmith
-- target services enforce JWT AuthN + Casbin AuthZ via TokenSmith middleware
+- target services enforce TokenSmith JWT AuthN + Casbin AuthZ via TokenSmith middleware
 
 For normative wire behavior and contract details, see:
 
@@ -31,9 +31,9 @@ Canonical request body:
 
 ```json
 {
-	"bootstrap_token": "<jwt>",
-	"target_service": "metadata-service",
-	"scopes": ["read"]
+  "bootstrap_token": "<jwt>",
+  "target_service": "metadata-service",
+  "scopes": ["read"]
 }
 ```
 
@@ -46,8 +46,8 @@ Canonical response body:
 
 ```json
 {
-	"token": "<service-jwt>",
-	"expires_at": "2026-03-25T18:47:12Z"
+  "token": "<service-jwt>",
+  "expires_at": "2026-03-25T18:47:12Z"
 }
 ```
 
@@ -57,36 +57,31 @@ Canonical response body:
 
 ```bash
 BOOTSTRAP_TOKEN=$(tokensmith mint-bootstrap-token \
-	--key-file ./keys/private.pem \
-	--service-id example-service-1 \
-	--target-service metadata-service \
-	--scopes read \
-	--ttl 5m)
+  --key-file ./keys/private.pem \
+  --service-id example-service-1 \
+  --target-service metadata-service \
+  --scopes read \
+  --ttl 5m)
 ```
 
-2. Start the caller service with:
+1. Start the caller service with:
 
 ```bash
 export TOKENSMITH_BOOTSTRAP_TOKEN="$BOOTSTRAP_TOKEN"
 ```
 
-3. Caller redeems this token once at `POST /service/token` and receives a regular service JWT for S2S calls.
+1. Caller redeems this token once at `POST /service/token` and receives a regular service JWT for S2S calls.
 
-4. TokenSmith enforces one-time use using bootstrap-token `jti` tracking.
-5. For restart-safe replay protection, start TokenSmith with `--bootstrap-jti-store /path/to/bootstrap-jti.json` (or `TOKENSMITH_BOOTSTRAP_JTI_STORE`).
-6. If a caller needs a new service JWT after bootstrap consumption, provision a new bootstrap token and update `TOKENSMITH_BOOTSTRAP_TOKEN` before requesting again.
-
-Reference implementation:
-
-- `example/serviceauth/README.md`
-- `example/serviceauth/main.go`
+1. TokenSmith enforces one-time use using bootstrap-token `jti` tracking.
+1. For restart-safe replay protection, start TokenSmith with `--bootstrap-jti-store /path/to/bootstrap-jti.json` (or `TOKENSMITH_BOOTSTRAP_JTI_STORE`).
+1. If a caller needs a new service JWT after bootstrap consumption, provision a new bootstrap token and update `TOKENSMITH_BOOTSTRAP_TOKEN` before requesting again.
 
 ## 2) Target service: validate JWTs and enforce policy
 
 Install middleware in this order:
 
-1. TokenSmith AuthN middleware (JWT validation + principal extraction)
-2. TokenSmith AuthZ middleware (Casbin decision)
+1. TokenSmith AuthN middleware (TokenSmith JWT validation and principal extraction)
+1. TokenSmith AuthZ middleware (Casbin decision)
 
 Reference wiring:
 

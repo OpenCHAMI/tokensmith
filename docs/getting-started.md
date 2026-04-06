@@ -8,6 +8,8 @@ SPDX-License-Identifier: MIT
 
 This guide is the fastest path to running TokenSmith and integrating AuthN/AuthZ in a service.
 
+`pkg/authn` validates TokenSmith JWTs. The expected claim set includes standard JWT claims plus TokenSmith claims such as `auth_level`, `auth_factors`, `auth_methods`, `session_id`, `session_exp`, and `auth_events`.
+
 If you need normative behavior details, see:
 
 - `docs/authz-spec.md`
@@ -46,7 +48,7 @@ If your service only needs internal service-to-service AuthN/AuthZ, you can skip
 1. Mint a one-time bootstrap token before service startup using `tokensmith mint-bootstrap-token`.
 2. Pass bootstrap token via `TOKENSMITH_BOOTSTRAP_TOKEN` to the caller service process.
 3. Have the caller service redeem bootstrap token(s) for service JWTs via `pkg/tokenservice` (library) or `example/serviceauth` (end-to-end client example).
-4. In the target service, install TokenSmith AuthN middleware to validate JWTs and build a verified principal.
+4. In the target service, install TokenSmith AuthN middleware to validate TokenSmith JWTs and build a verified principal.
 5. Install TokenSmith AuthZ middleware and map routes using either explicit `authz.RouteMapper` or path/method style (`authz.PathMethodMapper` plus Casbin matchers).
 6. Ensure service principals map to the `service` role in policy/grouping.
 
@@ -132,4 +134,4 @@ For new services, use canonical principal helpers:
 
 Reference details:
 
-- `docs/migration.md`
+- `docs/context-guide.md`

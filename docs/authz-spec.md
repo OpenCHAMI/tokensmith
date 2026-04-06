@@ -240,32 +240,41 @@ Outputs:
 
 Rules are applied in order; first match wins.
 
-| Priority | Mode     | Public | Principal | Mapped | Engine error | Evaluate | Result  | HTTP | Reason |
-|----------|----------|--------|-----------|--------|--------------|----------|---------|------|--------|
-| 1        | any      | true   | any       | any    | any          | no       | allow   | n/a  | n/a    |
-| 2        | OFF      | false  | any       | any    | any          | no       | allow   | n/a  | n/a    |
-| 3        | SHADOW   | false  | false     | any    | any          | no       | allow   | n/a  | no_principal (log) |
-| 4        | ENFORCE  | false  | false     | any    | any          | no       | deny    | 401  | no_principal |
-| 5        | SHADOW   | false  | true      | false  | any          | no       | allow   | n/a  | unmapped_route (log) |
-| 6        | ENFORCE  | false  | true      | false  | any          | no       | deny    | 403  | unmapped_route |
-| 7        | SHADOW   | false  | true      | true   | true         | yes      | allow   | n/a  | engine_error (log) |
-| 8        | ENFORCE  | false  | true      | true   | true         | yes      | deny    | 500  | engine_error |
-| 9        | SHADOW   | false  | true      | true   | false        | yes      | allow   | n/a  | policy_denied (log if denied) |
-| 10       | ENFORCE  | false  | true      | true   | false        | yes      | allow/deny | 403 if deny | policy_denied |
+| Priority | Mode    | Public | Principal | Mapped | Engine error | Evaluate | Result     | HTTP        | Reason                     |
+| -------- | ------- | ------ | --------- | ------ | ------------ | -------- | ---------- | ----------- | -------------------------- |
+| 1        | any     | true   | any       | any    | any          | no       | allow      | n/a         | n/a                        |
+| 2        | OFF     | false  | any       | any    | any          | no       | allow      | n/a         | n/a                        |
+| 3        | SHADOW  | false  | false     | any    | any          | no       | allow      | n/a         | no_principal (log)         |
+| 4        | ENFORCE | false  | false     | any    | any          | no       | deny       | 401         | no_principal               |
+| 5        | SHADOW  | false  | true      | false  | any          | no       | allow      | n/a         | unmapped_route (log)       |
+| 6        | ENFORCE | false  | true      | false  | any          | no       | deny       | 403         | unmapped_route             |
+| 7        | SHADOW  | false  | true      | true   | true         | yes      | allow      | n/a         | engine_error (log)         |
+| 8        | ENFORCE | false  | true      | true   | true         | yes      | deny       | 500         | engine_error               |
+| 9        | SHADOW  | false  | true      | true   | false        | yes      | allow      | n/a         | policy_denied (log)        |
+| 10       | ENFORCE | false  | true      | true   | false        | yes      | allow/deny | 403 if deny | policy_denied              |
 
 Notes:
 
 - In SHADOW mode, TokenSmith MUST log decisions for mapped requests and SHOULD log for unmapped/missing principal.
 - In ENFORCE mode, deny-by-default applies to unmapped routes unless explicitly configured otherwise (configuration is an implementation detail but MUST be testable).
 
-## 5. AuthN/JWT minimum safe defaults
+## 5. AuthN/TokenSmith JWT defaults
 
 TokenSmith JWT validation MUST, by default:
 
 - Validate signature
-- Validate `exp` and `nbf` when present
+- Require and validate `exp`
+- Require and validate `iat`
+- Require and validate `nbf`
 - Require and validate `iss` (issuer)
 - Require and validate `aud` (audience)
+- Require and validate TokenSmith claims:
+  - `auth_level`
+  - `auth_factors`
+  - `auth_methods`
+  - `session_id`
+  - `session_exp`
+  - `auth_events`
 
 Opt-outs:
 
