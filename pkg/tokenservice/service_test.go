@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -775,4 +776,38 @@ func TestTokenService_ServiceTokenHandler_BootstrapTokenReuseDeniedAfterRestart(
 	secondW := httptest.NewRecorder()
 	serviceB.ServiceTokenHandler(secondW, secondReq)
 	require.Equal(t, http.StatusUnauthorized, secondW.Result().StatusCode)
+}
+
+func TestTokenService_ServiceTokenHandler_TargetMismatchReturnsGenericUnauthorized(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	keyManager := keys.NewKeyManager()
+	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
+	require.NoError(t, err)
+
+	service, err := NewTokenService(keyManager, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+	})
+	require.NoError(t, err)
+
+	bootstrapToken, err := service.MintBootstrapToken(context.Background(), "svc-a", "svc-b", []string{"read"}, 5*time.Minute)
+	require.NoError(t, err)
+
+	body, err := json.Marshal(ServiceTokenRequest{
+		BootstrapToken: bootstrapToken,
+		TargetService:  "svc-c",
+		Scopes:         []string{"read"},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	service.ServiceTokenHandler(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Result().StatusCode)
+	assert.Contains(t, w.Body.String(), "Unauthorized")
+	assert.NotContains(t, strings.ToLower(w.Body.String()), "target service")
 }
