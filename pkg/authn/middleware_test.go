@@ -17,6 +17,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/authz"
+	"github.com/openchami/tokensmith/pkg/keys"
 )
 
 func validTokenSmithClaims(iss string, aud []string) jwt.MapClaims {
@@ -37,11 +38,21 @@ func validTokenSmithClaims(iss string, aud []string) jwt.MapClaims {
 	}
 }
 
+func setRFC7638KID(t *testing.T, token *jwt.Token, key crypto.PublicKey) {
+	t.Helper()
+	kid, err := keys.RFC7638Thumbprint(key)
+	if err != nil {
+		t.Fatalf("derive kid: %v", err)
+	}
+	token.Header["kid"] = kid
+}
+
 func TestAuthN_DefaultsRejectWrongIssuer(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 
 	claims := validTokenSmithClaims("wrong", []string{"svc"})
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	setRFC7638KID(t, tok, &priv.PublicKey)
 	s, _ := tok.SignedString(priv)
 
 	mw, err := Middleware(Options{
@@ -80,6 +91,7 @@ func TestAuthN_DefaultsRejectWrongAudience(t *testing.T) {
 
 	claims := validTokenSmithClaims("iss", []string{"other"})
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	setRFC7638KID(t, tok, &priv.PublicKey)
 	s, _ := tok.SignedString(priv)
 
 	mw, err := Middleware(Options{
@@ -108,6 +120,7 @@ func TestAuthN_ValidTokenPassesAndSetsPrincipal(t *testing.T) {
 
 	claims := validTokenSmithClaims("iss", []string{"svc"})
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	setRFC7638KID(t, tok, &priv.PublicKey)
 	s, _ := tok.SignedString(priv)
 
 	mw, err := Middleware(Options{
@@ -154,7 +167,7 @@ func TestAuthN_JWKSFetchFailureFailsClosedWithoutCache(t *testing.T) {
 
 	claims := validTokenSmithClaims("iss", []string{"svc"})
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	tok.Header["kid"] = "k1"
+	setRFC7638KID(t, tok, &priv.PublicKey)
 	s, _ := tok.SignedString(priv)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,11 +202,15 @@ func TestAuthN_JWKSRejectsMismatchedJWKAlg(t *testing.T) {
 
 	claims := validTokenSmithClaims("iss", []string{"svc"})
 	tok := jwt.NewWithClaims(jwt.SigningMethodPS256, claims)
-	tok.Header["kid"] = "k1"
+	kid, err := keys.RFC7638Thumbprint(&priv.PublicKey)
+	if err != nil {
+		t.Fatalf("derive kid: %v", err)
+	}
+	tok.Header["kid"] = kid
 	s, _ := tok.SignedString(priv)
 
 	// JWK advertises RS256 for this key, so PS256 must be rejected.
-	jwks := jwksJSON(t, "k1", &priv.PublicKey)
+	jwks := jwksJSON(t, kid, &priv.PublicKey)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(jwks)
 	}))
@@ -235,6 +252,69 @@ func TestAuthN_RejectsMissingTokenSmithClaims(t *testing.T) {
 		"exp": time.Unix(200, 0).Unix(),
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	setRFC7638KID(t, tok, &priv.PublicKey)
+	s, _ := tok.SignedString(priv)
+
+	mw, err := Middleware(Options{
+		Issuers:    []string{"iss"},
+		Audiences:  []string{"svc"},
+		StaticKeys: []crypto.PublicKey{&priv.PublicKey},
+		now:        func() time.Time { return time.Unix(150, 0) },
+	})
+	if err != nil {
+		t.Fatalf("middleware init: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	req.Header.Set("Authorization", "Bearer "+s)
+	rr := httptest.NewRecorder()
+
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("next should not be called")
+	}))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
+func TestAuthN_RejectsMissingKIDHeader(t *testing.T) {
+	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+
+	claims := validTokenSmithClaims("iss", []string{"svc"})
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	// Intentionally omit kid.
+	s, _ := tok.SignedString(priv)
+
+	mw, err := Middleware(Options{
+		Issuers:    []string{"iss"},
+		Audiences:  []string{"svc"},
+		StaticKeys: []crypto.PublicKey{&priv.PublicKey},
+		now:        func() time.Time { return time.Unix(150, 0) },
+	})
+	if err != nil {
+		t.Fatalf("middleware init: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	req.Header.Set("Authorization", "Bearer "+s)
+	rr := httptest.NewRecorder()
+
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("next should not be called")
+	}))
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
+func TestAuthN_RejectsNonRFC7638KIDHeader(t *testing.T) {
+	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+
+	claims := validTokenSmithClaims("iss", []string{"svc"})
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tok.Header["kid"] = "openchami-legacy-kid"
 	s, _ := tok.SignedString(priv)
 
 	mw, err := Middleware(Options{

@@ -71,6 +71,8 @@ TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
 - **AuthN/AuthZ Middleware**
   - TokenSmith JWT validation in `pkg/authn`
   - PKI-based signature validation with RSA, ECDSA, and JWKS key support
+  - RFC 7638-compliant `kid` thumbprints for signing keys
+  - Middleware enforcement of `kid` presence and RFC 7638 format
   - Principal extraction from verified TokenSmith claims
   - Structured authentication failure logging
   - Casbin-based authorization in `pkg/authz`

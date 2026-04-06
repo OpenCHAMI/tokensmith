@@ -165,13 +165,14 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	}
 
 	// Create OpenCHAMI claims
-	// Create OpenCHAMI claims
+	issuedAt := time.Unix(introspection.IssuedAt, 0)
 	claims := &token.TSClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.Issuer,
 			Subject:   introspection.Username,
 			ExpiresAt: jwt.NewNumericDate(time.Unix(introspection.ExpiresAt, 0)),
-			IssuedAt:  jwt.NewNumericDate(time.Unix(introspection.IssuedAt, 0)),
+			NotBefore: jwt.NewNumericDate(issuedAt),
+			IssuedAt:  jwt.NewNumericDate(issuedAt),
 		},
 		ClusterID:   s.ClusterID,
 		OpenCHAMIID: s.OpenCHAMIID,
@@ -321,13 +322,16 @@ func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targ
 		return "", errors.New("target service cannot be empty")
 	}
 
+	now := time.Now()
+
 	claims := &token.TSClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.Issuer,
 			Subject:   serviceID,
 			Audience:  []string{targetService},
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+			NotBefore: jwt.NewNumericDate(now),
+			IssuedAt:  jwt.NewNumericDate(now),
 		},
 		ClusterID:   s.ClusterID,
 		OpenCHAMIID: s.OpenCHAMIID,
@@ -336,8 +340,8 @@ func (s *TokenService) GenerateServiceToken(ctx context.Context, serviceID, targ
 		AuthLevel:   "IAL2",
 		AuthFactors: 2,
 		AuthMethods: []string{"service", "certificate"},
-		SessionID:   fmt.Sprintf("service-%s-%d", serviceID, time.Now().UnixNano()),
-		SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+		SessionID:   fmt.Sprintf("service-%s-%d", serviceID, now.UnixNano()),
+		SessionExp:  now.Add(24 * time.Hour).Unix(),
 		AuthEvents:  []string{"service_auth"},
 	}
 

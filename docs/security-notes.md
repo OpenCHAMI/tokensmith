@@ -41,6 +41,18 @@ AuthN in `pkg/authn` validates TokenSmith JWTs against the current TokenSmith cl
 
 If your environment considers roles sensitive, configure TokenSmith to omit role lists in logs.
 
+## Key IDs (`kid`) and key binding
+
+TokenSmith uses RFC 7638 JWK thumbprints (SHA-256, base64url) as JWT `kid` values.
+
+AuthN middleware in `pkg/authn` enforces that:
+
+- JWT header `kid` is present
+- `kid` format is RFC 7638-compliant
+- key lookup is performed by `kid` (JWKS/static key matching)
+
+Rationale: requiring deterministic key IDs prevents ambiguous static-key fallback and ensures verification binds to the intended signing key.
+
 ## Issuer/audience defaults
 
 Per `docs/authz-spec.md`:

@@ -12,6 +12,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -74,6 +75,8 @@ type Options struct {
 
 	Mapper PrincipalMapper
 
+	staticKeysByKID map[string]crypto.PublicKey
+
 	now nowFunc
 }
 
@@ -109,6 +112,17 @@ func (o Options) withDefaults() (Options, error) {
 		out.Mapper = func(ctx context.Context, token *jwt.Token, claims jwt.MapClaims) (authz.Principal, error) {
 			sub, _ := claims["sub"].(string)
 			return authz.Principal{ID: sub}, nil
+		}
+	}
+
+	if len(out.StaticKeys) > 0 {
+		out.staticKeysByKID = make(map[string]crypto.PublicKey, len(out.StaticKeys))
+		for _, key := range out.StaticKeys {
+			kid, err := keys.RFC7638Thumbprint(key)
+			if err != nil {
+				return Options{}, fmt.Errorf("invalid static key for RFC 7638 kid derivation: %w", err)
+			}
+			out.staticKeysByKID[kid] = key
 		}
 	}
 
@@ -164,7 +178,13 @@ func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 			claims := &tstoken.TSClaims{}
 
 			token, err := parser.ParseWithClaims(tokStr, claims, func(t *jwt.Token) (any, error) {
-				kid, _ := t.Header["kid"].(string)
+				kid, ok := t.Header["kid"].(string)
+				if !ok || kid == "" {
+					return nil, errors.New("missing kid header")
+				}
+				if !keys.IsRFC7638Thumbprint(kid) {
+					return nil, errors.New("invalid kid header format")
+				}
 				alg := t.Method.Alg()
 
 				if err := keys.ValidateAlgorithm(alg); err != nil {
@@ -185,12 +205,8 @@ func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 					}
 				}
 
-				// Try static keys.
-				for _, k := range opt.StaticKeys {
-					if _, err := ensureAlgCompatibleKey(alg, k); err != nil {
-						continue
-					}
-					return k, nil
+				if k, ok := opt.staticKeysByKID[kid]; ok {
+					return ensureAlgCompatibleKey(alg, k)
 				}
 
 				// If we have no usable cached keys, refresh once (fail closed if fetch fails).

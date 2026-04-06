@@ -8,7 +8,7 @@ SPDX-License-Identifier: MIT
 
 This guide is the fastest path to running TokenSmith and integrating AuthN/AuthZ in a service.
 
-`pkg/authn` validates TokenSmith JWTs. The expected claim set includes standard JWT claims plus TokenSmith claims such as `auth_level`, `auth_factors`, `auth_methods`, `session_id`, `session_exp`, and `auth_events`.
+`pkg/authn` validates TokenSmith JWTs. The expected claim set includes standard JWT claims plus TokenSmith claims such as `auth_level`, `auth_factors`, `auth_methods`, `session_id`, `session_exp`, and `auth_events`. TokenSmith-issued JWTs include RFC 7638 `kid` thumbprints, and middleware requires a valid RFC 7638 `kid` header for verification.
 
 If you need normative behavior details, see:
 
