@@ -37,7 +37,7 @@ Use filesystem policy fragments when you need to:
 Mount a directory into each service (e.g., via Kubernetes ConfigMap/Secret/volume), and point the service at it via:
 
 - `TOKENSMITH_POLICY_DIR` (preferred)
-- `AUTHZ_POLICY_DIR` (compat)
+- `AUTHZ_POLICY_DIR`
 
 TokenSmith loads `*.csv` fragments in **lexical order** by filename.
 

@@ -4,113 +4,60 @@ Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
 SPDX-License-Identifier: MIT
 -->
 
-# TokenSmith migration guide (context keys, ordering, rollout)
+# TokenSmith middleware integration guide
 
-TokenSmith is evolving into the canonical owner of OpenCHAMI AuthN/AuthZ standards.
+This guide defines the current TokenSmith middleware model and recommended wiring for services.
 
-This document defines **compatibility guardrails** so existing services keep working while
-new middleware and a more explicit principal model are rolled out.
+## Supported middleware model
 
-## Context keys: legacy vs new
+Use TokenSmith with this split of responsibilities:
 
-### Legacy (existing)
+- Authentication and JWT verification: `pkg/authn`
+- Authorization and policy decisions: `pkg/authz`
 
-The legacy JWT middleware (`github.com/openchami/tokensmith/middleware`) stores validated JWT claims into request context:
+## Context model
 
-- `middleware.ClaimsContextKey` (value: `*token.TSClaims`)
-- `middleware.RawClaimsContextKey` (value: `*token.TSClaims`)
+TokenSmith standardizes on a normalized authorization identity:
 
-Accessors:
-
-- `middleware.GetClaimsFromContext(ctx)`
-- `middleware.GetRawClaimsFromContext(ctx)`
-
-These APIs remain for compatibility.
-
-### New (recommended)
-
-TokenSmith standardizes on storing a normalized authorization identity:
-
-- **Principal**: `*authz.Principal`
+- Principal: `authz.Principal`
 
 Canonical helpers:
 
 - `tokensmith.SetPrincipal(ctx, p)`
 - `tokensmith.PrincipalFromContext(ctx)`
+- `authn.PrincipalFromContext(ctx)`
 
-## Compatibility strategy
+Use verified claims only when needed for fields not represented by principal:
 
-For at least one release line:
+- `authn.VerifiedClaimsFromContext(ctx)`
 
-- **Read-old + read-new**: `tokensmith.PrincipalFromContext(ctx)` reads:
-  1) the new principal key (if present)
-  2) else, derives a minimal principal from legacy JWT claims (if present)
-
-- **Write-new only** (recommended): new AuthN middleware should store principals via `tokensmith.SetPrincipal`.
-  - Services may optionally continue storing legacy claims for downstream code during migration.
-
-### Legacy principal derivation
-
-When only legacy JWT claims exist, `tokensmith.PrincipalFromContext` derives:
-
-- `principal.ID = claims.Subject`
-- `principal.Roles = claims.Scope`
-
-This is best-effort to preserve behavior for services that previously used `scope` as an authorization input.
-
-## Middleware ordering expectations
-
-AuthZ expects AuthN to run before it.
+## Middleware ordering
 
 Recommended order:
 
-1) request-id middleware (optional)
-2) AuthN middleware (JWT/OIDC validation; sets principal)
-3) AuthZ middleware (Casbin enforcement)
-4) application handler
+1. request-id middleware (optional)
+2. AuthN middleware (`pkg/authn`) to verify JWT and set principal
+3. AuthZ middleware (`pkg/authz`) to enforce policy
+4. application handler
 
-### What if AuthZ runs without AuthN?
+## Failure expectations
 
-If AuthZ runs and no principal is present:
+If AuthZ runs without a principal present, treat the request as an authentication failure path and return a consistent error response according to your service policy and `docs/authz-spec.md`.
 
-- strict configurations should treat it as an **AuthN failure** (`401`)
-- compatibility configurations may return an **AuthZ denial** (`403`) with a stable JSON body
+## Adoption checklist
 
-See `docs/authz-spec.md` for the normative wire contract.
+1. Configure `authn.Middleware(authn.Options{...})` with issuer/audience/key material.
+2. Provide an `authn.Mapper` that maps claims into `authz.Principal`.
+3. Attach `authz` middleware with a route mapper or path/method mapper.
+4. Read principal in handlers with `authn.PrincipalFromContext` or `tokensmith.PrincipalFromContext`.
+5. Roll out authorization in `shadow` mode before moving to `enforce`.
+6. Track `policy_version` during rollout to verify consistent policy deployment.
 
-## Practical adoption checklist
+## Common wiring issues
 
-Use this sequence to migrate an existing service with minimal risk.
-
-1. Keep existing AuthN in place.
-2. Start writing principals with `tokensmith.SetPrincipal(ctx, p)` in AuthN.
-3. Update authorization call-sites to read `tokensmith.PrincipalFromContext(ctx)`.
-4. Keep legacy claims reads only where still required by older handlers.
-5. Run in AuthZ `shadow` mode first and review decision logs/metrics.
-6. Move to `enforce` after policy and principal shape are validated.
-
-## Middleware ordering failure modes
-
-| Ordering issue | Typical outcome | Recommended fix |
+| Issue | Outcome | Fix |
 | --- | --- | --- |
-| AuthZ before AuthN | Missing principal; request may fail as `401` or compatibility `403` depending on configuration | Ensure AuthN middleware runs before AuthZ |
-| AuthN runs but does not set principal | AuthZ cannot evaluate intended subject/roles | Map verified JWT claims to `authz.Principal` and store with `tokensmith.SetPrincipal` |
-| Route not mapped and not public in enforce mode | Deny-by-default `403` | Add explicit mapping or mark route public by policy/design |
+| AuthZ before AuthN | Missing principal, request denied | Ensure AuthN runs before AuthZ |
+| AuthN mapper missing required claims | AuthN rejection | Validate claim mapping logic and expected token shape |
+| Route not mapped in enforce mode | Deny-by-default response | Add explicit route mapping or public route annotation |
 | Policy changed without restart | Old policy still active | Restart service (no hot reload in v1) |
-
-## What to remove last
-
-Do not remove legacy `middleware.GetClaimsFromContext` usage until:
-
-- all authorization decision paths read principals,
-- downstream handlers no longer rely on direct legacy claim structs,
-- shadow-mode observations show no unexpected denials.
-
-## Deprecations
-
-The following legacy helpers remain but are deprecated for new consumers:
-
-- `middleware.GetClaimsFromContext`
-- `middleware.GetRawClaimsFromContext`
-
-They will be removed only after a documented deprecation period.

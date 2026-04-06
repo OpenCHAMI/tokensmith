@@ -24,8 +24,6 @@ require (
 
 replace github.com/openchami/tokensmith => ../../
 
-replace github.com/openchami/tokensmith/middleware => ../../middleware
-
 replace github.com/openchami/tokensmith/pkg/token => ../../pkg/token
 
 replace github.com/openchami/tokensmith/pkg/oidc/hydra => ../../pkg/oidc/hydra

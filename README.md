@@ -51,7 +51,7 @@ TokenSmith now supports both token exchange and Casbin-first AuthN/AuthZ middlew
 - Casbin model and policy workflow: [`docs/casbin-first-guide.md`](docs/casbin-first-guide.md)
 - Policy loading and `policy_version`: [`docs/authz_policy.md`](docs/authz_policy.md)
 - Operations and rollout modes: [`docs/authz_operations.md`](docs/authz_operations.md)
-- Migration from legacy context helpers: [`docs/migration.md`](docs/migration.md)
+- Middleware wiring and principal context: [`docs/migration.md`](docs/migration.md)
 - Fabrica integration: [`docs/fabrica.md`](docs/fabrica.md)
 
 ## Features
@@ -125,15 +125,15 @@ tokensmith/
 go get github.com/openchami/tokensmith
 ```
 
-### JWT Middleware
+### AuthN/AuthZ Middleware
+
+Use the main module and wire JWT validation with `pkg/authn` plus authorization with `pkg/authz`.
 
 ```bash
-go get github.com/openchami/tokensmith/middleware
+go get github.com/openchami/tokensmith
 ```
 
-See the [middleware documentation](middleware/README.md) for detailed usage instructions.
-
-For new services, prefer the AuthN/AuthZ middleware stack documented in [`docs/getting-started.md`](docs/getting-started.md).
+See [`docs/getting-started.md`](docs/getting-started.md) for the recommended middleware stack.
 
 ## Testing (local developer guidance)
 
@@ -224,7 +224,7 @@ This makes it possible to confirm exactly which policy is in effect across a fle
 
 TokenSmith exposes a small public `pkg/testutil` package intended for **service integration tests**.
 
-Compatibility policy:
+Stability policy:
 
 - Best-effort stability within a major version of TokenSmith.
 - No guarantees are made about internal structures or unexported behavior.

@@ -26,7 +26,7 @@ Precedence:
 | Variable | Used by | Description |
 | --- | --- | --- |
 | `TOKENSMITH_POLICY_DIR` | `pkg/authz/policyloader` | Preferred path to policy fragment directory |
-| `AUTHZ_POLICY_DIR` | `pkg/authz/policyloader` | Compatibility path to policy fragment directory |
+| `AUTHZ_POLICY_DIR` | `pkg/authz/policyloader` | Alternate path name accepted by policy loader |
 
 If both are set, use one source of truth per deployment to avoid confusion.
 
