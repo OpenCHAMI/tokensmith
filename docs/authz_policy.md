@@ -41,7 +41,7 @@ Rationale: predictable behavior across container runtimes and to reduce confusio
 Set one of:
 
 - `TOKENSMITH_POLICY_DIR` (preferred)
-- `AUTHZ_POLICY_DIR` (compat)
+- `AUTHZ_POLICY_DIR`
 
 to a directory containing policy fragment files.
 

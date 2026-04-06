@@ -8,6 +8,8 @@ SPDX-License-Identifier: MIT
 
 This guide is the fastest path to running TokenSmith and integrating AuthN/AuthZ in a service.
 
+`pkg/authn` validates TokenSmith JWTs. The expected claim set includes standard JWT claims plus TokenSmith claims such as `auth_level`, `auth_factors`, `auth_methods`, `session_id`, `session_exp`, and `auth_events`. TokenSmith-issued JWTs include RFC 7638 `kid` thumbprints, and middleware requires a valid RFC 7638 `kid` header for verification.
+
 If you need normative behavior details, see:
 
 - `docs/authz-spec.md`
@@ -45,13 +47,9 @@ If your service only needs internal service-to-service AuthN/AuthZ, you can skip
 
 1. Mint a one-time bootstrap token before service startup using `tokensmith mint-bootstrap-token`.
 2. Pass bootstrap token via `TOKENSMITH_BOOTSTRAP_TOKEN` to the caller service process.
-3. Have the caller service redeem bootstrap token(s) for service JWTs using:
-  - `pkg/tokenservice` (library), or
-  - `example/serviceauth` (end-to-end client example).
-4. In the target service, install TokenSmith AuthN middleware to validate JWTs and build a verified principal.
-5. Install TokenSmith AuthZ middleware and map routes using either:
-  - explicit `authz.RouteMapper`, or
-  - path/method style (`authz.PathMethodMapper` + Casbin matchers).
+3. Have the caller service redeem bootstrap token(s) for service JWTs via `pkg/tokenservice` (library) or `example/serviceauth` (end-to-end client example).
+4. In the target service, install TokenSmith AuthN middleware to validate TokenSmith JWTs and build a verified principal.
+5. Install TokenSmith AuthZ middleware and map routes using either explicit `authz.RouteMapper` or path/method style (`authz.PathMethodMapper` plus Casbin matchers).
 6. Ensure service principals map to the `service` role in policy/grouping.
 
 Current examples:
@@ -90,7 +88,7 @@ By default, TokenSmith uses an embedded baseline Casbin model and policy.
 To add policy fragments from disk, set one of:
 
 - `TOKENSMITH_POLICY_DIR` (preferred)
-- `AUTHZ_POLICY_DIR` (compatibility)
+- `AUTHZ_POLICY_DIR`
 
 Policy fragments are loaded at process startup in lexical filename order. Hot reload is not supported in v1.
 
@@ -127,13 +125,17 @@ Recommended operator workflow (including endpoint wiring and rollout checks):
 - `docs/authz_operations.md#diagnostics-endpoint-recommended`
 - `docs/authz_operations.md#rollout-verification-playbook`
 
-## 6) Migrate from legacy context claims
+## 6) Use canonical principal context helpers
 
 For new services, use canonical principal helpers:
 
-- `tokensmith.SetPrincipal(ctx, p)`
-- `tokensmith.PrincipalFromContext(ctx)`
+- `authz.SetPrincipal(ctx, p)`
+- `authz.PrincipalFromContext(ctx)`
 
-Migration details:
+When your service uses `authn.Middleware`, TokenSmith already writes principal
+to both authn and authz context helpers. No additional bridge middleware is
+required between AuthN and AuthZ.
 
-- `docs/migration.md`
+Reference details:
+
+- `docs/context-guide.md`

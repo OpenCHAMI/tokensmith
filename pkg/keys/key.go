@@ -11,11 +11,12 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 // FIPS-compliant key sizes
@@ -58,7 +59,7 @@ func (km *KeyManager) LoadPrivateKey(keyPath string) error {
 
 	km.privateKey = privateKey
 	km.publicKey = &privateKey.PublicKey
-	return nil
+	return km.generateKIDFromPublicKey()
 }
 
 // LoadPublicKey loads a public key from a PEM file
@@ -82,22 +83,96 @@ func (km *KeyManager) LoadPublicKey(keyPath string) error {
 	}
 
 	km.publicKey = publicKey
-	return nil
+	return km.generateKIDFromPublicKey()
 }
 
 // generate KID from public key
 func (km *KeyManager) generateKIDFromPublicKey() error {
-	// unmarshal pubkey independent of RSA or EC
-	pub, err := x509.MarshalPKIXPublicKey(km.publicKey)
+	kid, err := RFC7638Thumbprint(km.publicKey)
 	if err != nil {
-		return fmt.Errorf("marshal public key: %w", err)
+		return fmt.Errorf("generate RFC 7638 key id: %w", err)
+	}
+	km.kid = kid
+	return nil
+}
+
+// RFC7638Thumbprint computes a JWK thumbprint-style key ID (SHA-256, base64url)
+// for supported public key types according to RFC 7638 canonical members.
+func RFC7638Thumbprint(publicKey interface{}) (string, error) {
+	canonicalJWK, err := canonicalJWKForThumbprint(publicKey)
+	if err != nil {
+		return "", err
 	}
 
-	// combine timestamp and sha256 of serialized pub key
-	timestamp := time.Now().UnixNano()
-	sum := sha256.Sum256(pub)
-	km.kid = fmt.Sprintf("openchami-%x-%d", sum[:16], timestamp)
-	return nil
+	sum := sha256.Sum256([]byte(canonicalJWK))
+	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
+}
+
+// IsRFC7638Thumbprint returns true when kid is a base64url-encoded SHA-256
+// JWK thumbprint as produced by RFC7638Thumbprint.
+func IsRFC7638Thumbprint(kid string) bool {
+	if kid == "" {
+		return false
+	}
+
+	raw, err := base64.RawURLEncoding.DecodeString(kid)
+	if err != nil {
+		return false
+	}
+
+	return len(raw) == sha256.Size
+}
+
+func canonicalJWKForThumbprint(publicKey interface{}) (string, error) {
+	switch k := publicKey.(type) {
+	case *rsa.PublicKey:
+		return canonicalRSAJWK(k), nil
+	case rsa.PublicKey:
+		return canonicalRSAJWK(&k), nil
+	case *ecdsa.PublicKey:
+		return canonicalECJWK(k)
+	case ecdsa.PublicKey:
+		return canonicalECJWK(&k)
+	default:
+		return "", fmt.Errorf("unsupported key type %T", publicKey)
+	}
+}
+
+func canonicalRSAJWK(k *rsa.PublicKey) string {
+	e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(k.E)).Bytes())
+	n := base64.RawURLEncoding.EncodeToString(k.N.Bytes())
+	return fmt.Sprintf(`{"e":"%s","kty":"RSA","n":"%s"}`,
+		e,
+		n,
+	)
+}
+
+func canonicalECJWK(k *ecdsa.PublicKey) (string, error) {
+	curve, err := jwkCurveName(k.Curve)
+	if err != nil {
+		return "", err
+	}
+	x := base64.RawURLEncoding.EncodeToString(k.X.Bytes())
+	y := base64.RawURLEncoding.EncodeToString(k.Y.Bytes())
+
+	return fmt.Sprintf(`{"crv":"%s","kty":"EC","x":"%s","y":"%s"}`,
+		curve,
+		x,
+		y,
+	), nil
+}
+
+func jwkCurveName(c elliptic.Curve) (string, error) {
+	switch c {
+	case elliptic.P256():
+		return "P-256", nil
+	case elliptic.P384():
+		return "P-384", nil
+	case elliptic.P521():
+		return "P-521", nil
+	default:
+		return "", fmt.Errorf("unsupported EC curve %s", c.Params().Name)
+	}
 }
 
 // GenerateKeyPair generates a new RSA key pair with FIPS-compliant key size

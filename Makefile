@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-.PHONY: help build test lint clean install run docker-build docker-run
+.PHONY: help build test lint clean install run docker-build docker-run check-no-legacy-middleware
 
 # Variables
 BINARY_NAME=tokensmith
@@ -20,7 +20,7 @@ help: ## Display this help screen
 build: ## Build the application
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o bin/$(BINARY_NAME) ./cmd/tokenservice
 
-test: ## Run tests
+test:  ## Run tests
 	$(GO) test $(GOFLAGS) -race -coverprofile=coverage.out -covermode=atomic $$(go list ./... 2>/dev/null | grep -v /examples/)
 
 test-coverage: test ## Run tests with coverage report

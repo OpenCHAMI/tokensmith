@@ -9,6 +9,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"testing"
@@ -126,4 +128,42 @@ func TestKeyManager(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not an RSA key")
 	})
+}
+
+func TestRFC7638Thumbprint_IsDeterministicAndValid(t *testing.T) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	kid1, err := RFC7638Thumbprint(&priv.PublicKey)
+	require.NoError(t, err)
+	kid2, err := RFC7638Thumbprint(&priv.PublicKey)
+	require.NoError(t, err)
+
+	assert.Equal(t, kid1, kid2)
+	assert.True(t, IsRFC7638Thumbprint(kid1))
+
+	raw, err := base64.RawURLEncoding.DecodeString(kid1)
+	require.NoError(t, err)
+	assert.Len(t, raw, sha256.Size)
+}
+
+func TestRFC7638Thumbprint_DifferentKeysDifferentKIDs(t *testing.T) {
+	priv1, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	priv2, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	kid1, err := RFC7638Thumbprint(&priv1.PublicKey)
+	require.NoError(t, err)
+	kid2, err := RFC7638Thumbprint(&priv2.PublicKey)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, kid1, kid2)
+}
+
+func TestRFC7638Thumbprint_InvalidFormatRejected(t *testing.T) {
+	assert.False(t, IsRFC7638Thumbprint(""))
+	assert.False(t, IsRFC7638Thumbprint("openchami-abc-123"))
+	assert.False(t, IsRFC7638Thumbprint("dG9vLXNob3J0"))
+	assert.False(t, IsRFC7638Thumbprint("Zm9vYmFy="))
 }

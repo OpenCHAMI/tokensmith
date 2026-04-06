@@ -5,18 +5,21 @@
 package main
 
 import (
+	"context"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
-
-	tsmiddleware "github.com/openchami/tokensmith/middleware"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/authn"
+	"github.com/openchami/tokensmith/pkg/authz"
 )
 
 func main() {
@@ -45,18 +48,27 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Create middleware options
-	opts := tsmiddleware.DefaultMiddlewareOptions()
-	opts.RequiredClaims = []string{"sub", "iss", "aud", "scope"}
-
-	// Example 1: Using static key
-	staticKeyMiddleware := tsmiddleware.JWTMiddleware(&privateKey.PublicKey, opts)
+	// Example 1: Using a static key
+	staticKeyMiddleware, err := authn.Middleware(authn.Options{
+		Issuers:    []string{"example.com"},
+		Audiences:  []string{"api.example.com"},
+		StaticKeys: []crypto.PublicKey{&privateKey.PublicKey},
+		Mapper:     principalMapper,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Example 2: Using JWKS URL (e.g., from Auth0)
-	optsWithJWKS := *opts
-	optsWithJWKS.JWKSURL = "https://your-tenant.auth0.com/.well-known/jwks.json"
-	optsWithJWKS.JWKSRefreshInterval = 15 * time.Minute
-	jwksMiddleware := tsmiddleware.JWTMiddleware(nil, &optsWithJWKS)
+	jwksMiddleware, err := authn.Middleware(authn.Options{
+		Issuers:   []string{"example.com"},
+		Audiences: []string{"api.example.com"},
+		JWKSURLs:  []string{"https://your-tenant.auth0.com/.well-known/jwks.json"},
+		Mapper:    principalMapper,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Create a chi router
 	r := chi.NewRouter()
@@ -77,29 +89,29 @@ func main() {
 		r.Use(staticKeyMiddleware)
 
 		r.Get("/protected-static", func(w http.ResponseWriter, r *http.Request) {
-			claims, err := tsmiddleware.GetClaimsFromContext(r.Context())
-			if err != nil {
+			principal, ok := authn.PrincipalFromContext(r.Context())
+			if !ok {
 				http.Error(w, "Failed to get claims", http.StatusInternalServerError)
 				return
 			}
 
-			_, _ = fmt.Fprintf(w, "Protected route (static key) accessed by %s\n", claims.Subject)
+			_, _ = fmt.Fprintf(w, "Protected route (static key) accessed by %s\n", principal.ID)
 		})
 	}) // Protected routes with JWKS
 	r.Group(func(r chi.Router) {
 		r.Use(jwksMiddleware)
 
 		r.Get("/protected-jwks", func(w http.ResponseWriter, r *http.Request) {
-			claims, err := tsmiddleware.GetClaimsFromContext(r.Context())
-			if err != nil {
+			principal, ok := authn.PrincipalFromContext(r.Context())
+			if !ok {
 				http.Error(w, "Failed to get claims", http.StatusInternalServerError)
 				return
 			}
 
-			_, _ = fmt.Fprintf(w, "Protected route (JWKS) accessed by %s\n", claims.Subject)
+			_, _ = fmt.Fprintf(w, "Protected route (JWKS) accessed by %s\n", principal.ID)
 		}) // Scope-protected routes
 		r.Group(func(r chi.Router) {
-			r.Use(tsmiddleware.RequireScope("write"))
+			r.Use(requireRole("write"))
 
 			r.Post("/write", func(w http.ResponseWriter, r *http.Request) {
 				_, _ = w.Write([]byte("Write access granted"))
@@ -121,5 +133,56 @@ func main() {
 	log.Println("Server starting on :8080")
 	if err := http.ListenAndServe(":8080", r); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func principalMapper(_ context.Context, _ *jwt.Token, claims jwt.MapClaims) (authz.Principal, error) {
+	sub, _ := claims["sub"].(string)
+	roles := extractScopes(claims)
+	return authz.Principal{ID: sub, Roles: roles}, nil
+}
+
+func requireRole(required string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			principal, ok := authn.PrincipalFromContext(r.Context())
+			if !ok {
+				http.Error(w, "Unauthorized: no principal", http.StatusUnauthorized)
+				return
+			}
+			for _, role := range principal.Roles {
+				if role == required {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			http.Error(w, "Insufficient scope: "+required+" required", http.StatusForbidden)
+		})
+	}
+}
+
+func extractScopes(claims jwt.MapClaims) []string {
+	raw, ok := claims["scope"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case string:
+		if v == "" {
+			return nil
+		}
+		return strings.Fields(v)
+	case []string:
+		return append([]string(nil), v...)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, it := range v {
+			if s, ok := it.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
 	}
 }

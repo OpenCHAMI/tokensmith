@@ -299,6 +299,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 				assert.Equal(t, "test-issuer", claims.Issuer)
 				assert.NotEmpty(t, claims.ExpiresAt)
 				assert.NotEmpty(t, claims.IssuedAt)
+				assert.NotEmpty(t, claims.NotBefore)
 				// Verify NIST-compliant claims for service tokens
 				assert.Equal(t, "IAL2", claims.AuthLevel)
 				assert.Equal(t, 2, claims.AuthFactors)
@@ -331,6 +332,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 				assert.Equal(t, "test-issuer", claims.Issuer)
 				assert.NotEmpty(t, claims.ExpiresAt)
 				assert.NotEmpty(t, claims.IssuedAt)
+				assert.NotEmpty(t, claims.NotBefore)
 				// Verify NIST-compliant claims for service tokens
 				assert.Equal(t, "IAL2", claims.AuthLevel)
 				assert.Equal(t, 2, claims.AuthFactors)
@@ -393,6 +395,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 				assert.Equal(t, "test-issuer", claims.Issuer)
 				assert.NotEmpty(t, claims.ExpiresAt)
 				assert.NotEmpty(t, claims.IssuedAt)
+				assert.NotEmpty(t, claims.NotBefore)
 				// Verify NIST-compliant claims for service tokens
 				assert.Equal(t, "IAL2", claims.AuthLevel)
 				assert.Equal(t, 2, claims.AuthFactors)
@@ -428,8 +431,82 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			claims, _, err := service.TokenManager.ParseToken(token)
 			assert.NoError(t, err)
 			tt.validateClaims(t, claims)
+
+			parsedToken, _, err := jwt.NewParser().ParseUnverified(token, jwt.MapClaims{})
+			assert.NoError(t, err)
+			assert.Equal(t, "JWT", parsedToken.Header["typ"])
+			assert.NotEmpty(t, parsedToken.Header["kid"])
 		})
 	}
+}
+
+func TestTokenService_GenerateServiceToken_HeaderAndPayloadShape(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	keyManager := keys.NewKeyManager()
+	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
+	require.NoError(t, err)
+
+	service := &TokenService{
+		TokenManager: token.NewTokenManager(keyManager, "https://tokensmith.openchami.dev", "default-cluster", "default-openchami", true),
+		Config: Config{
+			Issuer:      "https://tokensmith.openchami.dev",
+			ClusterID:   "default-cluster",
+			OpenCHAMIID: "default-openchami",
+		},
+		Issuer:      "https://tokensmith.openchami.dev",
+		ClusterID:   "default-cluster",
+		OpenCHAMIID: "default-openchami",
+	}
+
+	tokenValue, err := service.GenerateServiceToken(context.Background(), "dev-client", "smd", nil)
+	require.NoError(t, err)
+
+	parsedToken, _, err := jwt.NewParser().ParseUnverified(tokenValue, jwt.MapClaims{})
+	require.NoError(t, err)
+
+	claims, ok := parsedToken.Claims.(jwt.MapClaims)
+	require.True(t, ok)
+
+	kid, err := keyManager.GetKid()
+	require.NoError(t, err)
+
+	assert.Equal(t, service.TokenManager.GetSigningAlgorithm(), parsedToken.Header["alg"])
+	assert.Equal(t, "JWT", parsedToken.Header["typ"])
+	assert.Equal(t, kid, parsedToken.Header["kid"])
+
+	assert.Equal(t, "https://tokensmith.openchami.dev", claims["iss"])
+	assert.Equal(t, "dev-client", claims["sub"])
+	assert.ElementsMatch(t, []interface{}{"smd"}, claims["aud"])
+	assert.NotNil(t, claims["exp"])
+	assert.NotNil(t, claims["iat"])
+	assert.NotNil(t, claims["nbf"])
+	assert.NotEmpty(t, claims["jti"])
+	assert.NotEmpty(t, claims["nonce"])
+	assert.Equal(t, "IAL2", claims["auth_level"])
+	assert.Equal(t, float64(2), claims["auth_factors"])
+	assert.ElementsMatch(t, []interface{}{"service", "certificate"}, claims["auth_methods"])
+	assert.NotEmpty(t, claims["session_id"])
+	assert.NotNil(t, claims["session_exp"])
+	assert.ElementsMatch(t, []interface{}{"service_auth"}, claims["auth_events"])
+	assert.Equal(t, "default-cluster", claims["cluster_id"])
+	assert.Equal(t, "default-openchami", claims["openchami_id"])
+	_, hasScope := claims["scope"]
+	assert.False(t, hasScope)
+
+	iat, ok := claims["iat"].(float64)
+	require.True(t, ok)
+	nbf, ok := claims["nbf"].(float64)
+	require.True(t, ok)
+	exp, ok := claims["exp"].(float64)
+	require.True(t, ok)
+	sessionExp, ok := claims["session_exp"].(float64)
+	require.True(t, ok)
+
+	assert.LessOrEqual(t, nbf, iat)
+	assert.Greater(t, exp, iat)
+	assert.GreaterOrEqual(t, sessionExp, exp)
 }
 
 func TestTokenService_ValidateToken(t *testing.T) {
@@ -583,6 +660,42 @@ func TestTokenService_ServiceTokenHandler_BootstrapExchange(t *testing.T) {
 	assert.Equal(t, "svc-a", claims.Subject)
 	assert.Equal(t, []string{"svc-b"}, []string(claims.Audience))
 	assert.Equal(t, []string{"read"}, claims.Scope)
+
+	parsedToken, _, err := jwt.NewParser().ParseUnverified(tokenResp.Token, jwt.MapClaims{})
+	require.NoError(t, err)
+	assert.Equal(t, service.TokenManager.GetSigningAlgorithm(), parsedToken.Method.Alg())
+}
+
+func TestTokenService_JWKSHandlerPublishesActiveSigningAlgorithm(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	keyManager := keys.NewKeyManager()
+	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
+	require.NoError(t, err)
+
+	service, err := NewTokenService(keyManager, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+	w := httptest.NewRecorder()
+
+	service.JWKSHandler(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var jwks struct {
+		Keys []struct {
+			Algorithm string `json:"alg"`
+		} `json:"keys"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&jwks))
+	require.Len(t, jwks.Keys, 1)
+	assert.Equal(t, service.TokenManager.GetSigningAlgorithm(), jwks.Keys[0].Algorithm)
 }
 
 func TestTokenService_ServiceTokenHandler_BootstrapTokenReuseDenied(t *testing.T) {

@@ -29,15 +29,15 @@ Policy loading mechanics are described in:
 Use filesystem policy fragments when you need to:
 
 - extend the baseline RBAC (e.g., add additional objects/actions),
-- add temporary allowances during a migration,
-- override/deny permissions by removing or avoiding grants.
+- add temporary allowances for staged rollout or incident response,
+- override or deny permissions by removing or avoiding grants.
 
 ### Directory + filename convention
 
 Mount a directory into each service (e.g., via Kubernetes ConfigMap/Secret/volume), and point the service at it via:
 
 - `TOKENSMITH_POLICY_DIR` (preferred)
-- `AUTHZ_POLICY_DIR` (compat)
+- `AUTHZ_POLICY_DIR`
 
 TokenSmith loads `*.csv` fragments in **lexical order** by filename.
 

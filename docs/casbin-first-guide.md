@@ -6,7 +6,7 @@ SPDX-License-Identifier: MIT
 
 # TokenSmith Casbin-first AuthN/AuthZ guide
 
-TokenSmith provides **drop-in `net/http` middleware** for JWT authentication (AuthN) and Casbin authorization (AuthZ).
+TokenSmith provides `net/http` authentication middleware for TokenSmith JWT validation (`pkg/authn`) and Casbin authorization middleware integrations (`pkg/authz`).
 
 **Casbin is the standard interface**:
 
@@ -27,7 +27,7 @@ If you are troubleshooting, these search terms apply directly:
 
 ### TokenSmith owns
 
-- AuthN JWT validation behavior and safe defaults.
+- AuthN TokenSmith JWT validation behavior and safe defaults.
 - Principal extraction and a stable principal representation in request context.
 - AuthZ mode semantics: `OFF` | `SHADOW` | `ENFORCE`.
 - Deny-by-default behavior for **unmapped** requests in `ENFORCE`.
@@ -47,7 +47,7 @@ If you are troubleshooting, these search terms apply directly:
 ## Recommended middleware ordering
 
 1. request-id middleware (optional, but recommended)
-2. TokenSmith AuthN (JWT validation; populates principal)
+2. TokenSmith AuthN (TokenSmith JWT validation; populates principal)
 3. TokenSmith AuthZ (Casbin)
 4. application handler
 

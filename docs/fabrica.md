@@ -17,7 +17,7 @@ Non-goals:
 
 Fabrica-generated services typically have stable CRUD endpoints. The recommended integration is:
 
-- Use TokenSmith **AuthN JWT middleware** to validate tokens and populate a `Principal`.
+- Use TokenSmith **AuthN JWT middleware** to validate TokenSmith JWTs and populate a `Principal`.
 - Use TokenSmith **AuthZ middleware** with an **explicit RouteMapper**.
 - Keep object/action constants close to route registration (generated code), not user input.
 - Write Casbin policy using those stable object/action identifiers.

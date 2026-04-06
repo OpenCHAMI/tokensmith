@@ -5,15 +5,20 @@
 package main
 
 import (
+	"context"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	tsmiddleware "github.com/openchami/tokensmith/middleware"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/authn"
+	"github.com/openchami/tokensmith/pkg/authz"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/openchami/tokensmith/pkg/token"
@@ -36,9 +41,18 @@ func main() {
 	// Create simplified OIDC provider (works with any OIDC-compliant provider including Hydra)
 	oidcProvider := oidc.NewSimpleProvider("http://hydra:4444", "test-client-id", "test-client-secret")
 
-	// Create middleware options for internal token validation
-	opts := tsmiddleware.DefaultMiddlewareOptions()
-	opts.RequiredClaims = []string{"sub", "iss", "aud", "scope"}
+	internalAuthn, err := authn.Middleware(authn.Options{
+		Issuers:    []string{"internal-service"},
+		Audiences:  []string{"service-b"},
+		StaticKeys: []crypto.PublicKey{&privateKey.PublicKey},
+		Mapper: func(_ context.Context, _ *jwt.Token, claims jwt.MapClaims) (authz.Principal, error) {
+			sub, _ := claims["sub"].(string)
+			return authz.Principal{ID: sub, Roles: extractScopes(claims)}, nil
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Create a chi router
 	r := chi.NewRouter()
@@ -105,16 +119,16 @@ func main() {
 
 	// Routes protected by internal tokens (service-to-service)
 	r.Group(func(r chi.Router) {
-		r.Use(tsmiddleware.JWTMiddleware(&privateKey.PublicKey, opts))
+		r.Use(internalAuthn)
 
 		r.Get("/internal", func(w http.ResponseWriter, r *http.Request) {
-			claims, err := tsmiddleware.GetClaimsFromContext(r.Context())
-			if err != nil {
+			principal, ok := authn.PrincipalFromContext(r.Context())
+			if !ok {
 				http.Error(w, "Failed to get claims", http.StatusInternalServerError)
 				return
 			}
 
-			_, _ = fmt.Fprintf(w, "Internal route accessed by %s\n", claims.Subject)
+			_, _ = fmt.Fprintf(w, "Internal route accessed by %s\n", principal.ID)
 		})
 	}) // Example of creating a service-to-service token
 	serviceToken, err := tokenManager.GenerateServiceToken("service-a", "service-b", []string{"read", "write"})
@@ -135,5 +149,31 @@ func main() {
 	log.Println("Server starting on :8080")
 	if err := http.ListenAndServe(":8080", r); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func extractScopes(claims jwt.MapClaims) []string {
+	raw, ok := claims["scope"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case string:
+		if v == "" {
+			return nil
+		}
+		return strings.Fields(v)
+	case []string:
+		return append([]string(nil), v...)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, it := range v {
+			if s, ok := it.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
 	}
 }

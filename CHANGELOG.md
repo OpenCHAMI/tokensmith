@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- Removed the standalone middleware module.
+- Removed its JWT middleware API surface and consolidated on `pkg/authn` and `pkg/authz`.
+- Standardized on a single JWT authentication implementation in `pkg/authn` with authorization in `pkg/authz`.
+
 ### Added
 - Authorization contract: normative AuthZ contract doc (modes off|shadow|enforce, decision taxonomy allow|deny|indeterminate|error, deny-by-default route model, stable JSON error schema, and deterministic policy hash requirement).
 - Public Go AuthZ contract types/constants in `pkg/authz`.

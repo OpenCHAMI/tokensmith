@@ -6,7 +6,7 @@ SPDX-License-Identifier: MIT
 
 # TokenSmith
 
-TokenSmith bridges external OIDC user identity with internal identity and access management using signed JWTs. It provides internal service-to-service identity and access management, along with a standalone chi middleware for JWT verification using PKI.
+TokenSmith bridges external OIDC user identity with internal identity and access management using signed JWTs. It issues TokenSmith JWTs for user and service flows and provides AuthN/AuthZ middleware for validating those tokens and enforcing policy.
 
 ## Badges
 
@@ -43,7 +43,7 @@ sequenceDiagram
 
 ## Start Here
 
-TokenSmith now supports both token exchange and Casbin-first AuthN/AuthZ middleware.
+TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
 
 - New adopters: [`docs/getting-started.md`](docs/getting-started.md)
 - Internal-only service-to-service setup: [`docs/getting-started.md#15-internal-service-to-service-only-no-external-user-token-exchange`](docs/getting-started.md#15-internal-service-to-service-only-no-external-user-token-exchange)
@@ -51,7 +51,7 @@ TokenSmith now supports both token exchange and Casbin-first AuthN/AuthZ middlew
 - Casbin model and policy workflow: [`docs/casbin-first-guide.md`](docs/casbin-first-guide.md)
 - Policy loading and `policy_version`: [`docs/authz_policy.md`](docs/authz_policy.md)
 - Operations and rollout modes: [`docs/authz_operations.md`](docs/authz_operations.md)
-- Migration from legacy context helpers: [`docs/migration.md`](docs/migration.md)
+- Middleware wiring and principal context: [`docs/context-guide.md`](docs/context-guide.md)
 - Fabrica integration: [`docs/fabrica.md`](docs/fabrica.md)
 
 ## Features
@@ -68,14 +68,15 @@ TokenSmith now supports both token exchange and Casbin-first AuthN/AuthZ middlew
   - Service-specific claims and scopes
   - Automatic token validation
 
-- **JWT Middleware**
-  - Standalone chi middleware for JWT verification
-  - PKI-based signature validation
-  - Support for RSA key pairs and JWKS
-  - Scope-based authorization
-  - Service-to-service authentication
-  - Extensible claims handling
-  - Casbin integration for policy-based authorization
+- **AuthN/AuthZ Middleware**
+  - TokenSmith JWT validation in `pkg/authn`
+  - PKI-based signature validation with RSA, ECDSA, and JWKS key support
+  - RFC 7638-compliant `kid` thumbprints for signing keys
+  - Middleware enforcement of `kid` presence and RFC 7638 format
+  - Principal extraction from verified TokenSmith claims
+  - Structured authentication failure logging
+  - Casbin-based authorization in `pkg/authz`
+  - Service-to-service authorization using TokenSmith service principals
 
 - **OIDC Provider Support**
   - Keycloak integration
@@ -125,15 +126,15 @@ tokensmith/
 go get github.com/openchami/tokensmith
 ```
 
-### JWT Middleware
+### AuthN/AuthZ Middleware
+
+Use the main module and wire TokenSmith JWT validation with `pkg/authn` plus authorization with `pkg/authz`.
 
 ```bash
-go get github.com/openchami/tokensmith/middleware
+go get github.com/openchami/tokensmith
 ```
 
-See the [middleware documentation](middleware/README.md) for detailed usage instructions.
-
-For new services, prefer the AuthN/AuthZ middleware stack documented in [`docs/getting-started.md`](docs/getting-started.md).
+See [`docs/getting-started.md`](docs/getting-started.md) for the recommended middleware stack.
 
 ## Testing (local developer guidance)
 
@@ -224,7 +225,7 @@ This makes it possible to confirm exactly which policy is in effect across a fle
 
 TokenSmith exposes a small public `pkg/testutil` package intended for **service integration tests**.
 
-Compatibility policy:
+Stability policy:
 
 - Best-effort stability within a major version of TokenSmith.
 - No guarantees are made about internal structures or unexported behavior.

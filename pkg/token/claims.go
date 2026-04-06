@@ -147,8 +147,31 @@ func NewClaims() *TSClaims {
 // Validate checks if the claims are valid according to RFC 7519, RFC 8725, and NIST SP 800-63B.
 // If enforce is false, violations are logged but do not cause errors.
 func (c *TSClaims) Validate(enforce bool) error {
-	now := time.Now()
+	return c.ValidateAt(enforce, time.Now())
+}
+
+// ValidateAt checks if the claims are valid at the provided time according to
+// RFC 7519, RFC 8725, and NIST SP 800-63B.
+func (c *TSClaims) ValidateAt(enforce bool, now time.Time) error {
 	var logs []string
+	if c.ExpiresAt == nil {
+		if enforce {
+			return errors.New("exp claim is required")
+		}
+		logs = append(logs, "Missing exp claim")
+	}
+	if c.IssuedAt == nil {
+		if enforce {
+			return errors.New("iat claim is required")
+		}
+		logs = append(logs, "Missing iat claim")
+	}
+	if c.NotBefore == nil {
+		if enforce {
+			return errors.New("nbf claim is required")
+		}
+		logs = append(logs, "Missing nbf claim")
+	}
 
 	// Time-based checks (RFC 8725 §3.5)
 	if c.ExpiresAt != nil && now.After(c.ExpiresAt.Time) {
@@ -214,6 +237,12 @@ func (c *TSClaims) Validate(enforce bool) error {
 			return errors.New("session_exp claim is required")
 		}
 		logs = append(logs, "Missing session_exp claim")
+	}
+	if len(c.AuthEvents) == 0 {
+		if enforce {
+			return errors.New("auth_events claim is required")
+		}
+		logs = append(logs, "Missing auth_events claim")
 	}
 	iat := int64(0)
 	if c.IssuedAt != nil {
