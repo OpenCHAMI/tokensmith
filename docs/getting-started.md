@@ -129,8 +129,12 @@ Recommended operator workflow (including endpoint wiring and rollout checks):
 
 For new services, use canonical principal helpers:
 
-- `tokensmith.SetPrincipal(ctx, p)`
-- `tokensmith.PrincipalFromContext(ctx)`
+- `authz.SetPrincipal(ctx, p)`
+- `authz.PrincipalFromContext(ctx)`
+
+When your service uses `authn.Middleware`, TokenSmith already writes principal
+to both authn and authz context helpers. No additional bridge middleware is
+required between AuthN and AuthZ.
 
 Reference details:
 

@@ -124,8 +124,14 @@ func main() {
 	})
 
 	mux.HandleFunc("/protected/mapper", func(w http.ResponseWriter, r *http.Request) {
+		principal, _ := authz.PrincipalFromContext(r.Context())
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "route": "mapper"})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":      true,
+			"route":   "mapper",
+			"subject": principal.ID,
+			"roles":   principal.Roles,
+		})
 	})
 
 	mux.HandleFunc("/protected/path/", func(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +140,7 @@ func main() {
 	})
 
 	// Compose middleware:
-	// - AuthN is global (sets principal when present)
+	// - AuthN is global (verifies JWT and sets principal for both authn/authz context helpers)
 	// - AuthZ is applied twice to show both mapping styles:
 	//   * mapper applies to /protected/mapper
 	//   * pathMapper applies to /protected/path/*

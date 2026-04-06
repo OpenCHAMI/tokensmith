@@ -277,6 +277,7 @@ func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 			}
 
 			ctx := ContextWithPrincipal(r.Context(), p)
+			ctx = authz.SetPrincipal(ctx, &p)
 			ctx = ContextWithVerifiedClaims(ctx, mapClaims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

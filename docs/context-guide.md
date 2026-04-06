@@ -23,9 +23,14 @@ TokenSmith standardizes on a normalized authorization identity:
 
 Canonical helpers:
 
-- `tokensmith.SetPrincipal(ctx, p)`
-- `tokensmith.PrincipalFromContext(ctx)`
+- `authz.SetPrincipal(ctx, p)`
+- `authz.PrincipalFromContext(ctx)`
 - `authn.PrincipalFromContext(ctx)`
+
+When using `pkg/authn` middleware, no service-specific bridge is required:
+
+- AuthN stores principal in `authn` context (`authn.PrincipalFromContext`)
+- AuthN also stores principal in `authz` context (`authz.PrincipalFromContext`)
 
 Use verified claims only when needed for fields not represented by principal:
 
@@ -49,7 +54,7 @@ If AuthZ runs without a principal present, treat the request as an authenticatio
 1. Configure `authn.Middleware(authn.Options{...})` with issuer, audience, and key material for TokenSmith JWTs.
 2. Provide an `authn.Mapper` that maps verified claims into `authz.Principal`.
 3. Attach `authz` middleware with a route mapper or path/method mapper.
-4. Read principal in handlers with `authn.PrincipalFromContext` or `tokensmith.PrincipalFromContext`.
+4. Read principal in handlers with `authn.PrincipalFromContext` or `authz.PrincipalFromContext`.
 5. Roll out authorization in `shadow` mode before moving to `enforce`.
 6. Track `policy_version` during rollout to verify consistent policy deployment.
 

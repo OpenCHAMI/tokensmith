@@ -135,6 +135,10 @@ func TestAuthN_ValidTokenPassesAndSetsPrincipal(t *testing.T) {
 		if !ok || p.ID != "u1" {
 			t.Fatalf("expected principal in context")
 		}
+		ap, ok := authz.PrincipalFromContext(r.Context())
+		if !ok || ap.ID != "u1" {
+			t.Fatalf("expected authz principal in context")
+		}
 	}))
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

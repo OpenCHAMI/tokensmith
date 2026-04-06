@@ -83,6 +83,9 @@ Install middleware in this order:
 1. TokenSmith AuthN middleware (TokenSmith JWT validation and principal extraction)
 1. TokenSmith AuthZ middleware (Casbin decision)
 
+TokenSmith AuthN writes principal into the context expected by TokenSmith AuthZ,
+so no service-specific bridge middleware is required between these two layers.
+
 Reference wiring:
 
 - `examples/minisvc/main.go`
