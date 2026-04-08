@@ -473,12 +473,26 @@ func (s *TokenService) ServiceTokenHandler(w http.ResponseWriter, r *http.Reques
 
 	serviceID, targetService, effectiveScopes, err := s.authenticateBootstrapRequest(req)
 	if err != nil {
+		s.logServiceTokenAuthFailure(r, req, err)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	// Validate target service and scopes
 	if err := s.validateServiceRequest(serviceID, targetService, effectiveScopes); err != nil {
+		log.Warn().
+			Str("component", "tokenservice").
+			Str("handler", "service_token").
+			Str("event", "service_token_forbidden").
+			Str("reason", "service_request_not_allowed").
+			Str("method", r.Method).
+			Str("path", r.URL.Path).
+			Str("remote_addr", r.RemoteAddr).
+			Str("service_id", serviceID).
+			Str("target_service", targetService).
+			Strs("requested_scopes", effectiveScopes).
+			Err(err).
+			Msg("service token request denied")
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
@@ -502,6 +516,44 @@ func (s *TokenService) ServiceTokenHandler(w http.ResponseWriter, r *http.Reques
 		Token:     tokenValue,
 		ExpiresAt: claims.ExpiresAt.Time,
 	})
+}
+
+func (s *TokenService) logServiceTokenAuthFailure(r *http.Request, req ServiceTokenRequest, err error) {
+	reason := "bootstrap_validation_failed"
+	errText := strings.ToLower(strings.TrimSpace(err.Error()))
+
+	switch {
+	case strings.Contains(errText, "already consumed"):
+		reason = "bootstrap_token_already_consumed"
+	case strings.Contains(errText, "target service"):
+		reason = "bootstrap_target_mismatch"
+	case strings.Contains(errText, "scope"):
+		reason = "bootstrap_scope_mismatch"
+	case strings.Contains(errText, "missing jti"):
+		reason = "bootstrap_missing_jti"
+	case strings.Contains(errText, "invalid bootstrap token"):
+		reason = "bootstrap_token_invalid"
+	case strings.Contains(errText, "token use"):
+		reason = "bootstrap_token_use_invalid"
+	case strings.Contains(errText, "target_service is required"):
+		reason = "bootstrap_target_missing"
+	case strings.Contains(errText, "missing bootstrap token"):
+		reason = "bootstrap_token_missing"
+	}
+
+	log.Warn().
+		Str("component", "tokenservice").
+		Str("handler", "service_token").
+		Str("event", "bootstrap_exchange_rejected").
+		Str("reason", reason).
+		Str("method", r.Method).
+		Str("path", r.URL.Path).
+		Str("remote_addr", r.RemoteAddr).
+		Bool("bootstrap_token_present", strings.TrimSpace(req.BootstrapToken) != "").
+		Str("requested_target_service", strings.TrimSpace(req.TargetService)).
+		Strs("requested_scopes", req.Scopes).
+		Err(err).
+		Msg("bootstrap token exchange rejected")
 }
 
 func (s *TokenService) authenticateBootstrapRequest(req ServiceTokenRequest) (string, string, []string, error) {
