@@ -31,7 +31,19 @@ Canonical request body:
 
 ```json
 {
+  "grant_type": "bootstrap_token",
   "bootstrap_token": "<jwt>",
+  "target_service": "metadata-service",
+  "scopes": ["read"]
+}
+```
+
+Refresh request body:
+
+```json
+{
+  "grant_type": "refresh_token",
+  "refresh_token": "<jwt>",
   "target_service": "metadata-service",
   "scopes": ["read"]
 }
@@ -47,9 +59,20 @@ Canonical response body:
 ```json
 {
   "token": "<service-jwt>",
-  "expires_at": "2026-03-25T18:47:12Z"
+  "expires_at": "2026-03-25T18:47:12Z",
+  "refresh_token": "<refresh-jwt>",
+  "refresh_expires_at": "2026-03-26T18:47:12Z"
 }
 ```
+
+Compatibility guarantees for `POST /service/token`:
+
+- Request fields `grant_type`, `bootstrap_token`, `refresh_token`, `target_service`, and `scopes` are stable.
+- Response fields `token`, `expires_at`, `refresh_token`, and `refresh_expires_at` are stable.
+- Invalid or expired bootstrap token returns `401 Unauthorized`.
+- One-time bootstrap token reuse returns `401 Unauthorized`.
+- Target mismatch between request and bootstrap allowance returns `401 Unauthorized`.
+- Requested scopes outside bootstrap allowance return `401 Unauthorized`.
 
 ### Bootstrap mint and distribution
 
@@ -70,11 +93,59 @@ BOOTSTRAP_TOKEN=$(tokensmith mint-bootstrap-token \
 export TOKENSMITH_BOOTSTRAP_TOKEN="$BOOTSTRAP_TOKEN"
 ```
 
-1. Caller redeems this token once at `POST /service/token` and receives a regular service JWT for S2S calls.
+1. Caller redeems this token once at `POST /service/token` (`grant_type=bootstrap_token`) and receives access + refresh tokens.
 
 1. TokenSmith enforces one-time use using bootstrap-token `jti` tracking.
 1. For restart-safe replay protection, start TokenSmith with `--bootstrap-jti-store /path/to/bootstrap-jti.json` (or `TOKENSMITH_BOOTSTRAP_JTI_STORE`).
-1. If a caller needs a new service JWT after bootstrap consumption, provision a new bootstrap token and update `TOKENSMITH_BOOTSTRAP_TOKEN` before requesting again.
+1. Caller renews service JWTs using `grant_type=refresh_token` until the refresh token expires.
+
+### Shared client usage (`pkg/tokenservice/client.go`)
+
+`ServiceClient` is the canonical client for callers that exchange bootstrap tokens
+for access + refresh tokens and renew using the refresh grant.
+
+Recommended consumer environment variables:
+
+- `TOKENSMITH_URL`: Base URL of TokenSmith, for example `http://tokensmith:8080`
+- `TOKENSMITH_BOOTSTRAP_TOKEN`: One-time bootstrap token
+- `TOKENSMITH_TARGET_SERVICE`: Target audience service name
+- `TOKENSMITH_SCOPES`: Comma-separated scopes for token exchange
+- `TOKENSMITH_REFRESH_SKEW_SEC`: Refresh threshold in seconds
+
+Example wiring:
+
+```go
+client := tokenservice.NewServiceClientWithOptions(
+  os.Getenv("TOKENSMITH_URL"),
+  "boot-service",
+  "boot-service-id",
+  "instance-1",
+  "cluster-1",
+  tokenservice.WithBootstrapToken(os.Getenv("TOKENSMITH_BOOTSTRAP_TOKEN")),
+  tokenservice.WithTargetService(os.Getenv("TOKENSMITH_TARGET_SERVICE")),
+  tokenservice.WithScopes(strings.Split(os.Getenv("TOKENSMITH_SCOPES"), ",")),
+  tokenservice.WithRefreshBefore(120*time.Second),
+)
+
+if err := client.Initialize(ctx); err != nil {
+  return err
+}
+
+go client.StartAutoRefresh(ctx)
+```
+
+`Initialize` performs a blocking startup exchange with bounded retry and
+exponential backoff before failing closed. Default behavior is 5 attempts,
+starting at 1 second and capping at 15 seconds. Callers can override this with
+`WithBootstrapMaxAttempts`, `WithBootstrapInitialBackoff`, and
+`WithBootstrapMaxBackoff`.
+
+`Initialize` performs the bootstrap exchange once. Subsequent renewals use the
+refresh grant automatically. `StartAutoRefresh` exits when refresh token expiry
+is reached and renewal can no longer proceed.
+
+Callers should treat refresh failures as degraded service state and expose
+`client.Stats()` in logs or health diagnostics.
 
 ## 2) Target service: validate JWTs and enforce policy
 

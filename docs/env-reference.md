@@ -45,7 +45,16 @@ Notes:
 
 | Variable | Used by | Description |
 | --- | --- | --- |
+| `TOKENSMITH_URL` | Consumer services (boot-service, metadata-service) | Base URL of TokenSmith service, used to call `POST /service/token` |
 | `TOKENSMITH_BOOTSTRAP_TOKEN` | `pkg/tokenservice/client.go` | One-time startup bootstrap token redeemed at `POST /service/token` |
+| `TOKENSMITH_TARGET_SERVICE` | Consumer services using `pkg/tokenservice/client.go` | Target service requested during exchange (`target_service` in request) |
+| `TOKENSMITH_SCOPES` | Consumer services using `pkg/tokenservice/client.go` | Comma-separated scopes requested during exchange (`scopes` in request) |
+| `TOKENSMITH_REFRESH_SKEW_SEC` | Consumer services using `pkg/tokenservice/client.go` | Refresh threshold before expiry for proactive token renewal |
+
+Notes:
+
+- Only `TOKENSMITH_BOOTSTRAP_TOKEN` is read directly by current `pkg/tokenservice/client.go` defaults.
+- Other variables are a standardized consumer UX contract and are typically mapped by the consuming service configuration layer.
 
 ## Example-only variables
 
