@@ -19,12 +19,14 @@ ENV TOKENSMITH_CLUSTER_ID="default-cluster"
 ENV TOKENSMITH_OPENCHAMI_ID="default-openchami"
 ENV TOKENSMITH_CONFIG="/tokensmith/config.json"
 ENV TOKENSMITH_KEY_DIR="/tokensmith/keys"
+ENV TOKENSMITH_RFC8693_BOOTSTRAP_STORE="/tokensmith/data/bootstrap-tokens"
+ENV TOKENSMITH_RFC8693_REFRESH_STORE="/tokensmith/data/refresh-tokens"
 ENV TOKENSMITH_OIDC_PROVIDER="http://hydra:4444"
 ENV TOKENSMITH_PORT="8080"
 
 VOLUME /tokensmith/keys
 VOLUME /tokensmith/config
-
+VOLUME /tokensmith/data
 
 
 # Get the tokensmith service from the goreleaser build.
