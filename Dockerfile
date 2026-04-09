@@ -10,6 +10,7 @@ RUN set -ex \
     && apk add --no-cache curl tini \
     && rm -rf /var/cache/apk/*  \
     && rm -rf /tmp/*
+RUN mkdir -p /tokensmith/data
 
 STOPSIGNAL SIGTERM
 
