@@ -8,6 +8,12 @@ SPDX-License-Identifier: MIT
 
 This page documents the current `tokensmith` command surface in `cmd/tokenservice`.
 
+See also:
+
+- `docs/getting-started.md`
+- `docs/http-endpoints.md`
+- `docs/env-reference.md`
+
 ## Commands
 
 - `tokensmith generate-config`
@@ -28,11 +34,11 @@ Example:
 tokensmith generate-config --config ./config.json
 ```
 
-If `--config` is omitted, command behavior depends on your shell invocation path. Prefer passing `--config` explicitly.
+Prefer passing `--config` explicitly.
 
 ## `tokensmith serve`
 
-Starts the token service.
+Starts the TokenSmith service.
 
 ### Flags
 
@@ -43,19 +49,21 @@ Starts the token service.
 | `--cluster-id` | Cluster identifier | `cl-F00F00F00` |
 | `--openchami-id` | OpenCHAMI instance identifier | `oc-F00F00F00` |
 | `--oidc-issuer` | OIDC issuer URL | `http://hydra:4444` |
-| `--oidc-client-id` | OIDC client ID (or `OIDC_CLIENT_ID`) | `""` |
-| `--oidc-client-secret` | OIDC client secret (or `OIDC_CLIENT_SECRET`) | `""` |
+| `--oidc-client-id` | OIDC client ID, or `OIDC_CLIENT_ID` | `""` |
+| `--oidc-client-secret` | OIDC client secret, or `OIDC_CLIENT_SECRET` | `""` |
 | `--key-file` | Existing private key path | `""` |
-| `--key-dir` | Directory where generated keys are saved | `""` |
-| `--bootstrap-jti-store` | File path for consumed bootstrap-token JTIs (or `TOKENSMITH_BOOTSTRAP_JTI_STORE`) | `""` |
-| `--non-enforcing` | Skip strict validation checks and log errors | `false` |
+| `--key-dir` | Directory where generated keys are saved when `--key-file` is not set | `""` |
+| `--rfc8693-bootstrap-store` | Path to the bootstrap token policy store, or `TOKENSMITH_RFC8693_BOOTSTRAP_STORE` | `./data/bootstrap-tokens` |
+| `--rfc8693-refresh-store` | Path to the refresh token family store, or `TOKENSMITH_RFC8693_REFRESH_STORE` | `./data/refresh-tokens` |
+| `--non-enforcing` | Skip strict validation checks and only log errors | `false` |
 | `--config` | Path to JSON config file | `""` |
 
 ### Key behavior
 
 - If `--key-file` is set, TokenSmith loads that private key.
-- If `--key-file` is not set, TokenSmith generates RSA keys and writes them to `--key-dir` as `private.pem` and `public.pem`.
-- If `--oidc-client-id` / `--oidc-client-secret` are omitted, TokenSmith reads `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`.
+- If `--key-file` is not set, TokenSmith generates an RSA keypair and writes it to `--key-dir` as `private.pem` and `public.pem`.
+- If `--oidc-client-id` or `--oidc-client-secret` are omitted, TokenSmith reads `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+- If RFC 8693 store flags are omitted, TokenSmith falls back to environment variables and then the defaults shown above.
 
 ### Minimal run example
 
@@ -64,25 +72,38 @@ tokensmith serve \
   --config ./config.json \
   --key-dir ./keys \
   --oidc-issuer https://issuer.example \
-  --oidc-client-id your-client-id
+  --oidc-client-id your-client-id \
+  --rfc8693-bootstrap-store ./data/bootstrap-tokens \
+  --rfc8693-refresh-store ./data/refresh-tokens
 ```
+
+### User-facing endpoints
+
+The `serve` command exposes:
+
+- `GET /health`
+- `GET /.well-known/jwks.json`
+- `POST /oauth/token`
+- `POST /token` (alias for the service-token flow)
+
+See `docs/http-endpoints.md` for request and response formats.
 
 ## `tokensmith mint-bootstrap-token`
 
 Mints a short-lived one-time bootstrap token for a caller service.
 
-This token is intended to be injected into a caller service process via environment variable and redeemed once at TokenSmith `/service/token` to obtain a regular service JWT.
+This token is intended to be injected into a caller service process via environment variable and redeemed once at `POST /oauth/token` to obtain a service access token plus refresh token.
 
-Reusing the same bootstrap token is denied. To obtain another service JWT later, mint and provision a new bootstrap token.
+Reusing the same bootstrap token is denied.
 
 ### Flags
 
 | Flag | Description | Default |
 | --- | --- | --- |
-| `--key-file` | RSA private key path used to sign bootstrap token | `""` (required) |
+| `--key-file` | RSA private key path used to sign the bootstrap token | `""` (required) |
 | `--service-id` | Caller service identity (`sub`) | `""` (required) |
-| `--target-service` | Allowed target service for exchange | `""` (required) |
-| `--scopes` | Comma-separated allowed scopes | `""` |
+| `--target-service` | Allowed audience for the resulting service token | `""` (required) |
+| `--scopes` | Comma-separated scopes encoded into the bootstrap policy | `""` |
 | `--ttl` | Bootstrap token lifetime | `5m` |
 | `--issuer` | Bootstrap token issuer | `http://tokensmith:8080` |
 | `--cluster-id` | Cluster identifier claim | `cl-F00F00F00` |
@@ -98,6 +119,10 @@ BOOTSTRAP_TOKEN=$(tokensmith mint-bootstrap-token \
   --scopes read \
   --ttl 5m)
 ```
+
+### What the token is for
+
+Bootstrap tokens are one-time startup credentials. They are exchanged at `POST /oauth/token` using the RFC 8693 bootstrap-token request shape documented in `docs/http-endpoints.md`.
 
 ## Configuration file schema
 

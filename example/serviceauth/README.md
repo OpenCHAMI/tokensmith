@@ -6,145 +6,129 @@ SPDX-License-Identifier: MIT
 
 # Service Authentication Example
 
-This example demonstrates how to implement service-to-service authentication using the tokensmith service. It shows how a service can:
-1. Redeem a startup bootstrap token for a service token from TokenSmith
-2. Use the token to authenticate with other services
+This example demonstrates TokenSmith service-to-service authentication using `pkg/tokenservice`.
+
+It shows how a caller service can:
+
+1. redeem a startup bootstrap token for an access token plus refresh token
+2. refresh tokens automatically when they approach expiry
+3. call another service with a TokenSmith-issued bearer token
 
 ## Prerequisites
 
 - Go 1.16 or later
-- A running tokensmith service (default: `http://localhost:8080`)
-- A target service that accepts service tokens (for demonstration)
+- a running TokenSmith service (default: `http://localhost:8080`)
+- a target service that accepts TokenSmith-issued bearer tokens
+- a one-time bootstrap token minted with `tokensmith mint-bootstrap-token`
 
 ## Configuration
 
-Before running the example, you need to:
+Before running the example:
 
-1. Ensure the tokensmith service is running and accessible
-2. Export a bootstrap token:
-   ```bash
-   export TOKENSMITH_BOOTSTRAP_TOKEN="<one-time-bootstrap-jwt>"
-   ```
-3. Update the following constants in `main.go` if needed:
-   ```go
-   const (
-       tokensmithURL = "http://localhost:8080" // Your tokensmith service URL
-       serviceName   = "example-service"        // Your service name
-       serviceID     = "example-service-1"      // Your service ID
-   )
-   ```
-4. Update the `targetURL` in the main function to point to your target service:
-   ```go
-   targetURL := "http://localhost:8081/protected-endpoint"
-   ```
+1. ensure the TokenSmith service is running and reachable
+2. export a bootstrap token:
 
-## Running the Example
+```bash
+export TOKENSMITH_BOOTSTRAP_TOKEN="<one-time-bootstrap-token>"
+```
 
-1. Navigate to the example directory:
-   ```bash
-   cd example/serviceauth
-   ```
+3. update the constants in `main.go` if needed:
 
-2. Run the example with required OpenCHAMI parameters:
-   ```bash
-   go run main.go --instance-id="openchami-instance-1" --cluster-id="cluster-1"
-   ```
+```go
+const (
+    tokensmithURL = "http://localhost:8080"
+    serviceName   = "example-service"
+    serviceID     = "example-service-1"
+)
+```
+
+4. update `targetURL` in `main.go` to point to the downstream service you want to call
+
+## Running the example
+
+```bash
+cd example/serviceauth
+go run main.go --instance-id="openchami-instance-1" --cluster-id="cluster-1"
+```
 
 The example will:
-1. Redeem the bootstrap token and get an initial service token from tokensmith
-2. Display the token expiration time
-3. Demonstrate refresh check behavior
-4. Use the token to call another service
 
-## OpenCHAMI Integration
+1. perform the initial bootstrap exchange against `POST /oauth/token`
+2. print the resulting access-token expiry
+3. run a refresh check
+4. call the target service with `Authorization: Bearer <token>`
 
-This example uses the `tokenservice` package from tokensmith to handle service authentication. The service tokens include OpenCHAMI-specific custom claims configured on the TokenSmith server:
+## What the client actually does
 
-- `openchami_id`: The OpenCHAMI instance identifier
-- `cluster_id`: The OpenCHAMI cluster identifier
-- `iss`: The tokensmith service URI as the issuer
+The example uses `pkg/tokenservice.ServiceClient`.
 
-The startup bootstrap token is passed via environment variable:
+Current behavior:
 
-- `TOKENSMITH_BOOTSTRAP_TOKEN`: one-time bootstrap JWT redeemed at `POST /service/token`
+- initial exchange uses RFC 8693 form data at `POST /oauth/token`
+- refresh uses `grant_type=refresh_token` at `POST /oauth/token`
+- the client stores the current access token, refresh token, and expiry timestamps in memory
+- `CallTargetService()` refreshes first if the token is near expiry
 
-The tokensmith service will include these claims in the generated JWT tokens, which can be used for:
-- Service identification within OpenCHAMI
-- Cluster-specific authorization
-- Instance-level tracking and monitoring
+The direct service-token HTTP contract is documented in `docs/http-endpoints.md`.
 
-## Implementation Details
+## OpenCHAMI-specific claims
 
-The example uses the `tokenservice` package from tokensmith, which provides:
+TokenSmith-issued service tokens include OpenCHAMI-specific claims configured on the TokenSmith server, including:
 
-1. **Service Client Creation**
-   ```go
-   client := tokenservice.NewServiceClient(
-       tokensmithURL,
-       serviceName,
-       serviceID,
-       instanceID,
-       clusterID,
-   )
-   ```
+- `openchami_id`
+- `cluster_id`
+- `iss`
 
-2. **Token Management**
-   - `GetToken()`: Redeems the current bootstrap token and obtains a service token
-   - `RefreshTokenIfNeeded()`: Checks token lifetime and attempts to fetch a new token when close to expiration (requires a newly provisioned bootstrap token after one-time consumption)
-   - `GetServiceToken()`: Retrieves the current service token
+## Security notes
 
-3. **Service Communication**
-   - `CallTargetService()`: Makes authenticated requests to other services
-   - Token lifetime check before making requests
-   - Proper error handling and context management
+- bootstrap tokens are one-time use
+- reusing a consumed bootstrap token fails
+- refresh tokens are rotated on every successful use
+- replaying an old refresh token revokes the refresh-token family
+- use HTTPS for real deployments
+- use durable RFC 8693 stores on the TokenSmith server if you need restart-safe replay protection
 
-## Error Handling
+## Integration pattern for your own services
 
-The example includes comprehensive error handling for:
-- Missing required parameters (instance-id, cluster-id)
-- Token request failures
-- Token refresh failures
-- Service communication errors
-- Invalid responses
+1. import the package:
 
-## Security Considerations
+```go
+import "github.com/openchami/tokensmith/pkg/tokenservice"
+```
 
-- Bootstrap tokens are one-time use; after redemption, obtaining another service token requires provisioning a new bootstrap token
-- All HTTP requests use HTTPS in production (update URLs accordingly)
-- Context timeouts are used to prevent hanging requests
-- Service credentials are managed securely through the tokenservice package
+2. create the client:
 
-## Integration with Your Services
+```go
+client := tokenservice.NewServiceClientWithOptions(
+    "https://your-tokensmith-service",
+    "your-service-name",
+    "your-service-id",
+    "your-instance-id",
+    "your-cluster-id",
+    tokenservice.WithBootstrapToken(os.Getenv("TOKENSMITH_BOOTSTRAP_TOKEN")),
+    tokenservice.WithTargetService("metadata-service"),
+)
+```
 
-To integrate this pattern into your services:
+3. initialize once at startup:
 
-1. Import the tokenservice package:
-   ```go
-   import "github.com/openchami/tokensmith/pkg/tokenservice"
-   ```
+```go
+if err := client.Initialize(ctx); err != nil {
+    return err
+}
 
-2. Create a service client with your configuration:
-   ```go
-   client := tokenservice.NewServiceClient(
-       "https://your-tokensmith-service",
-       "your-service-name",
-       "your-service-id",
-       "your-instance-id",
-       "your-cluster-id",
-   )
-   ```
+go client.StartAutoRefresh(ctx)
+```
 
-3. Use the client to make authenticated requests:
-   ```go
-   ctx := context.Background()
+4. use the access token when calling downstream services:
 
-   // Get initial token
-   if err := client.GetToken(ctx); err != nil {
-       // Handle error
-   }
+```go
+if err := client.CallTargetService(ctx, "https://api.example.com/protected"); err != nil {
+    return err
+}
+```
 
-   // Make authenticated request
-   if err := client.CallTargetService(ctx, "https://api.example.com/protected"); err != nil {
-       // Handle error
-   }
-   ```
+See also:
+
+- `docs/internal-service-auth.md`
+- `docs/http-endpoints.md`

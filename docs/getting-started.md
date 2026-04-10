@@ -37,17 +37,50 @@ If `--oidc-client-id` or `--oidc-client-secret` are not provided, TokenSmith fal
 
 See full command options in `docs/cli-reference.md`.
 
+## 1.1) JWKS endpoint
+
+TokenSmith publishes its active public signing keys at:
+
+- `GET /.well-known/jwks.json`
+
+This endpoint returns the JWKS used to validate TokenSmith-issued JWTs.
+
+Current behavior:
+
+- response content type is `application/json`
+- the response body contains a standard `keys` array
+- each published RSA key includes `kty`, `use`, `alg`, `kid`, `n`, and `e`
+
+Operational guidance:
+
+- treat `/.well-known/jwks.json` as the canonical verification endpoint for TokenSmith-issued JWTs
+- TokenSmith currently does not publish its own OIDC discovery document at `/.well-known/openid-configuration`
+- configure JWT verifiers with the direct JWKS URL
+- cache keys according to verifier policy and plan for outage/rotation behavior
+
+Example:
+
+```bash
+curl -s http://localhost:8080/.well-known/jwks.json | jq
+```
+
+For JWKS validation behavior, caching, and failure semantics, see:
+
+- `docs/http-endpoints.md`
+- `docs/authz-spec.md#6-jwks-caching-and-failure-semantics`
+- `docs/security-notes.md#jwks-caching-and-availability-risks`
+
 ## 1.5) Internal service-to-service only (no external user token exchange)
 
 Standalone quick guide:
 
 - `docs/internal-service-auth.md`
 
-If your service only needs internal service-to-service AuthN/AuthZ, you can skip user token exchange flows and use this path:
+If your service only needs internal service-to-service AuthN/AuthZ, you can skip end-user token-exchange details and use this path:
 
-1. Mint a one-time bootstrap token before service startup using `tokensmith mint-bootstrap-token`.
-2. Pass bootstrap token via `TOKENSMITH_BOOTSTRAP_TOKEN` to the caller service process.
-3. Have the caller service redeem bootstrap token(s) for service JWTs via `pkg/tokenservice` (library) or `example/serviceauth` (end-to-end client example).
+1. Mint a one-time bootstrap token with `tokensmith mint-bootstrap-token`.
+2. Pass the token via `TOKENSMITH_BOOTSTRAP_TOKEN` to the caller service process.
+3. Have the caller service redeem the token at `POST /oauth/token` using `pkg/tokenservice` or `example/serviceauth`.
 4. In the target service, install TokenSmith AuthN middleware to validate TokenSmith JWTs and build a verified principal.
 5. Install TokenSmith AuthZ middleware and map routes using either explicit `authz.RouteMapper` or path/method style (`authz.PathMethodMapper` plus Casbin matchers).
 6. Ensure service principals map to the `service` role in policy/grouping.
@@ -62,6 +95,28 @@ Normative requirements for service principals:
 
 - `docs/authz_contract.md#service-principal-requirements`
 - `docs/authz_contract.md#integration-checklist-services`
+
+## 1.2) Endpoint overview
+
+The TokenSmith service currently exposes these user-facing endpoints:
+
+- `GET /health`
+- `GET /.well-known/jwks.json`
+- `POST /oauth/token`
+- `POST /token` (alias for the service-token flow)
+
+See `docs/http-endpoints.md` for request/response formats and failure behavior.
+
+## 1.3) Key material and token-state storage
+
+Current startup behavior:
+
+- if `--key-file` is set, TokenSmith loads the existing private key
+- if `--key-file` is not set, TokenSmith generates an RSA keypair and writes `private.pem` and `public.pem` under `--key-dir`
+- bootstrap token policies are stored in `./data/bootstrap-tokens` unless overridden
+- refresh token families are stored in `./data/refresh-tokens` unless overridden
+
+For production, use durable storage paths for the RFC 8693 stores.
 
 ## 2) Pick an AuthZ integration style
 

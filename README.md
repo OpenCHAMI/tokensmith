@@ -46,12 +46,12 @@ sequenceDiagram
 TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
 
 - New adopters: [`docs/getting-started.md`](docs/getting-started.md)
-- Internal-only service-to-service setup: [`docs/getting-started.md#15-internal-service-to-service-only-no-external-user-token-exchange`](docs/getting-started.md#15-internal-service-to-service-only-no-external-user-token-exchange)
+- HTTP endpoints and wire formats: [`docs/http-endpoints.md`](docs/http-endpoints.md)
 - Internal-only service-to-service quick guide: [`docs/internal-service-auth.md`](docs/internal-service-auth.md)
+- Middleware wiring and principal context: [`docs/context-guide.md`](docs/context-guide.md)
 - Casbin model and policy workflow: [`docs/casbin-first-guide.md`](docs/casbin-first-guide.md)
 - Policy loading and `policy_version`: [`docs/authz_policy.md`](docs/authz_policy.md)
 - Operations and rollout modes: [`docs/authz_operations.md`](docs/authz_operations.md)
-- Middleware wiring and principal context: [`docs/context-guide.md`](docs/context-guide.md)
 - Fabrica integration: [`docs/fabrica.md`](docs/fabrica.md)
 
 ## Features
@@ -90,13 +90,25 @@ Generate a default config and run the service:
 
 ```bash
 tokensmith generate-config --config ./config.json
-tokensmith serve --config ./config.json --key-dir ./keys --oidc-issuer https://issuer.example
+tokensmith serve \
+  --config ./config.json \
+  --key-dir ./keys \
+  --oidc-issuer https://issuer.example \
+  --rfc8693-bootstrap-store ./data/bootstrap-tokens \
+  --rfc8693-refresh-store ./data/refresh-tokens
 ```
+
+Useful first endpoints:
+
+- `GET /health`
+- `GET /.well-known/jwks.json`
+- `POST /oauth/token`
 
 For complete startup options and environment variable precedence:
 
 - CLI reference: [`docs/cli-reference.md`](docs/cli-reference.md)
 - Environment reference: [`docs/env-reference.md`](docs/env-reference.md)
+- HTTP endpoints: [`docs/http-endpoints.md`](docs/http-endpoints.md)
 
 ## Project Structure
 

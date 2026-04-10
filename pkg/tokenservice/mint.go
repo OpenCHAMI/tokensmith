@@ -15,7 +15,7 @@ import (
 )
 
 // MintBootstrapToken creates a short-lived bootstrap token intended for one-time
-// exchange at /service/token to obtain a standard service token.
+// exchange at /oauth/token to obtain a service access token and refresh token.
 func (s *TokenService) MintBootstrapToken(ctx context.Context, serviceID, targetService string, scopes []string, ttl time.Duration) (string, error) {
 	if serviceID == "" {
 		return "", errors.New("service ID cannot be empty")
@@ -100,7 +100,7 @@ func (s *TokenService) MintServiceToken(ctx context.Context, serviceID, targetSe
 }
 
 // MintRefreshToken creates a short-lived one-time refresh token used to obtain
-// the next service token from /service/token using grant_type=refresh_token.
+// the next service token from /oauth/token using grant_type=refresh_token.
 func (s *TokenService) MintRefreshToken(ctx context.Context, serviceID, targetService string, scopes []string, ttl time.Duration) (string, error) {
 	if serviceID == "" {
 		return "", errors.New("service ID cannot be empty")

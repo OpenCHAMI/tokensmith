@@ -46,7 +46,6 @@ func TestServiceClientInitializeWithOptions(t *testing.T) {
 		"cluster-1",
 		WithBootstrapToken("bootstrap-token"),
 		WithTargetService("hsm"),
-		WithScopes([]string{"hsm:read", " hsm:write "}),
 	)
 
 	err := client.Initialize(context.Background())

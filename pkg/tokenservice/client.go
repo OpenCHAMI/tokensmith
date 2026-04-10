@@ -40,7 +40,6 @@ type ServiceClient struct {
 	serviceName             string
 	serviceID               string
 	targetService           string
-	scopes                  []string
 	bootstrapToken          string
 	refreshBefore           time.Duration
 	autoInterval            time.Duration
@@ -93,29 +92,12 @@ func WithBootstrapToken(token string) ServiceClientOption {
 	}
 }
 
-// WithTargetService sets the requested target service for exchanged tokens.
+// WithTargetService records the intended target service for this client. This value is
+// client-local metadata used for validation and logging; the server determines the actual
+// authorized audience from the bootstrap token policy and ignores any client hint.
 func WithTargetService(service string) ServiceClientOption {
 	return func(c *ServiceClient) {
 		c.targetService = strings.TrimSpace(service)
-	}
-}
-
-// WithScopes sets requested scopes for exchanged service tokens.
-func WithScopes(scopes []string) ServiceClientOption {
-	return func(c *ServiceClient) {
-		if len(scopes) == 0 {
-			c.scopes = nil
-			return
-		}
-		normalized := make([]string, 0, len(scopes))
-		for _, s := range scopes {
-			s = strings.TrimSpace(s)
-			if s == "" {
-				continue
-			}
-			normalized = append(normalized, s)
-		}
-		c.scopes = normalized
 	}
 }
 
@@ -326,10 +308,10 @@ func (c *ServiceClient) GetToken(ctx context.Context) error {
 			c.recordClientRefreshFailure(wrapped)
 			return wrapped
 		}
-		return c.requestServiceToken(ctx, GrantTypeRefreshToken)
+		return c.requestServiceToken(ctx, "refresh")
 	}
 
-	return c.requestServiceToken(ctx, GrantTypeBootstrapToken)
+	return c.requestServiceToken(ctx, "bootstrap")
 }
 
 func (c *ServiceClient) requestServiceToken(ctx context.Context, grantType string) error {
@@ -337,7 +319,7 @@ func (c *ServiceClient) requestServiceToken(ctx context.Context, grantType strin
 	form := url.Values{}
 
 	switch grantType {
-	case GrantTypeBootstrapToken:
+	case "bootstrap":
 		bootstrapToken := c.currentBootstrapToken()
 		if bootstrapToken == "" {
 			return fmt.Errorf("%w: set %s or WithBootstrapToken", ErrMissingBootstrapToken, BootstrapTokenEnvVar)
@@ -345,7 +327,7 @@ func (c *ServiceClient) requestServiceToken(ctx context.Context, grantType strin
 		form.Set("grant_type", GrantTypeTokenExchange)
 		form.Set("subject_token", bootstrapToken)
 		form.Set("subject_token_type", BootstrapTokenTypeRFC8693)
-	case GrantTypeRefreshToken:
+	case "refresh":
 		c.mu.RLock()
 		refreshToken := strings.TrimSpace(c.refreshToken)
 		c.mu.RUnlock()
@@ -355,7 +337,7 @@ func (c *ServiceClient) requestServiceToken(ctx context.Context, grantType strin
 		form.Set("grant_type", GrantTypeRefreshTokenRFC8693)
 		form.Set("refresh_token", refreshToken)
 	default:
-		return fmt.Errorf("unsupported grant type: %s", grantType)
+		return fmt.Errorf("unsupported internal grant type: %s", grantType)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/oauth/token", c.tokensmithURL), strings.NewReader(form.Encode()))
