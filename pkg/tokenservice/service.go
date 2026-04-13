@@ -5,8 +5,10 @@
 package tokenservice
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/openchami/tokensmith/pkg/keys"
@@ -23,11 +25,12 @@ const (
 
 // Config holds the configuration for the token service
 type Config struct {
-	Issuer       string
-	GroupScopes  map[string][]string
-	ClusterID    string
-	OpenCHAMIID  string
-	NonEnforcing bool // Skip validation checks and only log errors
+	Issuer              string
+	GroupScopes         map[string][]string
+	ClusterID           string
+	OpenCHAMIID         string
+	NonEnforcing        bool // Skip validation checks and only log errors
+	EnableLocalUserMint bool
 
 	// RFC 8693 stores (opaque token and family management)
 	RFC8693BootstrapStorePath string
@@ -37,6 +40,22 @@ type Config struct {
 	OIDCIssuerURL    string
 	OIDCClientID     string
 	OIDCClientSecret string
+}
+
+// OIDCProviderConfigUpdate captures mutable single-provider OIDC settings.
+type OIDCProviderConfigUpdate struct {
+	IssuerURL       string
+	ClientID        string
+	ReplaceExisting bool
+	DryRun          bool
+}
+
+// OIDCProviderStatus describes current runtime OIDC provider state.
+type OIDCProviderStatus struct {
+	Configured           bool   `json:"configured"`
+	IssuerURL            string `json:"issuer_url"`
+	ClientID             string `json:"client_id"`
+	LocalUserMintEnabled bool   `json:"local_user_mint_enabled"`
 }
 
 // TokenService handles token operations and provider interactions
@@ -122,4 +141,75 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	svc.refreshTokenStore = refreshStore
 
 	return svc, nil
+}
+
+func (s *TokenService) currentOIDCProvider() oidc.Provider {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.OIDCProvider
+}
+
+func (s *TokenService) hasConfiguredOIDCProvider() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return strings.TrimSpace(s.Config.OIDCIssuerURL) != "" && strings.TrimSpace(s.Config.OIDCClientID) != ""
+}
+
+// GetOIDCProviderStatus returns current in-memory OIDC provider status.
+func (s *TokenService) GetOIDCProviderStatus() OIDCProviderStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return OIDCProviderStatus{
+		Configured:           strings.TrimSpace(s.Config.OIDCIssuerURL) != "" && strings.TrimSpace(s.Config.OIDCClientID) != "",
+		IssuerURL:            s.Config.OIDCIssuerURL,
+		ClientID:             s.Config.OIDCClientID,
+		LocalUserMintEnabled: s.Config.EnableLocalUserMint,
+	}
+}
+
+// ApplyOIDCProviderConfig updates the active single OIDC provider in memory.
+func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCProviderConfigUpdate) (string, OIDCProviderStatus, error) {
+	issuerURL := strings.TrimSpace(update.IssuerURL)
+	clientID := strings.TrimSpace(update.ClientID)
+	if issuerURL == "" {
+		return "", s.GetOIDCProviderStatus(), fmt.Errorf("issuer_url is required")
+	}
+	if clientID == "" {
+		return "", s.GetOIDCProviderStatus(), fmt.Errorf("client_id is required")
+	}
+
+	secret := strings.TrimSpace(s.Config.OIDCClientSecret)
+	if secret == "" {
+		return "", s.GetOIDCProviderStatus(), fmt.Errorf("OIDC client secret is not configured in service environment")
+	}
+
+	hasExisting := s.hasConfiguredOIDCProvider()
+	if hasExisting && !update.ReplaceExisting {
+		return "", s.GetOIDCProviderStatus(), fmt.Errorf("OIDC provider already configured; use --replace-existing to overwrite")
+	}
+
+	provider := oidc.NewSimpleProvider(issuerURL, clientID, secret)
+	if _, err := provider.GetProviderMetadata(ctx); err != nil {
+		return "", s.GetOIDCProviderStatus(), fmt.Errorf("OIDC provider validation failed: %w", err)
+	}
+
+	status := s.GetOIDCProviderStatus()
+	if update.DryRun {
+		if hasExisting {
+			return "would_replace", status, nil
+		}
+		return "would_create", status, nil
+	}
+
+	s.mu.Lock()
+	s.OIDCProvider = provider
+	s.Config.OIDCIssuerURL = issuerURL
+	s.Config.OIDCClientID = clientID
+	s.mu.Unlock()
+
+	if hasExisting {
+		return "replaced", s.GetOIDCProviderStatus(), nil
+	}
+	return "created", s.GetOIDCProviderStatus(), nil
 }

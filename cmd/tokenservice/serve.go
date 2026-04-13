@@ -51,6 +51,7 @@ var serveCmd = &cobra.Command{
 			ClusterID:                 clusterID,
 			OpenCHAMIID:               openCHAMIID,
 			NonEnforcing:              nonEnforcing,
+			EnableLocalUserMint:       enableLocalUserMint,
 			OIDCIssuerURL:             oidcIssuerURL,
 			OIDCClientID:              oidcClientID,
 			OIDCClientSecret:          oidcClientSecret,
@@ -113,6 +114,7 @@ func init() {
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")
+	serveCmd.Flags().BoolVar(&enableLocalUserMint, "enable-local-user-mint", false, "Enable local user-token mint mode (break-glass path)")
 
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().StringVar(&rfc8693BootstrapStorePath, "rfc8693-bootstrap-store", "", "Path to RFC 8693 bootstrap token store (or set TOKENSMITH_RFC8693_BOOTSTRAP_STORE; default: ./data/bootstrap-tokens)")

@@ -53,6 +53,55 @@ Important:
 - TokenSmith does not currently publish its own OIDC discovery document at `/.well-known/openid-configuration`
 - Configure verifiers with the direct JWKS URL unless you are using a separate discovery layer
 
+## Local admin endpoints
+
+These endpoints are intended for local operator workflows and are rejected for non-loopback callers.
+
+### `GET /admin/oidc/config`
+
+Returns current single-provider OIDC runtime status.
+
+Example:
+
+```bash
+curl -s http://127.0.0.1:8080/admin/oidc/config | jq
+```
+
+Response shape:
+
+```json
+{
+  "status": "ok",
+  "oidc": {
+    "configured": true,
+    "issuer_url": "https://issuer.example",
+    "client_id": "tokensmith-client",
+    "local_user_mint_enabled": false
+  }
+}
+```
+
+### `POST /admin/oidc/config`
+
+Applies a single-provider OIDC runtime update in-process (no restart required).
+
+Request body:
+
+```json
+{
+  "issuer_url": "https://issuer.example",
+  "client_id": "tokensmith-client",
+  "replace_existing": false,
+  "dry_run": false
+}
+```
+
+Notes:
+
+- if an OIDC provider already exists, `replace_existing` must be `true`
+- `dry_run=true` validates and reports create/replace result without applying
+- client secrets are env-only (`OIDC_CLIENT_SECRET`) and are not accepted in request payload
+
 ## Service-token endpoints
 
 ### `POST /oauth/token`

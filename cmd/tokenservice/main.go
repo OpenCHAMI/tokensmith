@@ -24,6 +24,7 @@ var (
 	keyFile                   string
 	keyDir                    string
 	nonEnforcing              bool // Skip validation checks and only log errors
+	enableLocalUserMint       bool
 	rfc8693BootstrapStorePath string
 	rfc8693RefreshStorePath   string
 )

@@ -20,7 +20,12 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		return "", errors.New("empty token")
 	}
 
-	introspection, err := s.OIDCProvider.IntrospectToken(ctx, idtoken)
+	provider := s.currentOIDCProvider()
+	if provider == nil {
+		return "", errors.New("OIDC provider is not configured")
+	}
+
+	introspection, err := provider.IntrospectToken(ctx, idtoken)
 	if err != nil {
 		return "", fmt.Errorf("token introspection failed: %w", err)
 	}

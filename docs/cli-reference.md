@@ -18,7 +18,10 @@ See also:
 
 - `tokensmith generate-config`
 - `tokensmith mint-bootstrap-token`
+- `tokensmith oidc status`
+- `tokensmith oidc configure`
 - `tokensmith serve`
+- `tokensmith user-token create`
 
 Global flag:
 
@@ -123,6 +126,85 @@ BOOTSTRAP_TOKEN=$(tokensmith mint-bootstrap-token \
 ### What the token is for
 
 Bootstrap tokens are one-time startup credentials. They are exchanged at `POST /oauth/token` using the RFC 8693 bootstrap-token request shape documented in `docs/http-endpoints.md`.
+
+## `tokensmith oidc status`
+
+Shows active single-provider OIDC runtime status from a running local TokenSmith instance.
+
+Flags:
+
+- `--url` TokenSmith base URL (default `http://127.0.0.1:8080`)
+
+Example:
+
+```bash
+tokensmith oidc status --url http://127.0.0.1:8080
+```
+
+## `tokensmith oidc configure`
+
+Configures the active single OIDC provider on a running local TokenSmith instance without restart.
+
+Flags:
+
+- `--url` TokenSmith base URL (default `http://127.0.0.1:8080`)
+- `--issuer-url` OIDC issuer URL (required)
+- `--client-id` OIDC client ID (required)
+- `--replace-existing` required when replacing an already configured provider
+- `--dry-run` validates and reports create/replace result without applying
+
+Notes:
+
+- This is a local-only operation; the service rejects non-loopback calls.
+- OIDC client secret is not accepted by this command and is never written to config.
+- The running service must already have `OIDC_CLIENT_SECRET` configured.
+
+Example:
+
+```bash
+tokensmith oidc configure \
+  --url http://127.0.0.1:8080 \
+  --issuer-url https://issuer.example \
+  --client-id tokensmith-client
+```
+
+Replace existing provider:
+
+```bash
+tokensmith oidc configure \
+  --url http://127.0.0.1:8080 \
+  --issuer-url https://new-issuer.example \
+  --client-id tokensmith-client \
+  --replace-existing
+```
+
+## `tokensmith user-token create`
+
+Creates a local user JWT for break-glass/no-upstream-OIDC scenarios.
+
+Required flags:
+
+- `--enable-local-user-mint`
+- `--key-file`
+- `--subject`
+- `--scopes`
+
+Important:
+
+- This path is intentionally explicit and should not be the normal operational mode.
+- Tokens are signed with the provided private key and include user-provided scopes.
+
+Example:
+
+```bash
+tokensmith user-token create \
+  --enable-local-user-mint \
+  --key-file ./keys/private.pem \
+  --subject operator@example \
+  --audience openchami \
+  --scopes read,write \
+  --ttl 1h
+```
 
 ## Configuration file schema
 

@@ -17,6 +17,11 @@ This page lists environment variables currently used by TokenSmith code paths.
 | `TOKENSMITH_RFC8693_BOOTSTRAP_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--rfc8693-bootstrap-store`; default `./data/bootstrap-tokens` |
 | `TOKENSMITH_RFC8693_REFRESH_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--rfc8693-refresh-store`; default `./data/refresh-tokens` |
 
+OIDC runtime configuration notes:
+
+- `OIDC_CLIENT_SECRET` is environment-only and is not persisted by OIDC runtime configure workflows.
+- `tokensmith oidc configure` updates issuer/client-id only and expects the running service to already have `OIDC_CLIENT_SECRET` set.
+
 Precedence for these values:
 
 1. explicit CLI flag value
