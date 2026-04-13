@@ -68,18 +68,6 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type oidcConfigRequest struct {
-	IssuerURL       string `json:"issuer_url"`
-	ClientID        string `json:"client_id"`
-	ReplaceExisting bool   `json:"replace_existing"`
-	DryRun          bool   `json:"dry_run"`
-}
-
-type oidcConfigResponse struct {
-	Status string             `json:"status"`
-	OIDC   OIDCProviderStatus `json:"oidc"`
-}
-
 func isLoopbackRequest(r *http.Request) bool {
 	host := r.RemoteAddr
 	if parsedHost, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
@@ -139,7 +127,7 @@ func (s *TokenService) OIDCConfigStatusHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(oidcConfigResponse{
+	_ = json.NewEncoder(w).Encode(OIDCConfigResponse{
 		Status: "ok",
 		OIDC:   s.GetOIDCProviderStatus(),
 	})
@@ -155,7 +143,7 @@ func (s *TokenService) OIDCConfigHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var req oidcConfigRequest
+	var req OIDCConfigRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
@@ -175,7 +163,7 @@ func (s *TokenService) OIDCConfigHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(oidcConfigResponse{
+	_ = json.NewEncoder(w).Encode(OIDCConfigResponse{
 		Status: status,
 		OIDC:   oidcStatus,
 	})

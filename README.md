@@ -45,7 +45,13 @@ sequenceDiagram
 
 TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
 
-- New adopters: [`docs/getting-started.md`](docs/getting-started.md)
+**First time users:**
+- [Quick navigation: Which path applies to me?](docs/getting-started.md#which-path-applies-to-me)
+- [Token flows guide: Understand upstream OIDC vs local tokens](docs/token-flows.md)
+- [Troubleshooting guide: Diagnose common issues](docs/troubleshooting.md)
+
+**Core documentation:**
+- Setup and integration: [`docs/getting-started.md`](docs/getting-started.md)
 - HTTP endpoints and wire formats: [`docs/http-endpoints.md`](docs/http-endpoints.md)
 - Internal-only service-to-service quick guide: [`docs/internal-service-auth.md`](docs/internal-service-auth.md)
 - Middleware wiring and principal context: [`docs/context-guide.md`](docs/context-guide.md)
@@ -53,6 +59,9 @@ TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
 - Policy loading and `policy_version`: [`docs/authz_policy.md`](docs/authz_policy.md)
 - Operations and rollout modes: [`docs/authz_operations.md`](docs/authz_operations.md)
 - Fabrica integration: [`docs/fabrica.md`](docs/fabrica.md)
+- Claims reference: [`docs/claim-reference.md`](docs/claim-reference.md)
+- CLI reference: [`docs/cli-reference.md`](docs/cli-reference.md)
+- Security notes: [`docs/security-notes.md`](docs/security-notes.md)
 
 ## Features
 
@@ -60,7 +69,8 @@ TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
   - Exchange external OIDC tokens for internal JWTs
   - Map external identities to internal service identities
   - Dynamic authorization and scope management via policy engines
-  - Support for multiple OIDC providers (Keycloak, Hydra, Authelia)
+  - Single upstream OIDC provider at runtime (configurable without restart)
+  - Compatible with multiple OIDC providers (Keycloak, Hydra, Authelia, Azure AD, etc.)
 
 - **Service-to-Service Authentication**
   - Secure internal service communication
@@ -78,11 +88,16 @@ TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
   - Casbin-based authorization in `pkg/authz`
   - Service-to-service authorization using TokenSmith service principals
 
-- **OIDC Provider Support**
-  - Keycloak integration
-  - Hydra integration
-  - Authelia integration
+- **OIDC Provider Flexibility**
+  - Runtime reconfiguration without restart (no downtime)
+  - Provider validation and dry-run mode
+  - Support for Keycloak, Hydra, Authelia, Azure AD, and other OIDC-compliant providers
   - Extensible provider interface
+
+- **Break-Glass Access**
+  - Local user token minting for emergency scenarios (when upstream OIDC is unavailable)
+  - Explicit enable flag to prevent accidental use
+  - Audit trail for break-glass token creation
 
 ## Quick Start
 
@@ -109,6 +124,22 @@ For complete startup options and environment variable precedence:
 - CLI reference: [`docs/cli-reference.md`](docs/cli-reference.md)
 - Environment reference: [`docs/env-reference.md`](docs/env-reference.md)
 - HTTP endpoints: [`docs/http-endpoints.md`](docs/http-endpoints.md)
+
+### OpenCHAMI Bootstrap-First Quick Start (RFC 8693)
+
+For most OpenCHAMI setups, start with the internal service bootstrap flow:
+
+1. Start TokenSmith with durable bootstrap/refresh stores.
+2. Mint an opaque bootstrap token with `tokensmith bootstrap-token create` using the same bootstrap store path.
+3. Inject `TOKENSMITH_BOOTSTRAP_TOKEN` into the caller service.
+4. Exchange at `POST /oauth/token` and verify `access_token` + `refresh_token` are returned.
+
+Important:
+
+- Bootstrap token issuance is strictly local to the TokenSmith runtime context.
+- For Podman Quadlets (common deployment), use `podman exec` into the TokenSmith container when minting bootstrap tokens.
+
+See full guide: [`docs/internal-service-auth.md`](docs/internal-service-auth.md)
 
 ## Project Structure
 

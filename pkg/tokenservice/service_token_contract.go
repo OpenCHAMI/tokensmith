@@ -5,13 +5,7 @@
 package tokenservice
 
 const (
-	BootstrapTokenUseClaim = "bootstrap_service"
-	BootstrapTokenUseField = "token_use"
-	BootstrapTargetField   = "target_service"
-	BootstrapScopesField   = "scopes"
-	BootstrapOneTimeField  = "bootstrap_one_time"
-	BootstrapAudience      = "tokensmith"
-	BootstrapTokenEnvVar   = "TOKENSMITH_BOOTSTRAP_TOKEN"
+	BootstrapTokenEnvVar = "TOKENSMITH_BOOTSTRAP_TOKEN"
 
 	RefreshTokenUseClaim = "refresh_token"
 	RefreshTokenUseField = "token_use"

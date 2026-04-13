@@ -19,7 +19,7 @@ It shows how a caller service can:
 - Go 1.16 or later
 - a running TokenSmith service (default: `http://localhost:8080`)
 - a target service that accepts TokenSmith-issued bearer tokens
-- a one-time bootstrap token minted with `tokensmith mint-bootstrap-token`
+- a one-time bootstrap token minted with `tokensmith bootstrap-token create`
 
 ## Configuration
 

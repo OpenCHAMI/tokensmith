@@ -12,27 +12,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/openchami/tokensmith/pkg/tokenservice"
 	"github.com/spf13/cobra"
 )
-
-type oidcConfigRequest struct {
-	IssuerURL       string `json:"issuer_url"`
-	ClientID        string `json:"client_id"`
-	ReplaceExisting bool   `json:"replace_existing"`
-	DryRun          bool   `json:"dry_run"`
-}
-
-type oidcConfigStatus struct {
-	Configured           bool   `json:"configured"`
-	IssuerURL            string `json:"issuer_url"`
-	ClientID             string `json:"client_id"`
-	LocalUserMintEnabled bool   `json:"local_user_mint_enabled"`
-}
-
-type oidcConfigResponse struct {
-	Status string           `json:"status"`
-	OIDC   oidcConfigStatus `json:"oidc"`
-}
 
 var (
 	oidcAdminURL          string
@@ -62,7 +44,7 @@ var oidcStatusCmd = &cobra.Command{
 			return fmt.Errorf("status request failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 
-		var out oidcConfigResponse
+		var out tokenservice.OIDCConfigResponse
 		if err := json.Unmarshal(body, &out); err != nil {
 			return fmt.Errorf("failed to parse status response: %w", err)
 		}
@@ -86,7 +68,7 @@ var oidcConfigureCmd = &cobra.Command{
 			return fmt.Errorf("--client-id is required")
 		}
 
-		payload := oidcConfigRequest{
+		payload := tokenservice.OIDCConfigRequest{
 			IssuerURL:       oidcConfigureIssuer,
 			ClientID:        oidcConfigureClientID,
 			ReplaceExisting: oidcReplaceExisting,
@@ -109,7 +91,7 @@ var oidcConfigureCmd = &cobra.Command{
 			return fmt.Errorf("configure request failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 
-		var out oidcConfigResponse
+		var out tokenservice.OIDCConfigResponse
 		if err := json.Unmarshal(body, &out); err != nil {
 			return fmt.Errorf("failed to parse configure response: %w", err)
 		}

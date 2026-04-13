@@ -8,12 +8,38 @@ SPDX-License-Identifier: MIT
 
 This guide is the fastest path to running TokenSmith and integrating AuthN/AuthZ in a service.
 
+## Which path applies to me?
+
+Start here to find the right guide for your situation:
+
+1. **I have an external OIDC provider (Keycloak, Azure AD, Okta, Dex, etc.) and want to use it for authentication**
+   - Follow section [1) Start the token service](#1-start-the-token-service) below
+   - Details: [Token Flows: Upstream OIDC](./token-flows.md#upstream-oidc-flow-recommended)
+
+2. **TokenSmith is down or I need emergency access without OIDC**
+   - Use the break-glass local user token flow: [Break-glass: Local user tokens](#break-glass-local-user-tokens)
+   - Details: [Token Flows: Local user token](./token-flows.md#local-user-token-flow-break-glass)
+
+3. **I'm setting up service-to-service authentication only (no end-user OIDC)**
+   - Jump to: [1.3) Internal service-to-service only](#13-internal-service-to-service-only-no-external-user-token-exchange)
+   - Details: [Internal service auth guide](./internal-service-auth.md)
+
+4. **I'm troubleshooting or debugging something**
+   - See: [Troubleshooting Guide](./troubleshooting.md)
+
+5. **I need to understand token claims and what's in a JWT**
+   - See: [Claim Reference](./claim-reference.md)
+
+---
+
 `pkg/authn` validates TokenSmith JWTs. The expected claim set includes standard JWT claims plus TokenSmith claims such as `auth_level`, `auth_factors`, `auth_methods`, `session_id`, `session_exp`, and `auth_events`. TokenSmith-issued JWTs include RFC 7638 `kid` thumbprints, and middleware requires a valid RFC 7638 `kid` header for verification.
 
 If you need normative behavior details, see:
 
 - `docs/authz-spec.md`
 - `docs/authz_contract.md`
+
+---
 
 ## 1) Start the token service
 
@@ -70,7 +96,62 @@ For JWKS validation behavior, caching, and failure semantics, see:
 - `docs/authz-spec.md#6-jwks-caching-and-failure-semantics`
 - `docs/security-notes.md#jwks-caching-and-availability-risks`
 
-## 1.5) Internal service-to-service only (no external user token exchange)
+## 1.2) Break-glass: Local user tokens (emergency access)
+
+**Use case**: When upstream OIDC is unavailable or for initial bootstrapping, you can mint tokens locally without relying on an external provider.
+
+**Important**: This flow is for break-glass and bootstrap scenarios only, not primary production authentication.
+
+### Starting with local user minting enabled
+
+```bash
+tokensmith serve \
+  --config ./config.json \
+  --key-dir ./keys \
+  --enable-local-user-mint
+```
+
+### Minting a local user token
+
+```bash
+tokensmith user-token create \
+  --subject "admin@example.com" \
+  --scopes "admin,read,write" \
+  --enable-local-user-mint
+```
+
+This outputs a JWT that you can use immediately with your services.
+
+### When to use this
+
+- **Initial bootstrap**: Set up an admin account before external OIDC is configured
+- **Disaster recovery**: Emergency access when external OIDC provider is down
+- **Testing**: Quick token generation without involving a full OIDC provider
+
+### After OIDC is available
+
+Once your OIDC provider is ready:
+
+1. Configure it with TokenSmith (no restart required):
+   ```bash
+   tokensmith oidc configure \
+     --issuer-url "https://keycloak.example.com/realms/master" \
+     --client-id "tokensmith" \
+     --replace-existing
+   ```
+
+2. Optionally restart TokenSmith without `--enable-local-user-mint` to disable the break-glass path
+
+### Security considerations
+
+- Local user tokens are issued directly by TokenSmith; they do not reflect upstream OIDC identity
+- The local-only admin endpoint is only accessible from `localhost`
+- Audit logs should record who minted local tokens and when
+- See [Security Notes: Local user minting](./security-notes.md#local-user-token-security) for full details
+
+Details: [Token Flows: Local user token flow](./token-flows.md#local-user-token-flow-break-glass)
+
+## 1.3) Internal service-to-service only (no external user token exchange)
 
 Standalone quick guide:
 
@@ -78,12 +159,19 @@ Standalone quick guide:
 
 If your service only needs internal service-to-service AuthN/AuthZ, you can skip end-user token-exchange details and use this path:
 
-1. Mint a one-time bootstrap token with `tokensmith mint-bootstrap-token`.
-2. Pass the token via `TOKENSMITH_BOOTSTRAP_TOKEN` to the caller service process.
-3. Have the caller service redeem the token at `POST /oauth/token` using `pkg/tokenservice` or `example/serviceauth`.
-4. In the target service, install TokenSmith AuthN middleware to validate TokenSmith JWTs and build a verified principal.
-5. Install TokenSmith AuthZ middleware and map routes using either explicit `authz.RouteMapper` or path/method style (`authz.PathMethodMapper` plus Casbin matchers).
-6. Ensure service principals map to the `service` role in policy/grouping.
+1. Start TokenSmith with a durable bootstrap store (`--rfc8693-bootstrap-store`).
+2. Mint a one-time opaque bootstrap token with `tokensmith bootstrap-token create --bootstrap-store <same-path>`.
+3. Pass the token via `TOKENSMITH_BOOTSTRAP_TOKEN` to the caller service process.
+4. Have the caller service redeem the token at `POST /oauth/token` using `pkg/tokenservice` or `example/serviceauth`.
+5. In the target service, install TokenSmith AuthN middleware to validate TokenSmith JWTs and build a verified principal.
+6. Install TokenSmith AuthZ middleware and map routes using either explicit `authz.RouteMapper` or path/method style (`authz.PathMethodMapper` plus Casbin matchers).
+7. Ensure service principals map to the `service` role in policy/grouping.
+
+Important:
+
+- `bootstrap-token create` must write policy to the same bootstrap store path used by the running TokenSmith service.
+- Treat bootstrap token creation as a strictly local operation to the TokenSmith runtime context.
+- For Podman Quadlets (common OpenCHAMI deployment), mint via `podman exec tokensmith ...` so the same mounted store path is used.
 
 Current examples:
 
@@ -96,7 +184,7 @@ Normative requirements for service principals:
 - `docs/authz_contract.md#service-principal-requirements`
 - `docs/authz_contract.md#integration-checklist-services`
 
-## 1.2) Endpoint overview
+## 1.4) Endpoint overview
 
 The TokenSmith service currently exposes these user-facing endpoints:
 
@@ -107,7 +195,7 @@ The TokenSmith service currently exposes these user-facing endpoints:
 
 See `docs/http-endpoints.md` for request/response formats and failure behavior.
 
-## 1.3) Key material and token-state storage
+## 1.5) Key material and token-state storage
 
 Current startup behavior:
 

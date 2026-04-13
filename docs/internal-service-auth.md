@@ -132,24 +132,43 @@ Observed error codes include:
 
 ## 3) Mint and distribute bootstrap tokens
 
-Mint a short-lived bootstrap token before service startup:
+Preferred flow for RFC 8693: create an opaque bootstrap token with server-side policy.
+
+Important:
+
+- Use the same bootstrap store path for both TokenSmith and bootstrap token creation.
+- If paths differ, TokenSmith cannot find the token policy and exchange will fail with `invalid_grant`.
+- Bootstrap token creation is a **strictly local operation** to the TokenSmith runtime context.
+- In practice, run `tokensmith bootstrap-token create` on the same host/container namespace where TokenSmith can read the same store path.
+
+### Podman Quadlet workflow (recommended for OpenCHAMI)
+
+If TokenSmith is deployed with Podman Quadlets, mint bootstrap tokens from the same host using `podman exec` so store-path coupling is guaranteed.
+
+Example (conceptual):
 
 ```bash
-BOOTSTRAP_TOKEN=$(tokensmith mint-bootstrap-token \
-  --key-file ./keys/private.pem \
-  --service-id example-service-1 \
-  --target-service metadata-service \
-  --scopes read \
-  --ttl 5m)
+# TokenSmith quadlet mounts /var/lib/tokensmith/bootstrap into container
+# and serve uses --rfc8693-bootstrap-store /var/lib/tokensmith/bootstrap
+
+BOOTSTRAP_TOKEN=$(podman exec tokensmith \
+  tokensmith bootstrap-token create \
+    --subject example-service-1 \
+    --audience metadata-service \
+    --scopes "read" \
+    --ttl 10m \
+    --refresh-ttl 24h \
+    --bootstrap-store /var/lib/tokensmith/bootstrap \
+    --output-format json | jq -r '.bootstrap_token')
 ```
 
-Start the caller service with:
+Why this matters:
 
-```bash
-export TOKENSMITH_BOOTSTRAP_TOKEN="$BOOTSTRAP_TOKEN"
-```
+- `bootstrap-token create` persists server-side policy files.
+- `/oauth/token` exchange succeeds only when TokenSmith can read those policy files.
+- Running minting on a different machine without shared storage will produce `invalid_grant`.
 
-For restart-safe replay protection and refresh-family persistence, start TokenSmith with durable stores:
+Start TokenSmith with durable stores:
 
 ```bash
 tokensmith serve \
@@ -158,6 +177,42 @@ tokensmith serve \
   --rfc8693-bootstrap-store ./data/bootstrap-tokens \
   --rfc8693-refresh-store ./data/refresh-tokens
 ```
+
+Then mint a short-lived opaque bootstrap token against that same store path:
+
+```bash
+BOOTSTRAP_TOKEN=$(tokensmith bootstrap-token create \
+  --subject example-service-1 \
+  --audience metadata-service \
+  --scopes "read" \
+  --ttl 10m \
+  --refresh-ttl 24h \
+  --bootstrap-store ./data/bootstrap-tokens \
+  --output-format json | jq -r '.bootstrap_token')
+```
+
+Start the caller service with:
+
+```bash
+export TOKENSMITH_BOOTSTRAP_TOKEN="$BOOTSTRAP_TOKEN"
+```
+
+### Verify immediately (first success checkpoint)
+
+After minting, validate the token exchange before wiring callers:
+
+```bash
+curl -s http://localhost:8080/oauth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+  --data-urlencode "subject_token=$BOOTSTRAP_TOKEN" \
+  --data-urlencode 'subject_token_type=urn:openchami:params:oauth:token-type:bootstrap-token' | jq .
+```
+
+Expected result:
+
+- `access_token` and `refresh_token` present
+- no `invalid_grant` error
 
 Defaults when unset:
 

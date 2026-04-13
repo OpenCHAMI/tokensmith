@@ -6,7 +6,6 @@ package oidc
 
 import (
 	"context"
-	"net/http"
 )
 
 // Provider defines the simplified interface for OIDC token validation and introspection.
@@ -54,12 +53,4 @@ type IntrospectionResponse struct {
 	Scope     string                 `json:"scope"`
 	ClientID  string                 `json:"client_id"`
 	TokenUse  string                 `json:"token_use"`
-}
-
-func OIDCMiddleware(provider Provider) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = provider.IntrospectToken(r.Context(), r.Header.Get("Authorization"))
-		})
-	}
 }

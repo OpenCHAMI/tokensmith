@@ -59,12 +59,7 @@ Example:
 		}
 
 		// Parse scopes
-		var scopes []string
-		if scopesStr != "" {
-			scopes = strings.FieldsFunc(scopesStr, func(r rune) bool {
-				return r == ',' || r == ' '
-			})
-		}
+		scopes := ParseScopeCSV(scopesStr)
 
 		// Parse TTLs
 		ttl, err := time.ParseDuration(ttlStr)

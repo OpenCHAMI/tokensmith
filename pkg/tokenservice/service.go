@@ -50,12 +50,26 @@ type OIDCProviderConfigUpdate struct {
 	DryRun          bool
 }
 
+// OIDCConfigRequest is the HTTP payload used to apply runtime OIDC updates.
+type OIDCConfigRequest struct {
+	IssuerURL       string `json:"issuer_url"`
+	ClientID        string `json:"client_id"`
+	ReplaceExisting bool   `json:"replace_existing"`
+	DryRun          bool   `json:"dry_run"`
+}
+
 // OIDCProviderStatus describes current runtime OIDC provider state.
 type OIDCProviderStatus struct {
 	Configured           bool   `json:"configured"`
 	IssuerURL            string `json:"issuer_url"`
 	ClientID             string `json:"client_id"`
 	LocalUserMintEnabled bool   `json:"local_user_mint_enabled"`
+}
+
+// OIDCConfigResponse is the HTTP response payload for runtime OIDC status/apply endpoints.
+type OIDCConfigResponse struct {
+	Status string             `json:"status"`
+	OIDC   OIDCProviderStatus `json:"oidc"`
 }
 
 // TokenService handles token operations and provider interactions

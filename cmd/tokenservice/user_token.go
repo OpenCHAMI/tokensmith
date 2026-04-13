@@ -52,7 +52,7 @@ var userTokenCreateCmd = &cobra.Command{
 			return fmt.Errorf("--ttl must be greater than zero")
 		}
 
-		scopes := parseScopeCSV(userTokenScopes)
+		scopes := ParseScopeCSV(userTokenScopes)
 		if len(scopes) == 0 {
 			return fmt.Errorf("--scopes must include at least one scope")
 		}

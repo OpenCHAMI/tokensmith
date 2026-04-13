@@ -179,6 +179,12 @@ If any pod reports a different `policy_version`, stop rollout and verify:
 
 ## Troubleshooting
 
+For general TokenSmith troubleshooting (token exchange, OIDC, local minting), see:
+
+- [`docs/troubleshooting.md`](./troubleshooting.md)
+
+This section covers **authorization-specific issues**.
+
 ### Symptom: policy changes have no effect
 
 Most common causes:
@@ -254,7 +260,7 @@ A common pattern is to map a service client id (or azp) into the `service` role.
 ```csv
 # Map a specific service principal into role:service
 # (exact subject string depends on your service principal mapping)
-# Example subject style used in the contract examples: "role:service".
+# Example subject style used in the contract examples: "service:boot-service".
 # If you use grouping policies, you may also use Casbin's g() relationships.
 #
 # Example using g() to link a service principal to the role:
@@ -263,3 +269,56 @@ A common pattern is to map a service client id (or azp) into the `service` role.
 # Then grant the role permissions:
 p, role:service, metadata:nodes, read
 ```
+
+---
+
+## Advanced troubleshooting: Quick diagnostic checklist
+
+If you're still stuck after following the above, use this checklist:
+
+1. **Verify token validity**
+   ```bash
+   # Decode token to see claims
+   echo "<JWT>" | cut -d. -f2 | base64 -d | jq .
+   # Confirm: sub, aud, auth_level, auth_methods, auth_events are present
+   ```
+
+2. **Verify principal extraction**
+   ```bash
+   # Enable debug logging in your service
+   export LOG_LEVEL=debug
+   # Look for logs showing the extracted principal ID, type, roles
+   ```
+
+3. **Verify policy parsing**
+   ```bash
+   # Check startup logs for policy_version and any parsing errors
+   ```
+
+4. **Test policy matching directly**
+   ```bash
+   # Use Casbin's own tools to test matchers (if you have access to the model/policy files)
+   # Example: Does the policy matcher correctly match your path?
+   ```
+
+5. **Confirm mode is active**
+   ```bash
+   # Call diagnostics endpoint or check env vars
+   echo $AUTHZ_POLICY_MODE  # should be "enforce" or "shadow", not "off"
+   ```
+
+6. **Check for path normalization issues**
+   ```bash
+   # Verify the router receives the same path as the policy matcher evaluates
+   # Log both the raw HTTP path and the normalized object in your handler
+   ```
+
+If none of these help, file an issue with:
+
+- Your policy model (Casbin `*.conf` file)
+- Your policy CSV snippets
+- The principal identity (anonymized)
+- The request path and HTTP method
+- The `policy_version` from the denial response
+
+See also: [`docs/troubleshooting.md`](./troubleshooting.md)

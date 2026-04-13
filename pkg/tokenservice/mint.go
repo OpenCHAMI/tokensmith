@@ -14,58 +14,6 @@ import (
 	"github.com/openchami/tokensmith/pkg/token"
 )
 
-// MintBootstrapToken creates a short-lived bootstrap token intended for one-time
-// exchange at /oauth/token to obtain a service access token and refresh token.
-func (s *TokenService) MintBootstrapToken(ctx context.Context, serviceID, targetService string, scopes []string, ttl time.Duration) (string, error) {
-	if serviceID == "" {
-		return "", errors.New("service ID cannot be empty")
-	}
-	if targetService == "" {
-		return "", errors.New("target service cannot be empty")
-	}
-	if ttl <= 0 {
-		return "", errors.New("ttl must be greater than zero")
-	}
-
-	now := time.Now()
-	claims := &token.TSClaims{
-		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    s.Issuer,
-			Subject:   serviceID,
-			Audience:  []string{BootstrapAudience},
-			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
-			NotBefore: jwt.NewNumericDate(now),
-			IssuedAt:  jwt.NewNumericDate(now),
-		},
-		ClusterID:   s.ClusterID,
-		OpenCHAMIID: s.OpenCHAMIID,
-		Scope:       append([]string(nil), scopes...),
-		AuthLevel:   "IAL2",
-		AuthFactors: 2,
-		AuthMethods: []string{"bootstrap", "offline"},
-		SessionID:   fmt.Sprintf("bootstrap-%s-%d", serviceID, now.UnixNano()),
-		SessionExp:  now.Add(ttl).Unix(),
-		AuthEvents:  []string{"bootstrap_mint"},
-	}
-
-	additionalClaims := map[string]interface{}{
-		BootstrapTokenUseField: BootstrapTokenUseClaim,
-		BootstrapTargetField:   targetService,
-		BootstrapScopesField:   append([]string(nil), scopes...),
-		BootstrapOneTimeField:  true,
-	}
-
-	tokenValue, err := s.TokenManager.GenerateTokenWithClaims(claims, additionalClaims)
-	if err != nil {
-		return "", err
-	}
-
-	// Audit log bootstrap token creation (admin action, NIST SP 800-63-4 Section 6.2.1)
-	AuditLogBootstrapCreated(serviceID, targetService, scopes, ttl, 0, "")
-
-	return tokenValue, nil
-}
-
 // MintServiceToken generates a service-to-service token.
 func (s *TokenService) MintServiceToken(ctx context.Context, serviceID, targetService string, scopes []string) (string, error) {
 	if serviceID == "" {
