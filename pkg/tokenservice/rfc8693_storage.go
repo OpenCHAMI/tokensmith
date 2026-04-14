@@ -110,14 +110,51 @@ func (s *BootstrapTokenStore) SavePolicy(policy *BootstrapTokenPolicy) error {
 // GetPolicy retrieves a bootstrap token policy by token hash.
 func (s *BootstrapTokenStore) GetPolicy(tokenHash string) (*BootstrapTokenPolicy, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	policy, ok := s.policies[tokenHash]
-	if !ok {
-		return nil, fmt.Errorf("bootstrap token policy not found")
+	s.mu.RUnlock()
+	if ok {
+		return policy, nil
 	}
 
+	// Fallback: load directly from disk for policies created after store startup.
+	policy, err := s.loadPolicyFromDisk(tokenHash)
+	if err != nil {
+		return nil, err
+	}
+
+	// Promote loaded policy to memory cache for subsequent O(1) lookups.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, exists := s.policies[tokenHash]; exists {
+		return existing, nil
+	}
+	s.policies[tokenHash] = policy
+
 	return policy, nil
+}
+
+// loadPolicyFromDisk reads and validates a single bootstrap policy file by token hash.
+func (s *BootstrapTokenStore) loadPolicyFromDisk(tokenHash string) (*BootstrapTokenPolicy, error) {
+	filePath := filepath.Join(s.storePath, tokenHash+".json")
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("bootstrap token policy not found")
+		}
+		return nil, fmt.Errorf("failed to read bootstrap policy file: %w", err)
+	}
+
+	var policy BootstrapTokenPolicy
+	if err := json.Unmarshal(data, &policy); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal bootstrap policy file: %w", err)
+	}
+
+	if policy.TokenHash != tokenHash {
+		return nil, fmt.Errorf("bootstrap token hash mismatch: expected %s, got %s", tokenHash, policy.TokenHash)
+	}
+
+	return &policy, nil
 }
 
 // UpdatePolicy updates a bootstrap token policy (e.g., mark as consumed).
