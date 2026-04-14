@@ -159,13 +159,120 @@ Standalone quick guide:
 
 If your service only needs internal service-to-service AuthN/AuthZ, you can skip end-user token-exchange details and use this path:
 
-1. Start TokenSmith with a durable bootstrap store (`--rfc8693-bootstrap-store`).
-2. Mint a one-time opaque bootstrap token with `tokensmith bootstrap-token create --bootstrap-store <same-path>`.
-3. Pass the token via `TOKENSMITH_BOOTSTRAP_TOKEN` to the caller service process.
+1. Start TokenSmith with a durable bootstrap store and refresh store.
+2. Exec into the TokenSmith container and mint one bootstrap token per caller service.
+3. Pass each caller service its own `TOKENSMITH_BOOTSTRAP_TOKEN` and `TOKENSMITH_URL`.
 4. Have the caller service redeem the token at `POST /oauth/token` using `pkg/tokenservice` or `example/serviceauth`.
 5. In the target service, install TokenSmith AuthN middleware to validate TokenSmith JWTs and build a verified principal.
 6. Install TokenSmith AuthZ middleware and map routes using either explicit `authz.RouteMapper` or path/method style (`authz.PathMethodMapper` plus Casbin matchers).
 7. Ensure service principals map to the `service` role in policy/grouping.
+
+### Recommended container workflow
+
+#### Start TokenSmith with bootstrap configured
+
+```bash
+podman run -d --name tokensmith \
+   -p 8080:8080 \
+   -e TOKENSMITH_ISSUER="http://tokensmith:8080" \
+   -e TOKENSMITH_PORT="8080" \
+   -e TOKENSMITH_CLUSTER_ID="cluster-1" \
+   -e TOKENSMITH_OPENCHAMI_ID="openchami-1" \
+   -e TOKENSMITH_CONFIG="/etc/tokensmith/config.json" \
+   -e TOKENSMITH_KEY_DIR="/var/lib/tokensmith/keys" \
+   -e TOKENSMITH_RFC8693_BOOTSTRAP_STORE="/var/lib/tokensmith/bootstrap" \
+   -e TOKENSMITH_RFC8693_REFRESH_STORE="/var/lib/tokensmith/refresh" \
+   -v ./config.json:/etc/tokensmith/config.json:ro \
+   -v ./tokensmith-data:/var/lib/tokensmith \
+   <your-tokensmith-image>
+```
+
+This is the critical requirement: TokenSmith must be started with a persistent bootstrap store path, and bootstrap-token creation must use that same path.
+
+#### Mint one token for each caller service
+
+```bash
+BOOT_SERVICE_TOKEN=$(podman exec tokensmith \
+   tokensmith bootstrap-token create \
+      --subject boot-service \
+      --audience smd \
+      --scopes "node:read" \
+      --ttl 10m \
+      --refresh-ttl 24h \
+      --bootstrap-store /var/lib/tokensmith/bootstrap \
+      --output-format json | jq -r '.bootstrap_token')
+
+METADATA_SERVICE_TOKEN=$(podman exec tokensmith \
+   tokensmith bootstrap-token create \
+      --subject metadata-service \
+      --audience smd \
+      --scopes "node:read" \
+      --ttl 10m \
+      --refresh-ttl 24h \
+      --bootstrap-store /var/lib/tokensmith/bootstrap \
+      --output-format json | jq -r '.bootstrap_token')
+```
+
+Do not mint one shared bootstrap token and reuse it across multiple services. Bootstrap tokens are one-time-use startup credentials and should map to one caller identity.
+
+#### Pass the matching token to the matching service
+
+```bash
+podman run -d --name boot-service \
+   -e TOKENSMITH_URL="http://tokensmith:8080" \
+   -e TOKENSMITH_BOOTSTRAP_TOKEN="$BOOT_SERVICE_TOKEN" \
+   <your-boot-service-image>
+
+podman run -d --name metadata-service \
+   -e TOKENSMITH_URL="http://tokensmith:8080" \
+   -e TOKENSMITH_BOOTSTRAP_TOKEN="$METADATA_SERVICE_TOKEN" \
+   <your-metadata-service-image>
+```
+
+Each service should receive only the token minted for that service. The subject, audience, and scopes are enforced server-side from the stored bootstrap policy.
+
+#### What each side should log
+
+Expected TokenSmith success log when a service redeems its bootstrap token:
+
+```text
+INF Bootstrap token successfully exchanged for service token subject=boot-service audience=smd token_hash_prefix=17c3cca6 refresh_family_id=...
+```
+
+Expected TokenSmith log when refresh rotation starts happening:
+
+```text
+INF Refresh token rotated successfully subject=boot-service audience=smd family_id=... usage_count=1
+```
+
+Common TokenSmith failure logs:
+
+```text
+WRN Bootstrap token not found client_ip=... token_hash_prefix=17c3cca6
+WRN Bootstrap token already consumed (replay attempt) client_ip=... token_hash_prefix=17c3cca6
+ERR Refresh token hash mismatch - replay attempt detected family_id=...
+ERR Refresh token family is revoked (replay detected via hash lookup) family_id=...
+```
+
+Expected caller-service logs depend on the service itself. `pkg/tokenservice` returns errors; it does not emit logs on its own. A service that logs the example flow should show output similar to:
+
+```text
+Getting initial service token...
+Got token, expires at: 2026-04-14 22:49:10 +0000 UTC
+Refreshing token...
+Refreshed token, new expiration: 2026-04-14 23:49:10 +0000 UTC
+Calling target service...
+Successfully called target service!
+```
+
+Common caller-service errors when bootstrap wiring is wrong:
+
+```text
+missing bootstrap token: set TOKENSMITH_BOOTSTRAP_TOKEN or WithBootstrapToken
+bootstrap token exchange failed after 5 attempts: failed to get token: status=400, body={"error":"invalid_grant","error_description":"The provided token is invalid or has already been used"}
+failed to get token: status=429, body={"error":"too_many_requests","error_description":"Too many failed token exchange attempts from this address"}
+refresh token expired
+```
 
 Important:
 

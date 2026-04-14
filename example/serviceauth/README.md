@@ -26,13 +26,27 @@ It shows how a caller service can:
 Before running the example:
 
 1. ensure the TokenSmith service is running and reachable
-2. export a bootstrap token:
+2. mint a bootstrap token for this caller service from the same TokenSmith runtime context:
 
 ```bash
-export TOKENSMITH_BOOTSTRAP_TOKEN="<one-time-bootstrap-token>"
+BOOTSTRAP_TOKEN=$(podman exec tokensmith \
+    tokensmith bootstrap-token create \
+        --subject example-service-1 \
+        --audience metadata-service \
+        --scopes "read" \
+        --ttl 10m \
+        --refresh-ttl 24h \
+        --bootstrap-store /var/lib/tokensmith/bootstrap \
+        --output-format json | jq -r '.bootstrap_token')
 ```
 
-3. update the constants in `main.go` if needed:
+3. export that bootstrap token:
+
+```bash
+export TOKENSMITH_BOOTSTRAP_TOKEN="$BOOTSTRAP_TOKEN"
+```
+
+4. update the constants in `main.go` if needed:
 
 ```go
 const (
@@ -42,7 +56,7 @@ const (
 )
 ```
 
-4. update `targetURL` in `main.go` to point to the downstream service you want to call
+5. update `targetURL` in `main.go` to point to the downstream service you want to call
 
 ## Running the example
 
@@ -57,6 +71,34 @@ The example will:
 2. print the resulting access-token expiry
 3. run a refresh check
 4. call the target service with `Authorization: Bearer <token>`
+
+### Expected example logs
+
+Successful run:
+
+```text
+Getting initial service token...
+Got token, expires at: 2026-04-14 22:49:10 +0000 UTC
+
+Waiting for token to be close to expiration...
+Refreshing token...
+Refreshed token, new expiration: 2026-04-14 23:49:10 +0000 UTC
+
+Calling target service...
+Successfully called target service!
+```
+
+Common failure output:
+
+```text
+Failed to get initial token: bootstrap token exchange failed after 5 attempts: failed to get token: status=400, body={"error":"invalid_grant","error_description":"The provided token is invalid or has already been used"}
+```
+
+```text
+Failed to get initial token: missing bootstrap token: set TOKENSMITH_BOOTSTRAP_TOKEN or WithBootstrapToken
+```
+
+If this example succeeds, TokenSmith should log a matching successful bootstrap exchange and later refresh rotation.
 
 ## What the client actually does
 

@@ -118,6 +118,7 @@ This is the recommended command for current RFC 8693 bootstrap exchange flows.
 - If omitted, `bootstrap-token create` uses a temporary local directory, which is usually not shared with the running service.
 - Treat this as a strictly local operation to the TokenSmith runtime context.
 - For Podman Quadlets, run `tokensmith bootstrap-token create` via `podman exec` in the TokenSmith container namespace.
+- Runtime behavior: when `/oauth/token` does not find a bootstrap policy in memory, TokenSmith attempts a one-file disk lookup (`<token-hash>.json`) and caches the result for subsequent requests.
 
 ### Flags
 
@@ -163,6 +164,132 @@ BOOTSTRAP_TOKEN=$(podman exec tokensmith \
     --bootstrap-store /var/lib/tokensmith/bootstrap \
     --output-format json | jq -r '.bootstrap_token')
 ```
+
+### Container-first operational workflow
+
+This is the clearest production pattern when TokenSmith runs in a container and caller services need one bootstrap token each.
+
+#### 1. Start TokenSmith with bootstrap and refresh stores configured
+
+```bash
+podman run -d --name tokensmith \
+  -p 8080:8080 \
+  -e TOKENSMITH_ISSUER="http://tokensmith:8080" \
+  -e TOKENSMITH_PORT="8080" \
+  -e TOKENSMITH_CLUSTER_ID="cluster-1" \
+  -e TOKENSMITH_OPENCHAMI_ID="openchami-1" \
+  -e TOKENSMITH_CONFIG="/etc/tokensmith/config.json" \
+  -e TOKENSMITH_KEY_DIR="/var/lib/tokensmith/keys" \
+  -e TOKENSMITH_RFC8693_BOOTSTRAP_STORE="/var/lib/tokensmith/bootstrap" \
+  -e TOKENSMITH_RFC8693_REFRESH_STORE="/var/lib/tokensmith/refresh" \
+  -v ./config.json:/etc/tokensmith/config.json:ro \
+  -v ./tokensmith-data:/var/lib/tokensmith \
+  <your-tokensmith-image>
+```
+
+The important part is that TokenSmith starts with a durable bootstrap store and refresh store. Those same paths must be used when creating bootstrap tokens.
+
+#### 2. Exec into the TokenSmith container and mint one token per caller service
+
+```bash
+BOOT_SERVICE_TOKEN=$(podman exec tokensmith \
+  tokensmith bootstrap-token create \
+    --subject boot-service \
+    --audience smd \
+    --scopes "node:read" \
+    --ttl 10m \
+    --refresh-ttl 24h \
+    --bootstrap-store /var/lib/tokensmith/bootstrap \
+    --output-format json | jq -r '.bootstrap_token')
+
+METADATA_SERVICE_TOKEN=$(podman exec tokensmith \
+  tokensmith bootstrap-token create \
+    --subject metadata-service \
+    --audience smd \
+    --scopes "node:read" \
+    --ttl 10m \
+    --refresh-ttl 24h \
+    --bootstrap-store /var/lib/tokensmith/bootstrap \
+    --output-format json | jq -r '.bootstrap_token')
+```
+
+Use one distinct bootstrap token per caller service. Do not reuse a single bootstrap token across services.
+
+Recommended mapping:
+
+- `--subject`: the caller service identity
+- `--audience`: the downstream service that caller will access
+- `--scopes`: the scopes TokenSmith should embed in the issued JWT
+
+#### 3. Pass the matching bootstrap token to each caller service
+
+Each caller service needs:
+
+- `TOKENSMITH_URL`: how it reaches TokenSmith
+- `TOKENSMITH_BOOTSTRAP_TOKEN`: the token minted specifically for that caller
+
+Example:
+
+```bash
+podman run -d --name boot-service \
+  -e TOKENSMITH_URL="http://tokensmith:8080" \
+  -e TOKENSMITH_BOOTSTRAP_TOKEN="$BOOT_SERVICE_TOKEN" \
+  <your-boot-service-image>
+
+podman run -d --name metadata-service \
+  -e TOKENSMITH_URL="http://tokensmith:8080" \
+  -e TOKENSMITH_BOOTSTRAP_TOKEN="$METADATA_SERVICE_TOKEN" \
+  <your-metadata-service-image>
+```
+
+If your service uses `pkg/tokenservice`, that bootstrap token is exchanged once at runtime at `POST /oauth/token`. After that, the service uses the returned refresh token family to keep getting fresh JWTs without reusing the bootstrap token.
+
+#### 4. What logs to expect
+
+In TokenSmith, a successful first-time bootstrap exchange produces a log like:
+
+```text
+INF Bootstrap token successfully exchanged for service token subject=boot-service audience=smd token_hash_prefix=17c3cca6 refresh_family_id=...
+```
+
+Later refreshes from that same service produce logs like:
+
+```text
+INF Refresh token rotated successfully subject=boot-service audience=smd family_id=... usage_count=1
+```
+
+Common TokenSmith failure logs:
+
+```text
+WRN Bootstrap token not found client_ip=... token_hash_prefix=17c3cca6
+WRN Bootstrap token already consumed (replay attempt) client_ip=... token_hash_prefix=17c3cca6
+ERR Refresh token hash mismatch - replay attempt detected family_id=...
+ERR Refresh token family is revoked (replay detected via hash lookup) family_id=...
+```
+
+In the caller service, expected logs depend on whether the service logs `pkg/tokenservice` errors itself. The library does not emit logs on its own; it returns errors to the caller.
+
+For the example client in `example/serviceauth`, the normal startup flow looks like:
+
+```text
+Getting initial service token...
+Got token, expires at: 2026-04-14 22:49:10 +0000 UTC
+Refreshing token...
+Refreshed token, new expiration: 2026-04-14 23:49:10 +0000 UTC
+Calling target service...
+Successfully called target service!
+```
+
+If the bootstrap token is missing or wrong, a caller service using `pkg/tokenservice` typically surfaces errors like:
+
+```text
+missing bootstrap token: set TOKENSMITH_BOOTSTRAP_TOKEN or WithBootstrapToken
+bootstrap token exchange failed after 5 attempts: failed to get token: status=400, body={"error":"invalid_grant","error_description":"The provided token is invalid or has already been used"}
+failed to get token: status=429, body={"error":"too_many_requests","error_description":"Too many failed token exchange attempts from this address"}
+refresh token expired
+```
+
+If you are integrating `pkg/tokenservice` into your own service, log the return values from `Initialize()` and `RefreshTokenIfNeeded()`, and expose `client.Stats()` in diagnostics so operators can see the last refresh error and token state.
 
 ### What the token is for
 
