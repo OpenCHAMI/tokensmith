@@ -7,7 +7,7 @@ FROM alpine:3
 # Include curl in the final image.
 RUN set -ex \
     && apk update \
-    && apk add --no-cache curl tini \
+    && apk add --no-cache curl tini jq \
     && rm -rf /var/cache/apk/*  \
     && rm -rf /tmp/*
 RUN mkdir -p /tokensmith/data
