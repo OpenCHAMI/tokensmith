@@ -115,6 +115,68 @@ func TestAuthN_DefaultsRejectWrongAudience(t *testing.T) {
 	}
 }
 
+func TestAuthN_RejectsBootstrapAudienceToken(t *testing.T) {
+	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+
+	claims := validTokenSmithClaims("iss", []string{"tokensmith"})
+	claims["token_use"] = "bootstrap_service"
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	setRFC7638KID(t, tok, &priv.PublicKey)
+	s, _ := tok.SignedString(priv)
+
+	mw, err := Middleware(Options{
+		Issuers:    []string{"iss"},
+		Audiences:  []string{"svc"},
+		StaticKeys: []crypto.PublicKey{&priv.PublicKey},
+		now:        func() time.Time { return time.Unix(150, 0) },
+	})
+	if err != nil {
+		t.Fatalf("middleware init: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	req.Header.Set("Authorization", "Bearer "+s)
+	rr := httptest.NewRecorder()
+
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("next should not be called")
+	}))
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
+func TestAuthN_RejectsOpaqueBootstrapTokenBearer(t *testing.T) {
+	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+
+	mw, err := Middleware(Options{
+		Issuers:    []string{"iss"},
+		Audiences:  []string{"svc"},
+		StaticKeys: []crypto.PublicKey{&priv.PublicKey},
+		now:        func() time.Time { return time.Unix(150, 0) },
+	})
+	if err != nil {
+		t.Fatalf("middleware init: %v", err)
+	}
+
+	// Opaque bootstrap tokens are not JWTs and must be rejected by authn middleware.
+	opaqueBootstrapToken := strings.Repeat("ab", 32)
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	req.Header.Set("Authorization", "Bearer "+opaqueBootstrapToken)
+	rr := httptest.NewRecorder()
+
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("next should not be called")
+	}))
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
 func TestAuthN_ValidTokenPassesAndSetsPrincipal(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 

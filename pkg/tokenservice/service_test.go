@@ -5,7 +5,6 @@
 package tokenservice
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -421,7 +420,7 @@ func TestTokenService_GenerateServiceToken(t *testing.T) {
 			}
 
 			// Generate service token
-			token, err := service.GenerateServiceToken(context.Background(), tt.serviceID, tt.targetService, tt.scopes)
+			token, err := service.MintServiceToken(context.Background(), tt.serviceID, tt.targetService, tt.scopes)
 			if tt.expectError {
 				assert.Error(t, err)
 				return
@@ -461,7 +460,7 @@ func TestTokenService_GenerateServiceToken_HeaderAndPayloadShape(t *testing.T) {
 		OpenCHAMIID: "default-openchami",
 	}
 
-	tokenValue, err := service.GenerateServiceToken(context.Background(), "dev-client", "smd", nil)
+	tokenValue, err := service.MintServiceToken(context.Background(), "dev-client", "smd", nil)
 	require.NoError(t, err)
 
 	parsedToken, _, err := jwt.NewParser().ParseUnverified(tokenValue, jwt.MapClaims{})
@@ -618,55 +617,6 @@ func TestTokenService_ValidateToken(t *testing.T) {
 	}
 }
 
-func TestTokenService_ServiceTokenHandler_BootstrapExchange(t *testing.T) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-
-	keyManager := keys.NewKeyManager()
-	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
-	require.NoError(t, err)
-
-	service, err := NewTokenService(keyManager, Config{
-		Issuer:      "http://tokensmith.test",
-		ClusterID:   "cluster-a",
-		OpenCHAMIID: "openchami-a",
-	})
-	require.NoError(t, err)
-
-	bootstrapToken, err := service.MintBootstrapToken(context.Background(), "svc-a", "svc-b", []string{"read", "write"}, 5*time.Minute)
-	require.NoError(t, err)
-
-	reqBody := ServiceTokenRequest{
-		BootstrapToken: bootstrapToken,
-		TargetService:  "svc-b",
-		Scopes:         []string{"read"},
-	}
-	bodyBytes, err := json.Marshal(reqBody)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(bodyBytes))
-	w := httptest.NewRecorder()
-
-	service.ServiceTokenHandler(w, req)
-	resp := w.Result()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	var tokenResp ServiceTokenResponse
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&tokenResp))
-	require.NotEmpty(t, tokenResp.Token)
-	require.False(t, tokenResp.ExpiresAt.IsZero())
-
-	claims, _, err := service.TokenManager.ParseToken(tokenResp.Token)
-	require.NoError(t, err)
-	assert.Equal(t, "svc-a", claims.Subject)
-	assert.Equal(t, []string{"svc-b"}, []string(claims.Audience))
-	assert.Equal(t, []string{"read"}, claims.Scope)
-
-	parsedToken, _, err := jwt.NewParser().ParseUnverified(tokenResp.Token, jwt.MapClaims{})
-	require.NoError(t, err)
-	assert.Equal(t, service.TokenManager.GetSigningAlgorithm(), parsedToken.Method.Alg())
-}
-
 func TestTokenService_JWKSHandlerPublishesActiveSigningAlgorithm(t *testing.T) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -699,7 +649,10 @@ func TestTokenService_JWKSHandlerPublishesActiveSigningAlgorithm(t *testing.T) {
 	assert.Equal(t, service.TokenManager.GetSigningAlgorithm(), jwks.Keys[0].Algorithm)
 }
 
-func TestTokenService_ServiceTokenHandler_BootstrapTokenReuseDenied(t *testing.T) {
+// TestOAuthTokenHandler_BootstrapExchangeThenRefresh is an end-to-end test of
+// the RFC 8693 /oauth/token endpoint: opaque bootstrap token -> access+refresh,
+// then refresh rotation (NIST SP 800-63-4 Section 6.2.2).
+func TestOAuthTokenHandler_BootstrapExchangeThenRefresh(t *testing.T) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
@@ -707,107 +660,95 @@ func TestTokenService_ServiceTokenHandler_BootstrapTokenReuseDenied(t *testing.T
 	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
 	require.NoError(t, err)
 
-	service, err := NewTokenService(keyManager, Config{
-		Issuer:      "http://tokensmith.test",
-		ClusterID:   "cluster-a",
-		OpenCHAMIID: "openchami-a",
+	storePath := t.TempDir()
+	var service *TokenService
+
+	// --- Phase 1: Admin creates opaque bootstrap token ---
+	bootstrapStore, err := NewBootstrapTokenStore(filepath.Join(storePath, "bootstrap-tokens"))
+	require.NoError(t, err)
+
+	opaqueToken := make([]byte, 32)
+	_, err = rand.Read(opaqueToken)
+	require.NoError(t, err)
+	tokenHex := fmt.Sprintf("%x", opaqueToken)
+	tokenHash := HashBootstrapToken(tokenHex)
+
+	now := time.Now()
+	policy := &BootstrapTokenPolicy{
+		ID:         "test-policy-1",
+		Subject:    "svc-a",
+		Audience:   "svc-b",
+		Scopes:     []string{"read", "write"},
+		TTL:        10 * time.Minute,
+		RefreshTTL: 24 * time.Hour,
+		TokenHash:  tokenHash,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(10 * time.Minute),
+	}
+	require.NoError(t, bootstrapStore.SavePolicy(policy))
+
+	// Reload the service so it picks up the stored policy
+	service, err = NewTokenService(keyManager, Config{
+		Issuer:                    "http://tokensmith.test",
+		ClusterID:                 "cluster-a",
+		OpenCHAMIID:               "openchami-a",
+		RFC8693BootstrapStorePath: filepath.Join(storePath, "bootstrap-tokens"),
+		RFC8693RefreshStorePath:   filepath.Join(storePath, "refresh-tokens"),
 	})
 	require.NoError(t, err)
 
-	bootstrapToken, err := service.MintBootstrapToken(context.Background(), "svc-a", "svc-b", []string{"read"}, 5*time.Minute)
+	// --- Phase 2: Exchange bootstrap token for access+refresh via /oauth/token ---
+	form := fmt.Sprintf("grant_type=%s&subject_token=%s&subject_token_type=%s",
+		GrantTypeTokenExchange, tokenHex, BootstrapTokenTypeRFC8693)
+	bootstrapReq := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form))
+	bootstrapReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	bootstrapW := httptest.NewRecorder()
+
+	service.OAuthTokenHandler(bootstrapW, bootstrapReq)
+	require.Equal(t, http.StatusOK, bootstrapW.Result().StatusCode)
+
+	var bootstrapOAuthResp OAuthTokenResponse
+	require.NoError(t, json.NewDecoder(bootstrapW.Body).Decode(&bootstrapOAuthResp))
+	require.NotEmpty(t, bootstrapOAuthResp.AccessToken)
+	require.NotEmpty(t, bootstrapOAuthResp.RefreshToken)
+	assert.Equal(t, "Bearer", bootstrapOAuthResp.TokenType)
+	assert.Equal(t, 3600, bootstrapOAuthResp.ExpiresIn)
+	assert.Greater(t, bootstrapOAuthResp.RefreshExpiresIn, 0)
+
+	// Verify access token audience is the policy's audience
+	claims, _, err := service.TokenManager.ParseToken(bootstrapOAuthResp.AccessToken)
 	require.NoError(t, err)
+	assert.Equal(t, "svc-a", claims.Subject)
+	assert.Equal(t, []string{"svc-b"}, []string(claims.Audience))
 
-	body, err := json.Marshal(ServiceTokenRequest{BootstrapToken: bootstrapToken})
-	require.NoError(t, err)
+	// --- Phase 3: Replay of bootstrap token must be rejected ---
+	replayReq := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form))
+	replayReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	replayW := httptest.NewRecorder()
+	service.OAuthTokenHandler(replayW, replayReq)
+	assert.Equal(t, http.StatusBadRequest, replayW.Result().StatusCode)
 
-	firstReq := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(body))
-	firstW := httptest.NewRecorder()
-	service.ServiceTokenHandler(firstW, firstReq)
-	require.Equal(t, http.StatusOK, firstW.Result().StatusCode)
+	// --- Phase 4: Use refresh token to rotate and obtain new access token ---
+	refreshForm := fmt.Sprintf("grant_type=%s&refresh_token=%s",
+		GrantTypeRefreshTokenRFC8693, bootstrapOAuthResp.RefreshToken)
+	refreshReq := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(refreshForm))
+	refreshReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	refreshW := httptest.NewRecorder()
 
-	secondReq := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(body))
-	secondW := httptest.NewRecorder()
-	service.ServiceTokenHandler(secondW, secondReq)
-	require.Equal(t, http.StatusUnauthorized, secondW.Result().StatusCode)
-}
+	service.OAuthTokenHandler(refreshW, refreshReq)
+	require.Equal(t, http.StatusOK, refreshW.Result().StatusCode)
 
-func TestTokenService_ServiceTokenHandler_BootstrapTokenReuseDeniedAfterRestart(t *testing.T) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
+	var refreshOAuthResp OAuthTokenResponse
+	require.NoError(t, json.NewDecoder(refreshW.Body).Decode(&refreshOAuthResp))
+	require.NotEmpty(t, refreshOAuthResp.AccessToken)
+	require.NotEmpty(t, refreshOAuthResp.RefreshToken)
+	assert.NotEqual(t, bootstrapOAuthResp.RefreshToken, refreshOAuthResp.RefreshToken, "refresh token must be rotated")
+	assert.Greater(t, refreshOAuthResp.RefreshExpiresIn, 0)
 
-	storePath := filepath.Join(t.TempDir(), "bootstrap-used-jti.json")
-
-	keyManagerA := keys.NewKeyManager()
-	err = keyManagerA.SetKeyPair(privateKey, &privateKey.PublicKey)
-	require.NoError(t, err)
-
-	serviceA, err := NewTokenService(keyManagerA, Config{
-		Issuer:                "http://tokensmith.test",
-		ClusterID:             "cluster-a",
-		OpenCHAMIID:           "openchami-a",
-		BootstrapJTIStorePath: storePath,
-	})
-	require.NoError(t, err)
-
-	bootstrapToken, err := serviceA.MintBootstrapToken(context.Background(), "svc-a", "svc-b", []string{"read"}, 5*time.Minute)
-	require.NoError(t, err)
-
-	body, err := json.Marshal(ServiceTokenRequest{BootstrapToken: bootstrapToken})
-	require.NoError(t, err)
-
-	firstReq := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(body))
-	firstW := httptest.NewRecorder()
-	serviceA.ServiceTokenHandler(firstW, firstReq)
-	require.Equal(t, http.StatusOK, firstW.Result().StatusCode)
-
-	keyManagerB := keys.NewKeyManager()
-	err = keyManagerB.SetKeyPair(privateKey, &privateKey.PublicKey)
-	require.NoError(t, err)
-
-	serviceB, err := NewTokenService(keyManagerB, Config{
-		Issuer:                "http://tokensmith.test",
-		ClusterID:             "cluster-a",
-		OpenCHAMIID:           "openchami-a",
-		BootstrapJTIStorePath: storePath,
-	})
-	require.NoError(t, err)
-
-	secondReq := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(body))
-	secondW := httptest.NewRecorder()
-	serviceB.ServiceTokenHandler(secondW, secondReq)
-	require.Equal(t, http.StatusUnauthorized, secondW.Result().StatusCode)
-}
-
-func TestTokenService_ServiceTokenHandler_TargetMismatchReturnsGenericUnauthorized(t *testing.T) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-
-	keyManager := keys.NewKeyManager()
-	err = keyManager.SetKeyPair(privateKey, &privateKey.PublicKey)
-	require.NoError(t, err)
-
-	service, err := NewTokenService(keyManager, Config{
-		Issuer:      "http://tokensmith.test",
-		ClusterID:   "cluster-a",
-		OpenCHAMIID: "openchami-a",
-	})
-	require.NoError(t, err)
-
-	bootstrapToken, err := service.MintBootstrapToken(context.Background(), "svc-a", "svc-b", []string{"read"}, 5*time.Minute)
-	require.NoError(t, err)
-
-	body, err := json.Marshal(ServiceTokenRequest{
-		BootstrapToken: bootstrapToken,
-		TargetService:  "svc-c",
-		Scopes:         []string{"read"},
-	})
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/service/token", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-
-	service.ServiceTokenHandler(w, req)
-	require.Equal(t, http.StatusUnauthorized, w.Result().StatusCode)
-	assert.Contains(t, w.Body.String(), "Unauthorized")
-	assert.NotContains(t, strings.ToLower(w.Body.String()), "target service")
+	// --- Phase 5: Replaying the old refresh token must be rejected (family revocation) ---
+	replayRefreshReq := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(refreshForm))
+	replayRefreshReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	replayRefreshW := httptest.NewRecorder()
+	service.OAuthTokenHandler(replayRefreshW, replayRefreshReq)
+	assert.Equal(t, http.StatusBadRequest, replayRefreshW.Result().StatusCode)
 }

@@ -31,21 +31,32 @@ var serveCmd = &cobra.Command{
 		if oidcClientSecret == "" {
 			oidcClientSecret = os.Getenv("OIDC_CLIENT_SECRET")
 		}
-		if bootstrapJTIStorePath == "" {
-			bootstrapJTIStorePath = os.Getenv("TOKENSMITH_BOOTSTRAP_JTI_STORE")
+		if rfc8693BootstrapStorePath == "" {
+			rfc8693BootstrapStorePath = os.Getenv("TOKENSMITH_RFC8693_BOOTSTRAP_STORE")
+			if rfc8693BootstrapStorePath == "" {
+				rfc8693BootstrapStorePath = "./data/bootstrap-tokens"
+			}
+		}
+		if rfc8693RefreshStorePath == "" {
+			rfc8693RefreshStorePath = os.Getenv("TOKENSMITH_RFC8693_REFRESH_STORE")
+			if rfc8693RefreshStorePath == "" {
+				rfc8693RefreshStorePath = "./data/refresh-tokens"
+			}
 		}
 
 		// Create token service configuration
 		serviceConfig := tokenservice.Config{
-			Issuer:                issuer,
-			GroupScopes:           fileConfig.GroupScopes, // Keep for backward compatibility
-			ClusterID:             clusterID,
-			OpenCHAMIID:           openCHAMIID,
-			NonEnforcing:          nonEnforcing,
-			BootstrapJTIStorePath: bootstrapJTIStorePath,
-			OIDCIssuerURL:         oidcIssuerURL,
-			OIDCClientID:          oidcClientID,
-			OIDCClientSecret:      oidcClientSecret,
+			Issuer:                    issuer,
+			GroupScopes:               fileConfig.GroupScopes, // Keep for backward compatibility
+			ClusterID:                 clusterID,
+			OpenCHAMIID:               openCHAMIID,
+			NonEnforcing:              nonEnforcing,
+			EnableLocalUserMint:       enableLocalUserMint,
+			OIDCIssuerURL:             oidcIssuerURL,
+			OIDCClientID:              oidcClientID,
+			OIDCClientSecret:          oidcClientSecret,
+			RFC8693BootstrapStorePath: rfc8693BootstrapStorePath,
+			RFC8693RefreshStorePath:   rfc8693RefreshStorePath,
 		}
 
 		// Create key manager
@@ -102,8 +113,12 @@ func init() {
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
-	serveCmd.Flags().StringVar(&bootstrapJTIStorePath, "bootstrap-jti-store", "", "Path to file-backed consumed bootstrap JTI store (or set TOKENSMITH_BOOTSTRAP_JTI_STORE)")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")
+	serveCmd.Flags().BoolVar(&enableLocalUserMint, "enable-local-user-mint", false, "Enable local user-token mint mode (break-glass path)")
+
+	rootCmd.AddCommand(serveCmd)
+	serveCmd.Flags().StringVar(&rfc8693BootstrapStorePath, "rfc8693-bootstrap-store", "", "Path to RFC 8693 bootstrap token store (or set TOKENSMITH_RFC8693_BOOTSTRAP_STORE; default: ./data/bootstrap-tokens)")
+	serveCmd.Flags().StringVar(&rfc8693RefreshStorePath, "rfc8693-refresh-store", "", "Path to RFC 8693 refresh token family store (or set TOKENSMITH_RFC8693_REFRESH_STORE; default: ./data/refresh-tokens)")
 
 	rootCmd.AddCommand(serveCmd)
 }

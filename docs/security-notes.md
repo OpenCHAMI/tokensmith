@@ -117,3 +117,169 @@ Rationale: inconsistent decoding between routers/middlewares can allow attackers
 - Policy/model load failures at startup: **fail-fast** (process should not start).
 - Runtime engine errors in `ENFORCE`: deny with a stable error response.
 - Missing/invalid tokens when authn is required: deny (401) with stable error response.
+
+---
+
+## Local user token security
+
+The `--enable-local-user-mint` flag allows break-glass creation of JWTs without relying on an upstream OIDC provider.
+
+### Trust boundaries
+
+- Local user tokens are signed directly by TokenSmith's private key.
+- They do **not** validate against an external OIDC provider.
+- The identity (subject, scopes) comes entirely from the local operator, not from a federated identity system.
+- Audit trails must record who created each local user token and when.
+
+### Threat model for local user minting
+
+**Assumes:**
+
+- Only trusted local operators can execute `tokensmith user-token create`.
+- The TokenSmith private key is protected (e.g., in a Kubernetes secret, encrypted at rest).
+- Local token minting is an emergency fallback, not the default operational mode.
+
+**Mitigations:**
+
+- Require explicit `--enable-local-user-mint` flag at startup to activate the feature.
+- No local user tokens can be minted if the flag is not set.
+- Services should treat local user tokens differently from OIDC-backed tokens (e.g., in audit logs) by inspecting the `auth_methods` or `auth_events` claim.
+
+### Using local user tokens securely
+
+1. **Enable only when needed** — Start TokenSmith with `--enable-local-user-mint` only during bootstrapping or break-glass scenarios.
+
+2. **Limit scope** — Mint tokens with the minimum required scopes:
+   ```bash
+   tokensmith user-token create \
+     --subject "emergency-operator" \
+     --scopes "admin"  # only what is needed
+   ```
+
+3. **Short lifetimes** — Use `--ttl` to keep tokens valid for the shortest reasonable time:
+   ```bash
+   tokensmith user-token create \
+     --subject "emergency-operator" \
+     --scopes "admin" \
+     --ttl 15m  # short lifetime for emergency access
+   ```
+
+4. **Audit and rotate** — After an emergency:
+   - Review logs for all local tokens created
+   - Rotate the TokenSmith private key if you suspect compromise
+   - Disable `--enable-local-user-mint` in production after bootstrap
+
+5. **Downstream verification** — Service middleware should:
+   - Accept TokenSmith JWTs as valid (signature checking handles both OIDC and local tokens)
+   - Optionally log or alert on local user tokens (check `auth_methods` claim for "local-user" signals)
+
+### What you should NOT do
+
+- ❌ Do not keep `--enable-local-user-mint` enabled in production unless required for your threat model.
+- ❌ Do not mint local user tokens with broad scopes like `"*"` or `"admin"`.
+- ❌ Do not embed local token creation in automation scripts; reserve it for manual break-glass scenarios.
+- ❌ Do not log the token contents themselves; log only the subject and scopes.
+
+---
+
+## Admin endpoints security
+
+TokenSmith exposes local-only admin endpoints for runtime OIDC provider reconfiguration:
+
+- `GET /admin/oidc/config` — inspect active OIDC configuration
+- `POST /admin/oidc/config` — update OIDC provider without restart
+
+### Access control
+
+**Critical:** These endpoints are **loopback-only** (127.0.0.1 or ::1).
+
+- Requests from any other IP address receive **403 Forbidden**.
+- This is enforced at the handler level before processing any request.
+
+### Threat model
+
+**Assumes:**
+
+- The TokenSmith process is running in a trusted container/pod, not exposed to untrusted networks.
+- Local access (e.g., via `exec`, SSH tunnel, or Kubernetes port-forward) is acceptable for trusted operators.
+- Incoming traffic to the service port is filtered to allow only expected clients (e.g., frontend, authorized sidecar).
+
+**Mitigations:**
+
+- Loopback-only gating prevents remote callers from reconfiguring the provider.
+- No authentication mechanism is added to admin endpoints (loopback IP is the trust boundary).
+- OIDC secrets are never accepted by admin endpoints; they remain env-only.
+
+### Using admin endpoints securely
+
+1. **Restrict port access** — Only allow loopback or trusted local processes to reach TokenSmith's HTTP port (default 8080):
+   ```yaml
+   # Example: NetworkPolicy in Kubernetes
+   kind: NetworkPolicy
+   metadata:
+     name: tokensmith
+   spec:
+     ingress:
+       - from:
+           - namespaceSelector:
+               matchLabels:
+                 name: backend-services
+         ports:
+           - protocol: TCP
+             port: 8080
+   ```
+
+2. **Use tunneling for remote access** — If TokenSmith is on a remote machine, tunnel through `localhost`:
+   ```bash
+   ssh -L 8080:localhost:8080 user@remote-tokensmith
+   # Then locally:
+   tokensmith oidc configure \
+     --issuer-url "https://..." \
+     --client-id "..." \
+     --replace-existing
+   ```
+
+3. **Audit admin calls** — Log all `/admin/oidc/config` requests (successful and rejected):
+   ```bash
+   # Monitor TokenSmith logs for admin endpoint activity
+   journalctl -u tokensmith | grep "admin/oidc"
+   ```
+
+4. **Validate OIDC configuration** — Always use `--dry-run` before applying:
+   ```bash
+   tokensmith oidc configure \
+     --issuer-url "https://new-provider.example.com" \
+     --client-id "new-client" \
+     --dry-run  # validates without applying
+   ```
+
+5. **Provide secret via environment** — The running TokenSmith process must already have `OIDC_CLIENT_SECRET` set:
+   ```bash
+   # Before starting TokenSmith
+   export OIDC_CLIENT_SECRET="<secret>"
+   tokensmith serve --oidc-issuer "..." --oidc-client-id "..."
+
+   # Then reconfigure (secret is already known):
+   tokensmith oidc configure \
+     --issuer-url "https://new-provider.example.com" \
+     --client-id "new-client" \
+     --replace-existing
+   ```
+
+### What you should NOT do
+
+- ❌ Do not expose the admin endpoints to the public internet or untrusted networks.
+- ❌ Do not attempt to bypass loopback checking by spoofing X-Forwarded-For headers (TokenSmith does not trust proxy headers for this check).
+- ❌ Do not configure OIDC secrets via admin endpoints; use environment variables instead.
+- ❌ Do not expose TokenSmith's HTTP port without network segmentation.
+
+### Combined with other controls
+
+Admin endpoints are **local-only by design** but benefit from defense-in-depth:
+
+- Container/process isolation (don't run untrusted code in the same pod)
+- NetworkPolicy ingress rules that permit only expected clients
+- RBAC on the `exec` or SSH privilege needed to access the container
+- Audit logging of admin endpoint calls
+
+See: [Getting started: Break-glass local user tokens](./getting-started.md#14-break-glass-local-user-tokens-emergency-access) for operational workflows that safely use admin endpoints.

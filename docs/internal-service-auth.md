@@ -6,94 +6,295 @@ SPDX-License-Identifier: MIT
 
 # Internal service-to-service AuthN/AuthZ
 
-This guide is for services that only need **internal service-to-service** authentication and authorization.
+This guide is for services that only need internal service-to-service authentication and authorization.
 
-Use this when:
+Use this path when:
 
-- clients are other trusted services (not end users)
-- caller services obtain service JWTs from TokenSmith
-- target services enforce TokenSmith JWT AuthN + Casbin AuthZ via TokenSmith middleware
+- callers are trusted services, not end users
+- caller services obtain TokenSmith-issued service JWTs at startup
+- target services validate TokenSmith JWTs and enforce Casbin policy with TokenSmith middleware
 
-For normative wire behavior and contract details, see:
+For normative behavior, see:
 
 - `docs/authz-spec.md`
 - `docs/authz_contract.md`
+- `docs/http-endpoints.md`
 
-## 1) Caller service: obtain service tokens from bootstrap token
+## 1) Configure target services to verify TokenSmith JWTs
 
-Use `pkg/tokenservice` in the caller service to redeem startup bootstrap tokens for service JWTs.
+Target services validating TokenSmith-issued JWTs should configure verifiers with the direct JWKS URL:
 
-Canonical exchange endpoint:
+- `GET /.well-known/jwks.json`
 
-- `POST /service/token`
+Example verifier configuration value:
 
-Canonical request body:
-
-```json
-{
-  "bootstrap_token": "<jwt>",
-  "target_service": "metadata-service",
-  "scopes": ["read"]
-}
+```text
+https://tokensmith.example/.well-known/jwks.json
 ```
 
-Notes:
+Important:
 
-- `target_service` and `scopes` are optional in the request body.
-- If omitted, TokenSmith uses the allowed target/scopes embedded in the bootstrap token.
+- TokenSmith currently exposes a direct JWKS endpoint
+- TokenSmith does not currently publish its own OIDC discovery document at `/.well-known/openid-configuration`
+- configure verifiers with the JWKS URL directly
+- the `kid` in TokenSmith-issued JWTs is expected to match a key in the published set
 
-Canonical response body:
+## 2) Caller service flow: bootstrap token to service token
 
-```json
-{
-  "token": "<service-jwt>",
-  "expires_at": "2026-03-25T18:47:12Z"
-}
+The service-to-service token flow uses the RFC 8693 token endpoint:
+
+- canonical endpoint: `POST /oauth/token`
+- compatibility alias: `POST /token`
+
+For new integrations, prefer `POST /oauth/token`.
+
+### Bootstrap token request
+
+Request format:
+
+- method: `POST`
+- content type: `application/x-www-form-urlencoded`
+
+Required form fields:
+
+```text
+grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+subject_token=<bootstrap-token>
+subject_token_type=urn:openchami:params:oauth:token-type:bootstrap-token
 ```
 
-### Bootstrap mint and distribution
-
-1. Mint a short-lived one-time bootstrap token before service startup:
+Example:
 
 ```bash
-BOOTSTRAP_TOKEN=$(tokensmith mint-bootstrap-token \
-  --key-file ./keys/private.pem \
-  --service-id example-service-1 \
-  --target-service metadata-service \
-  --scopes read \
-  --ttl 5m)
+curl -s https://tokensmith.example/oauth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+  --data-urlencode 'subject_token=<bootstrap-token>' \
+  --data-urlencode 'subject_token_type=urn:openchami:params:oauth:token-type:bootstrap-token'
 ```
 
-1. Start the caller service with:
+Successful response shape:
+
+```json
+{
+  "access_token": "<service-jwt>",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "<opaque-refresh-token>",
+  "refresh_expires_in": 86400,
+  "scope": "read",
+  "issued_token_type": "urn:ietf:params:oauth:token-type:access-token"
+}
+```
+
+### Refresh token request
+
+```bash
+curl -s https://tokensmith.example/oauth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=refresh_token' \
+  --data-urlencode 'refresh_token=<opaque-refresh-token>'
+```
+
+### Error behavior you should expect
+
+Observed error responses are OAuth-style JSON:
+
+```json
+{
+  "error": "invalid_grant",
+  "error_description": "The provided token is invalid or has already been used"
+}
+```
+
+Observed status codes for this flow include:
+
+- `400 Bad Request`
+- `405 Method Not Allowed`
+- `429 Too Many Requests`
+- `500 Internal Server Error`
+
+Observed error codes include:
+
+- `invalid_request`
+- `unsupported_grant_type`
+- `invalid_grant`
+- `too_many_requests`
+- `server_error`
+
+### Security-relevant behavior
+
+- bootstrap tokens are one-time use
+- reusing a consumed bootstrap token fails with `invalid_grant`
+- failed bootstrap exchanges are throttled per client IP
+- refresh tokens are rotated on every successful use
+- replaying an old rotated refresh token revokes the entire token family
+
+## 3) Mint and distribute bootstrap tokens
+
+Preferred flow for RFC 8693: create an opaque bootstrap token with server-side policy.
+
+Important:
+
+- Use the same bootstrap store path for both TokenSmith and bootstrap token creation.
+- If paths differ, TokenSmith cannot find the token policy and exchange will fail with `invalid_grant`.
+- Bootstrap token creation is a **strictly local operation** to the TokenSmith runtime context.
+- In practice, run `tokensmith bootstrap-token create` on the same host/container namespace where TokenSmith can read the same store path.
+
+### Podman Quadlet workflow (recommended for OpenCHAMI)
+
+If TokenSmith is deployed with Podman Quadlets, mint bootstrap tokens from the same host using `podman exec` so store-path coupling is guaranteed.
+
+Example (conceptual):
+
+```bash
+# TokenSmith quadlet mounts /var/lib/tokensmith/bootstrap into container
+# and serve uses --rfc8693-bootstrap-store /var/lib/tokensmith/bootstrap
+
+BOOTSTRAP_TOKEN=$(podman exec tokensmith \
+  tokensmith bootstrap-token create \
+    --subject example-service-1 \
+    --audience metadata-service \
+    --scopes "read" \
+    --ttl 10m \
+    --refresh-ttl 24h \
+    --bootstrap-store /var/lib/tokensmith/bootstrap \
+    --output-format json | jq -r '.bootstrap_token')
+```
+
+Why this matters:
+
+- `bootstrap-token create` persists server-side policy files.
+- `/oauth/token` exchange succeeds only when TokenSmith can read those policy files.
+- Running minting on a different machine without shared storage will produce `invalid_grant`.
+
+Start TokenSmith with durable stores:
+
+```bash
+tokensmith serve \
+  --config ./config.json \
+  --key-dir ./keys \
+  --rfc8693-bootstrap-store ./data/bootstrap-tokens \
+  --rfc8693-refresh-store ./data/refresh-tokens
+```
+
+Then mint a short-lived opaque bootstrap token against that same store path:
+
+```bash
+BOOTSTRAP_TOKEN=$(tokensmith bootstrap-token create \
+  --subject example-service-1 \
+  --audience metadata-service \
+  --scopes "read" \
+  --ttl 10m \
+  --refresh-ttl 24h \
+  --bootstrap-store ./data/bootstrap-tokens \
+  --output-format json | jq -r '.bootstrap_token')
+```
+
+Start the caller service with:
 
 ```bash
 export TOKENSMITH_BOOTSTRAP_TOKEN="$BOOTSTRAP_TOKEN"
 ```
 
-1. Caller redeems this token once at `POST /service/token` and receives a regular service JWT for S2S calls.
+### Verify immediately (first success checkpoint)
 
-1. TokenSmith enforces one-time use using bootstrap-token `jti` tracking.
-1. For restart-safe replay protection, start TokenSmith with `--bootstrap-jti-store /path/to/bootstrap-jti.json` (or `TOKENSMITH_BOOTSTRAP_JTI_STORE`).
-1. If a caller needs a new service JWT after bootstrap consumption, provision a new bootstrap token and update `TOKENSMITH_BOOTSTRAP_TOKEN` before requesting again.
+After minting, validate the token exchange before wiring callers:
 
-## 2) Target service: validate JWTs and enforce policy
+```bash
+curl -s http://localhost:8080/oauth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+  --data-urlencode "subject_token=$BOOTSTRAP_TOKEN" \
+  --data-urlencode 'subject_token_type=urn:openchami:params:oauth:token-type:bootstrap-token' | jq .
+```
+
+Expected result:
+
+- `access_token` and `refresh_token` present
+- no `invalid_grant` error
+
+Defaults when unset:
+
+- bootstrap store: `./data/bootstrap-tokens`
+- refresh store: `./data/refresh-tokens`
+
+## 4) Use the shared client (`pkg/tokenservice/client.go`)
+
+`ServiceClient` is the canonical caller-side client for bootstrap exchange, refresh rotation, and attaching bearer tokens to downstream requests.
+
+Recommended caller configuration:
+
+- `TOKENSMITH_URL`: base URL of the TokenSmith service
+- `TOKENSMITH_BOOTSTRAP_TOKEN`: one-time bootstrap token
+- `TOKENSMITH_TARGET_SERVICE`: consumer-side config convention for intended audience
+
+Important implementation note:
+
+- current server-side issuance is determined by the bootstrap-token policy and refresh-token family
+- `pkg/tokenservice.ServiceClient` sends RFC 8693 bootstrap and refresh form fields only; `WithTargetService` is client-local metadata (not sent to the server) used for validation and audit logging
+
+Example wiring:
+
+```go
+client := tokenservice.NewServiceClientWithOptions(
+  os.Getenv("TOKENSMITH_URL"),
+  "boot-service",
+  "boot-service-id",
+  "instance-1",
+  "cluster-1",
+  tokenservice.WithBootstrapToken(os.Getenv("TOKENSMITH_BOOTSTRAP_TOKEN")),
+  tokenservice.WithTargetService("metadata-service"),
+  tokenservice.WithRefreshBefore(120*time.Second),
+)
+
+if err := client.Initialize(ctx); err != nil {
+  return err
+}
+
+go client.StartAutoRefresh(ctx)
+```
+
+`Initialize` performs a blocking startup exchange with bounded retry and exponential backoff before failing closed.
+
+Current defaults:
+
+- max attempts: `5`
+- initial backoff: `1s`
+- max backoff: `15s`
+- refresh threshold: `5m`
+- auto-refresh check interval: `1m`
+
+Callers can override these with:
+
+- `WithBootstrapMaxAttempts`
+- `WithBootstrapInitialBackoff`
+- `WithBootstrapMaxBackoff`
+- `WithRefreshBefore`
+- `WithAutoRefreshInterval`
+
+Expose `client.Stats()` in logs or diagnostics to understand refresh success, failure, and current token state.
+
+## 5) Target service middleware order
 
 Install middleware in this order:
 
-1. TokenSmith AuthN middleware (TokenSmith JWT validation and principal extraction)
-1. TokenSmith AuthZ middleware (Casbin decision)
+1. request ID / access logging middleware
+2. TokenSmith AuthN middleware
+3. TokenSmith AuthZ middleware
+4. application handler
 
-TokenSmith AuthN writes principal into the context expected by TokenSmith AuthZ,
-so no service-specific bridge middleware is required between these two layers.
+TokenSmith AuthN writes principal into both authn and authz context helpers, so no service-specific bridge middleware is required between them.
 
 Reference wiring:
 
 - `examples/minisvc/main.go`
 - `examples/minisvc/mapper.go`
+- `docs/context-guide.md`
 
-## 3) Policy and role mapping
+## 6) Policy and role mapping
 
-Ensure service principals map to role `service` in policy/grouping. The baseline role model includes `service` for service-to-service calls.
+Ensure service principals resolve to role `service` in policy/grouping.
 
 Reference files:
 
@@ -106,9 +307,9 @@ Normative requirements:
 - `docs/authz_contract.md#service-principal-requirements`
 - `docs/authz_contract.md#rbac-role-model-minimum-required-roles`
 
-## 4) Rollout mode
+## 7) Rollout mode
 
-Roll out per service using:
+Recommended rollout sequence per service:
 
 1. `off`
 2. `shadow`
@@ -118,11 +319,13 @@ Operational guidance:
 
 - `docs/authz_operations.md`
 
-## 5) Recommended integration checklist
+## 8) Integration checklist
 
-- Caller receives `TOKENSMITH_BOOTSTRAP_TOKEN` at startup and redeems once via `pkg/tokenservice`
-- Target installs AuthN before AuthZ
-- Routes are mapped via `authz.RouteMapper` or path/method mapping
-- Service principals resolve to role `service`
-- Service runs through off → shadow → enforce rollout
-- Operators track `policy_version` in logs/deny responses
+- caller receives `TOKENSMITH_BOOTSTRAP_TOKEN` at startup
+- caller exchanges bootstrap token once via `pkg/tokenservice` or `POST /oauth/token`
+- target service validates JWTs with the direct JWKS URL
+- target installs AuthN before AuthZ
+- routes are mapped explicitly or by path/method strategy
+- service principals resolve to role `service`
+- rollout proceeds through off → shadow → enforce
+- operators track `policy_version` in logs and deny responses
