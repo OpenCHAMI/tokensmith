@@ -10,5 +10,6 @@ exec /usr/local/bin/tokensmith serve \
   --openchami-id="$TOKENSMITH_OPENCHAMI_ID" \
   --config="$TOKENSMITH_CONFIG" \
   --key-dir="$TOKENSMITH_KEY_DIR" \
-  --rfc8693-bootstrap-store="$TOKENSMITH_RFC8693_BOOTSTRAP_STORE"\
-  --rfc8693-refresh-store="$TOKENSMITH_RFC8693_REFRESH_STORE"
+  --rfc8693-bootstrap-store="$TOKENSMITH_RFC8693_BOOTSTRAP_STORE" \
+  --rfc8693-refresh-store="$TOKENSMITH_RFC8693_REFRESH_STORE" \
+  "$@"
