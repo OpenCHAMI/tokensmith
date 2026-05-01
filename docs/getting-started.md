@@ -80,8 +80,9 @@ Current behavior:
 Operational guidance:
 
 - treat `/.well-known/jwks.json` as the canonical verification endpoint for TokenSmith-issued JWTs
-- TokenSmith currently does not publish its own OIDC discovery document at `/.well-known/openid-configuration`
-- configure JWT verifiers with the direct JWKS URL
+- TokenSmith publishes discovery metadata at `/.well-known/oauth-authorization-server` and `/.well-known/openid-configuration`
+- TokenSmith is non-interactive and does not expose an authorization/login/consent endpoint
+- configure JWT verifiers with `jwks_uri` from discovery metadata (or use the direct JWKS URL)
 - cache keys according to verifier policy and plan for outage/rotation behavior
 
 Example:

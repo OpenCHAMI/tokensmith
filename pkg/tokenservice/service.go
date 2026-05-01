@@ -40,6 +40,12 @@ type Config struct {
 	OIDCIssuerURL    string
 	OIDCClientID     string
 	OIDCClientSecret string
+
+	// OAuth management endpoint authentication configuration.
+	// When enabled, /oauth/introspect and /oauth/revoke require HTTP Basic auth.
+	OAuthManagementAuthEnabled  bool
+	OAuthManagementClientID     string
+	OAuthManagementClientSecret string
 }
 
 // OIDCProviderConfigUpdate captures mutable single-provider OIDC settings.
@@ -94,6 +100,15 @@ type TokenService struct {
 
 // NewTokenService creates a new TokenService instance
 func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService, error) {
+	if config.OAuthManagementAuthEnabled {
+		if strings.TrimSpace(config.OAuthManagementClientID) == "" {
+			return nil, fmt.Errorf("oauth management auth is enabled but oauth management client id is empty")
+		}
+		if strings.TrimSpace(config.OAuthManagementClientSecret) == "" {
+			return nil, fmt.Errorf("oauth management auth is enabled but oauth management client secret is empty")
+		}
+	}
+
 	// Initialize the token manager
 	tokenManager := token.NewTokenManager(
 		keyManager,

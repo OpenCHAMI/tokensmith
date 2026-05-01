@@ -31,6 +31,12 @@ var serveCmd = &cobra.Command{
 		if oidcClientSecret == "" {
 			oidcClientSecret = os.Getenv("OIDC_CLIENT_SECRET")
 		}
+		if oauthManagementClientID == "" {
+			oauthManagementClientID = os.Getenv("TOKENSMITH_OAUTH_MANAGEMENT_CLIENT_ID")
+		}
+		if oauthManagementClientSecret == "" {
+			oauthManagementClientSecret = os.Getenv("TOKENSMITH_OAUTH_MANAGEMENT_CLIENT_SECRET")
+		}
 		if rfc8693BootstrapStorePath == "" {
 			rfc8693BootstrapStorePath = os.Getenv("TOKENSMITH_RFC8693_BOOTSTRAP_STORE")
 			if rfc8693BootstrapStorePath == "" {
@@ -46,17 +52,20 @@ var serveCmd = &cobra.Command{
 
 		// Create token service configuration
 		serviceConfig := tokenservice.Config{
-			Issuer:                    issuer,
-			GroupScopes:               fileConfig.GroupScopes, // Keep for backward compatibility
-			ClusterID:                 clusterID,
-			OpenCHAMIID:               openCHAMIID,
-			NonEnforcing:              nonEnforcing,
-			EnableLocalUserMint:       enableLocalUserMint,
-			OIDCIssuerURL:             oidcIssuerURL,
-			OIDCClientID:              oidcClientID,
-			OIDCClientSecret:          oidcClientSecret,
-			RFC8693BootstrapStorePath: rfc8693BootstrapStorePath,
-			RFC8693RefreshStorePath:   rfc8693RefreshStorePath,
+			Issuer:                      issuer,
+			GroupScopes:                 fileConfig.GroupScopes, // Keep for backward compatibility
+			ClusterID:                   clusterID,
+			OpenCHAMIID:                 openCHAMIID,
+			NonEnforcing:                nonEnforcing,
+			EnableLocalUserMint:         enableLocalUserMint,
+			OIDCIssuerURL:               oidcIssuerURL,
+			OIDCClientID:                oidcClientID,
+			OIDCClientSecret:            oidcClientSecret,
+			OAuthManagementAuthEnabled:  oauthManagementAuthEnabled,
+			OAuthManagementClientID:     oauthManagementClientID,
+			OAuthManagementClientSecret: oauthManagementClientSecret,
+			RFC8693BootstrapStorePath:   rfc8693BootstrapStorePath,
+			RFC8693RefreshStorePath:     rfc8693RefreshStorePath,
 		}
 
 		// Create key manager
@@ -111,6 +120,9 @@ func init() {
 	serveCmd.Flags().StringVar(&oidcIssuerURL, "oidc-issuer", "http://hydra:4444", "OIDC provider issuer URL")
 	serveCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OIDC client ID (or set OIDC_CLIENT_ID env var)")
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
+	serveCmd.Flags().BoolVar(&oauthManagementAuthEnabled, "oauth-management-auth-enabled", false, "Require HTTP Basic client auth for /oauth/introspect and /oauth/revoke")
+	serveCmd.Flags().StringVar(&oauthManagementClientID, "oauth-management-client-id", "", "Client ID for OAuth management endpoint auth (or set TOKENSMITH_OAUTH_MANAGEMENT_CLIENT_ID)")
+	serveCmd.Flags().StringVar(&oauthManagementClientSecret, "oauth-management-client-secret", "", "Client secret for OAuth management endpoint auth (or set TOKENSMITH_OAUTH_MANAGEMENT_CLIENT_SECRET)")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")

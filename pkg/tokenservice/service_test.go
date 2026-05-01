@@ -649,6 +649,259 @@ func TestTokenService_JWKSHandlerPublishesActiveSigningAlgorithm(t *testing.T) {
 	assert.Equal(t, service.TokenManager.GetSigningAlgorithm(), jwks.Keys[0].Algorithm)
 }
 
+func TestTokenService_OAuthAuthorizationServerMetadataHandler(t *testing.T) {
+	service := newTestTokenService(t, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+		GroupScopes: map[string][]string{
+			"admin": {"write", "read", "admin"},
+			"user":  {"read"},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	w := httptest.NewRecorder()
+
+	service.OAuthAuthorizationServerMetadataHandler(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var metadata map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&metadata))
+
+	assert.Equal(t, "http://tokensmith.test", metadata["issuer"])
+	assert.Equal(t, "http://tokensmith.test/.well-known/jwks.json", metadata["jwks_uri"])
+	assert.Equal(t, "http://tokensmith.test/oauth/token", metadata["token_endpoint"])
+	assert.Equal(t, "http://tokensmith.test/oauth/introspect", metadata["introspection_endpoint"])
+	assert.Equal(t, "http://tokensmith.test/oauth/revoke", metadata["revocation_endpoint"])
+
+	grantTypes, ok := metadata["grant_types_supported"].([]interface{})
+	require.True(t, ok)
+	assert.ElementsMatch(t, []interface{}{GrantTypeTokenExchange, GrantTypeRefreshTokenRFC8693}, grantTypes)
+
+	endpointAuthMethods, ok := metadata["token_endpoint_auth_methods_supported"].([]interface{})
+	require.True(t, ok)
+	assert.ElementsMatch(t, []interface{}{"none"}, endpointAuthMethods)
+
+	introspectionAuthMethods, ok := metadata["introspection_endpoint_auth_methods_supported"].([]interface{})
+	require.True(t, ok)
+	assert.ElementsMatch(t, []interface{}{"none"}, introspectionAuthMethods)
+
+	revocationAuthMethods, ok := metadata["revocation_endpoint_auth_methods_supported"].([]interface{})
+	require.True(t, ok)
+	assert.ElementsMatch(t, []interface{}{"none"}, revocationAuthMethods)
+
+	scopes, ok := metadata["scopes_supported"].([]interface{})
+	require.True(t, ok)
+	assert.Equal(t, []interface{}{"admin", "read", "write"}, scopes)
+}
+
+func TestTokenService_OpenIDConfigurationHandler_NonInteractiveProfile(t *testing.T) {
+	service := newTestTokenService(t, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+		GroupScopes: map[string][]string{
+			"operator": {"write", "read"},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil)
+	w := httptest.NewRecorder()
+
+	service.OpenIDConfigurationHandler(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var metadata map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&metadata))
+
+	assert.Equal(t, "http://tokensmith.test", metadata["issuer"])
+	assert.Equal(t, "http://tokensmith.test/.well-known/jwks.json", metadata["jwks_uri"])
+	assert.Equal(t, "http://tokensmith.test/oauth/token", metadata["token_endpoint"])
+	assert.Equal(t, "http://tokensmith.test/oauth/introspect", metadata["introspection_endpoint"])
+	assert.Equal(t, "http://tokensmith.test/oauth/revoke", metadata["revocation_endpoint"])
+	assert.Equal(t, true, metadata["openchami_non_interactive"])
+
+	_, hasAuthorizationEndpoint := metadata["authorization_endpoint"]
+	assert.False(t, hasAuthorizationEndpoint)
+
+	idTokenAlgs, ok := metadata["id_token_signing_alg_values_supported"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, idTokenAlgs, 1)
+	assert.Equal(t, service.TokenManager.GetSigningAlgorithm(), idTokenAlgs[0])
+
+	subjectTypes, ok := metadata["subject_types_supported"].([]interface{})
+	require.True(t, ok)
+	assert.ElementsMatch(t, []interface{}{"public"}, subjectTypes)
+}
+
+func TestOAuthIntrospectionHandler_AccessTokenActive(t *testing.T) {
+	service := newTestTokenService(t, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+	})
+
+	accessToken, err := service.GenerateServiceToken("svc-a", "svc-b", []string{"read", "write"}, time.Hour)
+	require.NoError(t, err)
+
+	form := "token=" + accessToken + "&token_type_hint=access_token"
+	req := httptest.NewRequest(http.MethodPost, "/oauth/introspect", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	service.OAuthIntrospectionHandler(w, req)
+	require.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+	var resp map[string]interface{}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, true, resp["active"])
+	assert.Equal(t, "svc-a", resp["sub"])
+	assert.Equal(t, "svc-b", resp["aud"])
+	assert.Equal(t, "read write", resp["scope"])
+	assert.Equal(t, "Bearer", resp["token_type"])
+}
+
+func TestOAuthIntrospectionHandler_RefreshTokenActiveAndRevoked(t *testing.T) {
+	service := newTestTokenService(t, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+	})
+
+	refreshToken, familyID, err := service.GenerateRefreshToken("svc-a", "svc-b", []string{"read"}, 2*time.Hour)
+	require.NoError(t, err)
+	assert.NotEmpty(t, familyID)
+
+	form := "token=" + refreshToken + "&token_type_hint=refresh_token"
+	req := httptest.NewRequest(http.MethodPost, "/oauth/introspect", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	service.OAuthIntrospectionHandler(w, req)
+	require.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+	var activeResp map[string]interface{}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&activeResp))
+	assert.Equal(t, true, activeResp["active"])
+	assert.Equal(t, "refresh_token", activeResp["token_type"])
+
+	revokeReq := httptest.NewRequest(http.MethodPost, "/oauth/revoke", strings.NewReader(form))
+	revokeReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	revokeW := httptest.NewRecorder()
+	service.OAuthRevocationHandler(revokeW, revokeReq)
+	require.Equal(t, http.StatusOK, revokeW.Result().StatusCode)
+
+	w2 := httptest.NewRecorder()
+	service.OAuthIntrospectionHandler(w2, req)
+	require.Equal(t, http.StatusOK, w2.Result().StatusCode)
+
+	var inactiveResp map[string]interface{}
+	require.NoError(t, json.NewDecoder(w2.Body).Decode(&inactiveResp))
+	assert.Equal(t, false, inactiveResp["active"])
+}
+
+func TestOAuthRevocationHandler_AccessTokenUnsupported(t *testing.T) {
+	service := newTestTokenService(t, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+	})
+
+	accessToken, err := service.GenerateServiceToken("svc-a", "svc-b", []string{"read"}, time.Hour)
+	require.NoError(t, err)
+
+	form := "token=" + accessToken + "&token_type_hint=access_token"
+	req := httptest.NewRequest(http.MethodPost, "/oauth/revoke", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	service.OAuthRevocationHandler(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+
+	var errResp OAuthErrorResponse
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&errResp))
+	assert.Equal(t, "unsupported_token_type", errResp.Error)
+}
+
+func TestOAuthRevocationHandler_UnknownRefreshTokenIsIdempotent(t *testing.T) {
+	service := newTestTokenService(t, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-a",
+		OpenCHAMIID: "openchami-a",
+	})
+
+	form := "token=does-not-exist&token_type_hint=refresh_token"
+	req := httptest.NewRequest(http.MethodPost, "/oauth/revoke", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	service.OAuthRevocationHandler(w, req)
+	require.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+func TestOAuthManagementMetadata_AuthMethodsWithClientSecretBasic(t *testing.T) {
+	service := newTestTokenService(t, Config{
+		Issuer:                      "http://tokensmith.test",
+		ClusterID:                   "cluster-a",
+		OpenCHAMIID:                 "openchami-a",
+		OAuthManagementAuthEnabled:  true,
+		OAuthManagementClientID:     "mgmt-client",
+		OAuthManagementClientSecret: "mgmt-secret",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	w := httptest.NewRecorder()
+
+	service.OAuthAuthorizationServerMetadataHandler(w, req)
+	require.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+	var metadata map[string]interface{}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&metadata))
+
+	introspectionAuthMethods, ok := metadata["introspection_endpoint_auth_methods_supported"].([]interface{})
+	require.True(t, ok)
+	assert.ElementsMatch(t, []interface{}{"client_secret_basic"}, introspectionAuthMethods)
+
+	revocationAuthMethods, ok := metadata["revocation_endpoint_auth_methods_supported"].([]interface{})
+	require.True(t, ok)
+	assert.ElementsMatch(t, []interface{}{"client_secret_basic"}, revocationAuthMethods)
+}
+
+func TestOAuthManagementClientAuthMiddleware_EnforcesBasicAuth(t *testing.T) {
+	service := newTestTokenService(t, Config{
+		Issuer:                      "http://tokensmith.test",
+		ClusterID:                   "cluster-a",
+		OpenCHAMIID:                 "openchami-a",
+		OAuthManagementAuthEnabled:  true,
+		OAuthManagementClientID:     "mgmt-client",
+		OAuthManagementClientSecret: "mgmt-secret",
+	})
+
+	handler := service.withOAuthManagementClientAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	noAuthReq := httptest.NewRequest(http.MethodPost, "/oauth/introspect", nil)
+	noAuthW := httptest.NewRecorder()
+	handler.ServeHTTP(noAuthW, noAuthReq)
+	require.Equal(t, http.StatusUnauthorized, noAuthW.Result().StatusCode)
+
+	badAuthReq := httptest.NewRequest(http.MethodPost, "/oauth/introspect", nil)
+	badAuthReq.SetBasicAuth("mgmt-client", "wrong-secret")
+	badAuthW := httptest.NewRecorder()
+	handler.ServeHTTP(badAuthW, badAuthReq)
+	require.Equal(t, http.StatusUnauthorized, badAuthW.Result().StatusCode)
+
+	okReq := httptest.NewRequest(http.MethodPost, "/oauth/introspect", nil)
+	okReq.SetBasicAuth("mgmt-client", "mgmt-secret")
+	okW := httptest.NewRecorder()
+	handler.ServeHTTP(okW, okReq)
+	require.Equal(t, http.StatusOK, okW.Result().StatusCode)
+}
+
 // TestOAuthTokenHandler_BootstrapExchangeThenRefresh is an end-to-end test of
 // the RFC 8693 /oauth/token endpoint: opaque bootstrap token -> access+refresh,
 // then refresh rotation (NIST SP 800-63-4 Section 6.2.2).

@@ -50,8 +50,36 @@ curl -s http://localhost:8080/.well-known/jwks.json | jq
 Important:
 
 - TokenSmith currently exposes a direct JWKS endpoint
-- TokenSmith does not currently publish its own OIDC discovery document at `/.well-known/openid-configuration`
-- Configure verifiers with the direct JWKS URL unless you are using a separate discovery layer
+- TokenSmith also publishes discovery metadata at `/.well-known/oauth-authorization-server` and `/.well-known/openid-configuration`
+- TokenSmith remains non-interactive: no `authorization_endpoint`, login, or consent flow is exposed
+
+### `GET /.well-known/oauth-authorization-server`
+
+Publishes OAuth 2.0 Authorization Server Metadata (RFC 8414).
+
+Key fields include:
+
+- `issuer`
+- `jwks_uri`
+- `token_endpoint`
+- `introspection_endpoint`
+- `revocation_endpoint`
+- `grant_types_supported`
+- `scopes_supported`
+
+### `GET /.well-known/openid-configuration`
+
+Publishes OpenID discovery metadata for TokenSmith's non-interactive profile.
+
+Key fields include:
+
+- `issuer`
+- `jwks_uri`
+- `token_endpoint`
+- `introspection_endpoint`
+- `revocation_endpoint`
+- `grant_types_supported`
+- `openchami_non_interactive=true`
 
 ## Local admin endpoints
 
@@ -107,6 +135,38 @@ Notes:
 ### `POST /oauth/token`
 
 Canonical token endpoint for the service-to-service bootstrap and refresh flows.
+
+### `POST /oauth/introspect`
+
+Token introspection endpoint (RFC 7662).
+
+Supported token classes:
+
+- `access_token` (TokenSmith JWT access tokens)
+- `refresh_token` (TokenSmith opaque refresh tokens)
+
+Notes:
+
+- returns `active: true|false` per RFC 7662
+- unknown, expired, or revoked tokens return `active: false`
+- when OAuth management auth is enabled, this endpoint requires HTTP Basic client auth
+
+### `POST /oauth/revoke`
+
+Token revocation endpoint (RFC 7009).
+
+Current behavior:
+
+- refresh token revocation is supported and revokes the token family
+- unknown refresh tokens still return `200 OK` (idempotent semantics)
+- access token revocation is not currently supported (`unsupported_token_type`)
+- when OAuth management auth is enabled, this endpoint requires HTTP Basic client auth
+
+Configuration for management endpoint auth:
+
+- `--oauth-management-auth-enabled`
+- `--oauth-management-client-id` or `TOKENSMITH_OAUTH_MANAGEMENT_CLIENT_ID`
+- `--oauth-management-client-secret` or `TOKENSMITH_OAUTH_MANAGEMENT_CLIENT_SECRET`
 
 ### `POST /token`
 
@@ -203,6 +263,7 @@ Observed error codes include:
 
 - `invalid_request`
 - `unsupported_grant_type`
+- `unsupported_token_type`
 - `invalid_grant`
 - `too_many_requests`
 - `server_error`

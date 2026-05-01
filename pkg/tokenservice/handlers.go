@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -222,6 +223,97 @@ func (s *TokenService) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *TokenService) issuerBaseURL() string {
+	return strings.TrimRight(strings.TrimSpace(s.Issuer), "/")
+}
+
+func (s *TokenService) endpointURL(path string) string {
+	base := s.issuerBaseURL()
+	if base == "" {
+		return path
+	}
+	if strings.HasPrefix(path, "/") {
+		return base + path
+	}
+	return base + "/" + path
+}
+
+func (s *TokenService) supportedScopes() []string {
+	seen := make(map[string]struct{})
+	for _, scopes := range s.GroupScopes {
+		for _, scope := range scopes {
+			scope = strings.TrimSpace(scope)
+			if scope == "" {
+				continue
+			}
+			seen[scope] = struct{}{}
+		}
+	}
+
+	result := make([]string, 0, len(seen))
+	for scope := range seen {
+		result = append(result, scope)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func (s *TokenService) signingAlgorithmsSupported() []string {
+	alg := strings.TrimSpace(s.TokenManager.GetSigningAlgorithm())
+	if alg == "" {
+		return []string{"RS256"}
+	}
+	return []string{alg}
+}
+
+func (s *TokenService) oauthManagementEndpointAuthMethodsSupported() []string {
+	if s.Config.OAuthManagementAuthEnabled {
+		return []string{"client_secret_basic"}
+	}
+	return []string{"none"}
+}
+
+// OAuthAuthorizationServerMetadataHandler publishes RFC 8414 metadata.
+func (s *TokenService) OAuthAuthorizationServerMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	metadata := map[string]interface{}{
+		"issuer":                                s.issuerBaseURL(),
+		"jwks_uri":                              s.endpointURL("/.well-known/jwks.json"),
+		"token_endpoint":                        s.endpointURL("/oauth/token"),
+		"introspection_endpoint":                s.endpointURL("/oauth/introspect"),
+		"revocation_endpoint":                   s.endpointURL("/oauth/revoke"),
+		"grant_types_supported":                 []string{GrantTypeTokenExchange, GrantTypeRefreshTokenRFC8693},
+		"token_endpoint_auth_methods_supported": []string{"none"},
+		"introspection_endpoint_auth_methods_supported": s.oauthManagementEndpointAuthMethodsSupported(),
+		"revocation_endpoint_auth_methods_supported":    s.oauthManagementEndpointAuthMethodsSupported(),
+		"scopes_supported": s.supportedScopes(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(metadata)
+}
+
+// OpenIDConfigurationHandler publishes OpenID discovery metadata for non-interactive usage.
+func (s *TokenService) OpenIDConfigurationHandler(w http.ResponseWriter, r *http.Request) {
+	metadata := map[string]interface{}{
+		"issuer":                                s.issuerBaseURL(),
+		"jwks_uri":                              s.endpointURL("/.well-known/jwks.json"),
+		"token_endpoint":                        s.endpointURL("/oauth/token"),
+		"introspection_endpoint":                s.endpointURL("/oauth/introspect"),
+		"revocation_endpoint":                   s.endpointURL("/oauth/revoke"),
+		"grant_types_supported":                 []string{GrantTypeTokenExchange, GrantTypeRefreshTokenRFC8693},
+		"token_endpoint_auth_methods_supported": []string{"none"},
+		"introspection_endpoint_auth_methods_supported": s.oauthManagementEndpointAuthMethodsSupported(),
+		"revocation_endpoint_auth_methods_supported":    s.oauthManagementEndpointAuthMethodsSupported(),
+		"subject_types_supported":                       []string{"public"},
+		"id_token_signing_alg_values_supported":         s.signingAlgorithmsSupported(),
+		"scopes_supported":                              s.supportedScopes(),
+		"openchami_non_interactive":                     true,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(metadata)
+}
+
 // Start starts the HTTP server.
 func (s *TokenService) Start(port int) error {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
@@ -238,8 +330,15 @@ func (s *TokenService) Start(port int) error {
 	r.Get("/health", s.HealthHandler)
 	r.Route("/.well-known", func(r chi.Router) {
 		r.Get("/jwks.json", s.JWKSHandler)
+		r.Get("/oauth-authorization-server", s.OAuthAuthorizationServerMetadataHandler)
+		r.Get("/openid-configuration", s.OpenIDConfigurationHandler)
 	})
 	r.Route("/oauth", func(r chi.Router) {
+		r.Group(func(r chi.Router) {
+			r.Use(s.withOAuthManagementClientAuth)
+			r.Post("/introspect", s.OAuthIntrospectionHandler)
+			r.Post("/revoke", s.OAuthRevocationHandler)
+		})
 		r.Group(func(r chi.Router) {
 			r.Use(oidc.RequireToken)
 			r.Use(s.withCurrentOIDCProvider)
