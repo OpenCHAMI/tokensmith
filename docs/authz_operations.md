@@ -21,6 +21,8 @@ Policy loading mechanics are described in:
 - A **baseline embedded Casbin model + policy** ships in TokenSmith.
 - If you do not configure a policy directory, the baseline policy is the effective policy.
 - Policy is loaded at **process start**; **no hot reload** in v1.
+  - This is a design choice: policy changes require a service restart to take effect.
+  - Future versions may support SIGHUP-driven hot reload; track this on GitHub as a feature request.
 
 ## Policy distribution (mounting fragments)
 
@@ -187,12 +189,16 @@ This section covers **authorization-specific issues**.
 
 ### Symptom: policy changes have no effect
 
+**Root cause: TokenSmith does not support hot reload in v1.**
+
 Most common causes:
 
-- Service not restarted (no hot reload).
+- **Service not restarted** (required for policy changes to take effect).
 - Fragment not mounted at the expected path.
 - Wrong env var set (`TOKENSMITH_POLICY_DIR` vs `AUTHZ_POLICY_DIR`).
 - Filename does not match `*.csv` or has unexpected ordering.
+
+**To apply policy changes:** restart the service or pod. Hot reload support is planned as a future feature.
 
 ### Symptom: requests are unexpectedly denied in enforce mode
 

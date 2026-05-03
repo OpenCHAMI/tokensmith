@@ -19,6 +19,13 @@ var serveCmd = &cobra.Command{
 	Short: "Start the token service",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Load configuration
+		// If configPath is provided, ensure the file exists
+		if configPath != "" {
+			if _, err := os.Stat(configPath); err != nil {
+				return fmt.Errorf("config file not found: %s (%w). Ensure the file exists or provide all required options via flags", configPath, err)
+			}
+		}
+
 		fileConfig, err := tokenservice.LoadFileConfig(configPath)
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
@@ -125,6 +132,7 @@ func init() {
 	serveCmd.Flags().StringVar(&oauthManagementClientSecret, "oauth-management-client-secret", "", "Client secret for OAuth management endpoint auth (or set TOKENSMITH_OAUTH_MANAGEMENT_CLIENT_SECRET)")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
+	serveCmd.Flags().StringVar(&configPath, "config", "", "Path to config file (optional if all options provided via flags or environment variables)")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")
 	serveCmd.Flags().BoolVar(&enableLocalUserMint, "enable-local-user-mint", false, "Enable local user-token mint mode (break-glass path)")
 

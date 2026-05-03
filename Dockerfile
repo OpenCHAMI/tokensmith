@@ -29,6 +29,9 @@ VOLUME /tokensmith/keys
 VOLUME /tokensmith/config
 VOLUME /tokensmith/data
 
+# Create required directories with proper ownership for the non-root user (UID 65534)
+# Must be done before switching to USER 65534:65534
+RUN mkdir -p /tokensmith/{keys,data,config} && chown -R 65534:65534 /tokensmith/{keys,data,config}
 
 # Get the tokensmith service from the goreleaser build.
 COPY tokensmith /usr/local/bin/
@@ -36,7 +39,8 @@ COPY tokensmith /usr/local/bin/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# nobody 65534:65534
+# Run as non-root user (UID 65534 = nobody)
+# Directories are pre-created and chowned above
 USER 65534:65534
 
 ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
