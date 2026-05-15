@@ -5,7 +5,9 @@
 package tokenservice
 
 const (
-	BootstrapTokenEnvVar = "TOKENSMITH_BOOTSTRAP_TOKEN"
+	BootstrapTokenEnvVar      = "TOKENSMITH_BOOTSTRAP_TOKEN"
+	ServiceIdentityCertEnvVar = "TOKENSMITH_SERVICE_IDENTITY_CERT"
+	ServiceIdentityKeyEnvVar  = "TOKENSMITH_SERVICE_IDENTITY_KEY"
 
 	RefreshTokenUseClaim = "refresh_token"
 	RefreshTokenUseField = "token_use"

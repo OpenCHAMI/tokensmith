@@ -6,6 +6,7 @@ package tokenservice
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"os"
 	"strings"
@@ -35,6 +36,11 @@ type Config struct {
 	// RFC 8693 stores (opaque token and family management)
 	RFC8693BootstrapStorePath string
 	RFC8693RefreshStorePath   string
+
+	// Service-identity mTLS trust anchor and TLS listener settings.
+	ServiceIdentityCAPath string
+	TLSCertFile           string
+	TLSKeyFile            string
 
 	// OIDC provider configuration
 	OIDCIssuerURL    string
@@ -90,6 +96,9 @@ type TokenService struct {
 	// Phase 3: per-IP rate limiting for failed bootstrap exchanges
 	// (NIST SP 800-63-4 Section 5.2.2)
 	replayLimiter *replayLimiter
+
+	// Trust roots for inbound mTLS service identity certificates.
+	serviceIdentityCAPool *x509.CertPool
 }
 
 // NewTokenService creates a new TokenService instance
@@ -119,6 +128,14 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		OpenCHAMIID:   config.OpenCHAMIID,
 		OIDCProvider:  oidcProvider,
 		replayLimiter: newReplayLimiter(),
+	}
+
+	if strings.TrimSpace(config.ServiceIdentityCAPath) != "" {
+		caPool, err := loadCertPoolFromPEMFile(config.ServiceIdentityCAPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load service identity CA bundle: %w", err)
+		}
+		svc.serviceIdentityCAPool = caPool
 	}
 
 	// Initialize RFC 8693 stores for opaque bootstrap and refresh tokens
@@ -155,6 +172,20 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	svc.refreshTokenStore = refreshStore
 
 	return svc, nil
+}
+
+func loadCertPoolFromPEMFile(path string) (*x509.CertPool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read PEM file %q: %w", path, err)
+	}
+
+	pool := x509.NewCertPool()
+	if ok := pool.AppendCertsFromPEM(data); !ok {
+		return nil, fmt.Errorf("PEM file %q did not contain any valid certificates", path)
+	}
+
+	return pool, nil
 }
 
 func (s *TokenService) currentOIDCProvider() oidc.Provider {

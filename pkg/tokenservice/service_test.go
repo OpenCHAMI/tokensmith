@@ -8,8 +8,13 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -751,4 +756,131 @@ func TestOAuthTokenHandler_BootstrapExchangeThenRefresh(t *testing.T) {
 	replayRefreshW := httptest.NewRecorder()
 	service.OAuthTokenHandler(replayRefreshW, replayRefreshReq)
 	assert.Equal(t, http.StatusBadRequest, replayRefreshW.Result().StatusCode)
+}
+
+func TestServiceIdentitySessionHandler_Success(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	keyManager := keys.NewKeyManager()
+	require.NoError(t, keyManager.SetKeyPair(privateKey, &privateKey.PublicKey))
+
+	caPEM, serviceCert := generateClientIdentityCertificate(t, "boot-service")
+	caPath := filepath.Join(t.TempDir(), "service-identity-ca.pem")
+	require.NoError(t, os.WriteFile(caPath, caPEM, 0600))
+
+	service, err := NewTokenService(keyManager, Config{
+		Issuer:                    "http://tokensmith.test",
+		ClusterID:                 "cluster-a",
+		OpenCHAMIID:               "openchami-a",
+		RFC8693BootstrapStorePath: filepath.Join(t.TempDir(), "bootstrap-tokens"),
+		RFC8693RefreshStorePath:   filepath.Join(t.TempDir(), "refresh-tokens"),
+		ServiceIdentityCAPath:     caPath,
+	})
+	require.NoError(t, err)
+
+	now := time.Now()
+	require.NoError(t, service.bootstrapTokenStore.SavePolicy(&BootstrapTokenPolicy{
+		ID:         "policy-1",
+		Subject:    "boot-service",
+		Audience:   "metadata-service",
+		Scopes:     []string{"read"},
+		TokenHash:  HashBootstrapToken("placeholder"),
+		TTL:        10 * time.Minute,
+		RefreshTTL: 24 * time.Hour,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(10 * time.Minute),
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/service-identity/session", strings.NewReader("{}"))
+	req.TLS = &tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{serviceCert},
+	}
+	w := httptest.NewRecorder()
+
+	service.ServiceIdentitySessionHandler(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var oauthResp OAuthTokenResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&oauthResp))
+	require.NotEmpty(t, oauthResp.AccessToken)
+	require.NotEmpty(t, oauthResp.RefreshToken)
+	assert.Equal(t, "Bearer", oauthResp.TokenType)
+
+	claims, _, err := service.TokenManager.ParseToken(oauthResp.AccessToken)
+	require.NoError(t, err)
+	assert.Equal(t, "boot-service", claims.Subject)
+	assert.Equal(t, []string{"metadata-service"}, []string(claims.Audience))
+	assert.Equal(t, []string{"service_identity_mtls"}, claims.AuthMethods)
+}
+
+func TestServiceIdentitySessionHandler_RequiresClientCertificate(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	keyManager := keys.NewKeyManager()
+	require.NoError(t, keyManager.SetKeyPair(privateKey, &privateKey.PublicKey))
+
+	caPEM, _ := generateClientIdentityCertificate(t, "boot-service")
+	caPath := filepath.Join(t.TempDir(), "service-identity-ca.pem")
+	require.NoError(t, os.WriteFile(caPath, caPEM, 0600))
+
+	service, err := NewTokenService(keyManager, Config{
+		Issuer:                "http://tokensmith.test",
+		ClusterID:             "cluster-a",
+		OpenCHAMIID:           "openchami-a",
+		ServiceIdentityCAPath: caPath,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/service-identity/session", strings.NewReader("{}"))
+	w := httptest.NewRecorder()
+	service.ServiceIdentitySessionHandler(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Result().StatusCode)
+}
+
+func generateClientIdentityCertificate(t *testing.T, subjectCN string) ([]byte, *x509.Certificate) {
+	t.Helper()
+
+	now := time.Now()
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "tokensmith-service-identity-ca"},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(48 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	require.NoError(t, err)
+	caCert, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err)
+
+	serviceKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	serviceTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject: pkix.Name{
+			CommonName:   subjectCN,
+			Organization: []string{"openchami"},
+		},
+		NotBefore:   now.Add(-time.Hour),
+		NotAfter:    now.Add(24 * time.Hour),
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+	}
+	serviceDER, err := x509.CreateCertificate(rand.Reader, serviceTemplate, caCert, &serviceKey.PublicKey, caKey)
+	require.NoError(t, err)
+	serviceCert, err := x509.ParseCertificate(serviceDER)
+	require.NoError(t, err)
+
+	caPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: caDER,
+	})
+	return caPEM, serviceCert
 }

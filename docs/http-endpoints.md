@@ -22,6 +22,7 @@ Current response fields include:
 - `cluster_id`
 - `openchami_id`
 - `oidc_issuer`
+- `service_identity_ca_configured`
 
 Example:
 
@@ -113,6 +114,31 @@ Canonical token endpoint for the service-to-service bootstrap and refresh flows.
 Compatibility alias for the same RFC 8693 / RFC 6749 token handling used by the service-token flow.
 
 For new integrations, prefer `POST /oauth/token`.
+
+### `POST /service-identity/session`
+
+Mint an access token + refresh token session using mTLS client identity.
+
+Requirements:
+
+- TokenSmith started with `--service-identity-ca <pem>`
+- TokenSmith started with TLS listener flags (`--tls-cert-file`, `--tls-key-file`)
+- caller presents a client certificate signed by the configured service-identity CA
+
+Behavior:
+
+- service identity subject is extracted from client certificate Common Name (`CN`)
+- TokenSmith looks up policy by subject (same subject/audience/scopes model used by bootstrap policy storage)
+- response shape matches `POST /oauth/token` success payload (`access_token`, `refresh_token`, `expires_in`, etc.)
+
+Example:
+
+```bash
+curl -s https://tokensmith.example/service-identity/session \
+  --cert /etc/openchami/tls/service.crt \
+  --key /etc/openchami/tls/service.key \
+  -X POST | jq
+```
 
 ## Bootstrap token exchange
 

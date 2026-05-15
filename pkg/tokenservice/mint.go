@@ -113,6 +113,15 @@ func (s *TokenService) UpdateGroupScopes(groupScopes map[string][]string) {
 // bootstrap token's server-side policy.
 // See: RFC 8693 Section 2.2.1 (Access Token Response)
 func (s *TokenService) GenerateServiceToken(subject, audience string, scopes []string, ttl time.Duration) (string, error) {
+	return s.generateServiceTokenWithContext(subject, audience, scopes, ttl, "bootstrap_exchange", "bootstrap_token_exchange", "bootstrap-exchange")
+}
+
+// GenerateServiceIdentityToken issues an access token from mTLS service identity proof.
+func (s *TokenService) GenerateServiceIdentityToken(subject, audience string, scopes []string, ttl time.Duration) (string, error) {
+	return s.generateServiceTokenWithContext(subject, audience, scopes, ttl, "service_identity_mtls", "service_identity_session", "service-identity")
+}
+
+func (s *TokenService) generateServiceTokenWithContext(subject, audience string, scopes []string, ttl time.Duration, authMethod, authEvent, sessionPrefix string) (string, error) {
 	if subject == "" {
 		return "", errors.New("subject cannot be empty")
 	}
@@ -139,10 +148,10 @@ func (s *TokenService) GenerateServiceToken(subject, audience string, scopes []s
 		Scope:       append([]string(nil), scopes...), // Immutable server-determined scopes
 		AuthLevel:   "IAL2",
 		AuthFactors: 2,
-		AuthMethods: []string{"bootstrap_exchange"},
-		SessionID:   fmt.Sprintf("bootstrap-exchange-%s-%d", subject, now.UnixNano()),
+		AuthMethods: []string{authMethod},
+		SessionID:   fmt.Sprintf("%s-%s-%d", sessionPrefix, subject, now.UnixNano()),
 		SessionExp:  now.Add(ttl).Unix(),
-		AuthEvents:  []string{"bootstrap_token_exchange"},
+		AuthEvents:  []string{authEvent},
 	}
 
 	return s.TokenManager.GenerateToken(claims)

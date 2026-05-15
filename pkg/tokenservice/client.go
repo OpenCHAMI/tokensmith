@@ -6,6 +6,7 @@ package tokenservice
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 var (
 	ErrMissingBootstrapToken = errors.New("missing bootstrap token")
 	ErrMissingRefreshToken   = errors.New("missing refresh token")
+	ErrTLSClientMaterial     = errors.New("invalid service identity client certificate configuration")
 	ErrEmptyTokenSmithURL    = errors.New("tokensmith URL is required")
 	ErrEmptyTargetService    = errors.New("target service is required")
 	ErrRefreshTokenExpired   = errors.New("refresh token expired")
@@ -41,6 +43,8 @@ type ServiceClient struct {
 	serviceID               string
 	targetService           string
 	bootstrapToken          string
+	serviceIdentityCertPath string
+	serviceIdentityKeyPath  string
 	refreshBefore           time.Duration
 	autoInterval            time.Duration
 	bootstrapMaxAttempts    int
@@ -89,6 +93,15 @@ func WithHTTPClient(httpClient *http.Client) ServiceClientOption {
 func WithBootstrapToken(token string) ServiceClientOption {
 	return func(c *ServiceClient) {
 		c.bootstrapToken = strings.TrimSpace(token)
+	}
+}
+
+// WithServiceIdentityCertKey configures client-certificate material used to obtain
+// a service session from /service-identity/session.
+func WithServiceIdentityCertKey(certPath, keyPath string) ServiceClientOption {
+	return func(c *ServiceClient) {
+		c.serviceIdentityCertPath = strings.TrimSpace(certPath)
+		c.serviceIdentityKeyPath = strings.TrimSpace(keyPath)
 	}
 }
 
@@ -311,6 +324,10 @@ func (c *ServiceClient) GetToken(ctx context.Context) error {
 		return c.requestServiceToken(ctx, "refresh")
 	}
 
+	if certPath, keyPath, ok := c.readableServiceIdentityPaths(); ok {
+		return c.requestServiceIdentitySession(ctx, certPath, keyPath)
+	}
+
 	return c.requestServiceToken(ctx, "bootstrap")
 }
 
@@ -345,11 +362,33 @@ func (c *ServiceClient) requestServiceToken(ctx context.Context, grantType strin
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return c.doTokenRequest(req)
+}
 
+func (c *ServiceClient) requestServiceIdentitySession(ctx context.Context, certPath, keyPath string) error {
+	mtlsClient, err := c.clientWithMutualTLS(certPath, keyPath)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/service-identity/session", c.tokensmithURL), strings.NewReader("{}"))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	return c.doTokenRequestWithClient(mtlsClient, req)
+}
+
+func (c *ServiceClient) doTokenRequest(req *http.Request) error {
+	return c.doTokenRequestWithClient(c.client, req)
+}
+
+func (c *ServiceClient) doTokenRequestWithClient(httpClient *http.Client, req *http.Request) error {
 	now := time.Now().UTC()
 	atomic.StoreInt64(&c.lastRefreshUnix, now.Unix())
 
-	resp, err := c.client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		atomic.AddUint64(&c.refreshFailures, 1)
 		wrapped := fmt.Errorf("failed to get token: %w", err)
@@ -479,12 +518,86 @@ func (c *ServiceClient) currentBootstrapToken() string {
 	return strings.TrimSpace(os.Getenv(BootstrapTokenEnvVar))
 }
 
+func (c *ServiceClient) currentServiceIdentityCertPath() string {
+	if c.serviceIdentityCertPath != "" {
+		return c.serviceIdentityCertPath
+	}
+	return strings.TrimSpace(os.Getenv(ServiceIdentityCertEnvVar))
+}
+
+func (c *ServiceClient) currentServiceIdentityKeyPath() string {
+	if c.serviceIdentityKeyPath != "" {
+		return c.serviceIdentityKeyPath
+	}
+	return strings.TrimSpace(os.Getenv(ServiceIdentityKeyEnvVar))
+}
+
+func (c *ServiceClient) readableServiceIdentityPaths() (certPath, keyPath string, ok bool) {
+	certPath = c.currentServiceIdentityCertPath()
+	keyPath = c.currentServiceIdentityKeyPath()
+	if certPath == "" || keyPath == "" {
+		return "", "", false
+	}
+
+	if certInfo, err := os.Stat(certPath); err != nil || certInfo.IsDir() {
+		return "", "", false
+	}
+	if keyInfo, err := os.Stat(keyPath); err != nil || keyInfo.IsDir() {
+		return "", "", false
+	}
+
+	return certPath, keyPath, true
+}
+
+func (c *ServiceClient) clientWithMutualTLS(certPath, keyPath string) (*http.Client, error) {
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to load cert/key pair: %v", ErrTLSClientMaterial, err)
+	}
+
+	baseTransport, err := cloneTransport(c.client.Transport)
+	if err != nil {
+		return nil, err
+	}
+	if baseTransport.TLSClientConfig == nil {
+		baseTransport.TLSClientConfig = &tls.Config{}
+	} else {
+		baseTransport.TLSClientConfig = baseTransport.TLSClientConfig.Clone()
+	}
+	baseTransport.TLSClientConfig.Certificates = append([]tls.Certificate(nil), cert)
+
+	out := *c.client
+	out.Transport = baseTransport
+	return &out, nil
+}
+
+func cloneTransport(rt http.RoundTripper) (*http.Transport, error) {
+	if rt == nil {
+		defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+		if !ok {
+			return nil, fmt.Errorf("%w: default transport type is unsupported", ErrTLSClientMaterial)
+		}
+		return defaultTransport.Clone(), nil
+	}
+
+	transport, ok := rt.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("%w: custom transport must be *http.Transport", ErrTLSClientMaterial)
+	}
+	return transport.Clone(), nil
+}
+
 func (c *ServiceClient) validateConfig() error {
 	if strings.TrimSpace(c.tokensmithURL) == "" {
 		return ErrEmptyTokenSmithURL
 	}
 	if strings.TrimSpace(c.targetService) == "" {
 		return ErrEmptyTargetService
+	}
+	certPath := c.currentServiceIdentityCertPath()
+	keyPath := c.currentServiceIdentityKeyPath()
+	if (certPath == "") != (keyPath == "") {
+		return fmt.Errorf("%w: both %s and %s must be set together", ErrTLSClientMaterial, ServiceIdentityCertEnvVar, ServiceIdentityKeyEnvVar)
 	}
 	return nil
 }

@@ -6,9 +6,12 @@ package tokenservice
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -171,14 +174,19 @@ func (s *TokenService) OIDCConfigHandler(w http.ResponseWriter, r *http.Request)
 
 // TokenExchangeHandler handles token exchange requests.
 func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
 		http.Error(w, "Missing authorization header", http.StatusUnauthorized)
 		return
 	}
 
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || parts[0] != "Bearer" {
+	token, ok := oidc.ParseBearerToken(authHeader)
+	if !ok {
 		http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
 		return
 	}
@@ -187,15 +195,15 @@ func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Reque
 		Scope         []string `json:"scope"`
 		TargetService string   `json:"target_service"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	ctx := context.WithValue(r.Context(), ScopeContextKey, payload.Scope)
 	ctx = context.WithValue(ctx, TargetServiceContextKey, payload.TargetService)
 
-	tokenValue, err := s.ExchangeToken(ctx, parts[1])
+	tokenValue, err := s.ExchangeToken(ctx, token)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
@@ -213,20 +221,17 @@ func (s *TokenService) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":       "healthy",
-		"service":      "tokensmith",
-		"issuer":       s.Issuer,
-		"cluster_id":   s.ClusterID,
-		"openchami_id": s.OpenCHAMIID,
-		"oidc_issuer":  s.Config.OIDCIssuerURL,
+		"status":                         "healthy",
+		"service":                        "tokensmith",
+		"issuer":                         s.Issuer,
+		"cluster_id":                     s.ClusterID,
+		"openchami_id":                   s.OpenCHAMIID,
+		"oidc_issuer":                    s.Config.OIDCIssuerURL,
+		"service_identity_ca_configured": s.serviceIdentityCAPool != nil,
 	})
 }
 
-// Start starts the HTTP server.
-func (s *TokenService) Start(port int) error {
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	logger := log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-
+func (s *TokenService) newRouter(logger zerolog.Logger) http.Handler {
 	r := chi.NewRouter()
 	r.Use(openchami_logger.OpenCHAMILogger(logger))
 	r.Use(middleware.RequestID)
@@ -243,8 +248,7 @@ func (s *TokenService) Start(port int) error {
 		r.Group(func(r chi.Router) {
 			r.Use(oidc.RequireToken)
 			r.Use(s.withCurrentOIDCProvider)
-			r.Post("/token", s.TokenExchangeHandler)
-			r.Get("/token", s.TokenExchangeHandler)
+			r.Post("/exchange", s.TokenExchangeHandler)
 		})
 	})
 	r.Route("/admin/oidc", func(r chi.Router) {
@@ -255,8 +259,44 @@ func (s *TokenService) Start(port int) error {
 	// See: https://datatracker.ietf.org/doc/html/rfc8693
 	r.Post("/oauth/token", s.OAuthTokenHandler)
 	r.Post("/token", s.OAuthTokenHandler) // Alias for compatibility
+	r.Post("/service-identity/session", s.ServiceIdentitySessionHandler)
+
+	return r
+}
+
+// Start starts the HTTP server.
+func (s *TokenService) Start(port int) error {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	logger := log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	addr := fmt.Sprintf(":%d", port)
-	fmt.Printf("Starting server on %s\n", addr)
-	return http.ListenAndServe(addr, r)
+	server := &http.Server{
+		Addr:    addr,
+		Handler: s.newRouter(logger),
+	}
+
+	tlsCert := strings.TrimSpace(s.Config.TLSCertFile)
+	tlsKey := strings.TrimSpace(s.Config.TLSKeyFile)
+
+	switch {
+	case (tlsCert == "") != (tlsKey == ""):
+		return fmt.Errorf("both TLS server cert and key must be provided together")
+	case tlsCert != "" && tlsKey != "":
+		server.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+		if s.serviceIdentityCAPool != nil {
+			server.TLSConfig.ClientAuth = tls.VerifyClientCertIfGiven
+			server.TLSConfig.ClientCAs = s.serviceIdentityCAPool
+		}
+
+		fmt.Printf("Starting TLS server on %s\n", addr)
+		return server.ListenAndServeTLS(tlsCert, tlsKey)
+	default:
+		if s.serviceIdentityCAPool != nil {
+			return fmt.Errorf("service identity CA is configured but TLS server cert/key are not; mTLS requires --tls-cert-file and --tls-key-file")
+		}
+		fmt.Printf("Starting server on %s\n", addr)
+		return server.ListenAndServe()
+	}
 }

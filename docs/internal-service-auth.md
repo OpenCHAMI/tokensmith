@@ -39,7 +39,7 @@ Important:
 - configure verifiers with the JWKS URL directly
 - the `kid` in TokenSmith-issued JWTs is expected to match a key in the published set
 
-## 2) Caller service flow: bootstrap token to service token
+## 2) Caller service flow: mTLS service identity (preferred) or bootstrap token
 
 The service-to-service token flow uses the RFC 8693 token endpoint:
 
@@ -47,6 +47,29 @@ The service-to-service token flow uses the RFC 8693 token endpoint:
 - compatibility alias: `POST /token`
 
 For new integrations, prefer `POST /oauth/token`.
+
+### Service identity mTLS request (preferred)
+
+Caller services can mint startup session credentials by presenting a client certificate:
+
+- endpoint: `POST /service-identity/session`
+- method: `POST`
+- body: empty JSON `{}` (or empty body)
+- TLS: client certificate required; certificate must chain to TokenSmith `--service-identity-ca`
+
+Example:
+
+```bash
+curl -s https://tokensmith.example/service-identity/session \
+  --cert /etc/openchami/tls/service.crt \
+  --key /etc/openchami/tls/service.key \
+  -X POST | jq
+```
+
+`pkg/tokenservice.ServiceClient` behavior:
+
+- if both `TOKENSMITH_SERVICE_IDENTITY_CERT` and `TOKENSMITH_SERVICE_IDENTITY_KEY` are set and readable, it uses `POST /service-identity/session`
+- else, it falls back to bootstrap token exchange via `POST /oauth/token`
 
 ### Bootstrap token request
 
