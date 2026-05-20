@@ -27,6 +27,9 @@ var (
 	enableLocalUserMint       bool
 	rfc8693BootstrapStorePath string
 	rfc8693RefreshStorePath   string
+	serviceIdentityCAPath     string
+	tlsCertFile               string
+	tlsKeyFile                string
 )
 
 var rootCmd = &cobra.Command{

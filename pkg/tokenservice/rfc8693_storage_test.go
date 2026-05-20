@@ -157,3 +157,89 @@ func TestBootstrapTokenStore_GetPolicy_ConcurrentFallback(t *testing.T) {
 		require.NoError(t, callErr)
 	}
 }
+
+func TestBootstrapTokenStore_GetLatestPolicyBySubject_PrefersNewest(t *testing.T) {
+	storePath := t.TempDir()
+	store, err := NewBootstrapTokenStore(storePath)
+	require.NoError(t, err)
+
+	now := time.Now().Add(-time.Minute)
+	old := &BootstrapTokenPolicy{
+		ID:         "bt-old",
+		Subject:    "boot-service",
+		Audience:   "smd-old",
+		TokenHash:  HashBootstrapToken("old"),
+		TTL:        10 * time.Minute,
+		RefreshTTL: 24 * time.Hour,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(10 * time.Minute),
+	}
+	newer := &BootstrapTokenPolicy{
+		ID:         "bt-new",
+		Subject:    "boot-service",
+		Audience:   "smd-new",
+		TokenHash:  HashBootstrapToken("new"),
+		TTL:        10 * time.Minute,
+		RefreshTTL: 24 * time.Hour,
+		CreatedAt:  now.Add(30 * time.Second),
+		ExpiresAt:  now.Add(10 * time.Minute),
+	}
+
+	require.NoError(t, store.SavePolicy(old))
+	require.NoError(t, store.SavePolicy(newer))
+
+	policy, err := store.GetLatestPolicyBySubject("boot-service")
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	assert.Equal(t, "smd-new", policy.Audience)
+}
+
+func TestBootstrapTokenStore_GetLatestPolicyBySubject_InMemoryFastPathSkipsDiskScan(t *testing.T) {
+	storePath := t.TempDir()
+	store, err := NewBootstrapTokenStore(storePath)
+	require.NoError(t, err)
+
+	now := time.Now()
+	policy := &BootstrapTokenPolicy{
+		ID:         "bt-fastpath",
+		Subject:    "boot-service",
+		Audience:   "smd",
+		TokenHash:  HashBootstrapToken("fastpath"),
+		TTL:        10 * time.Minute,
+		RefreshTTL: 24 * time.Hour,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(10 * time.Minute),
+	}
+	require.NoError(t, store.SavePolicy(policy))
+
+	// If disk scanning is attempted, this path causes os.ReadDir to fail with ENOTDIR.
+	store.storePath = filepath.Join(storePath, policy.TokenHash+".json")
+
+	found, err := store.GetLatestPolicyBySubject("boot-service")
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.Equal(t, policy.TokenHash, found.TokenHash)
+}
+
+func TestBootstrapTokenStore_GetLatestPolicyBySubject_FallbackToDisk(t *testing.T) {
+	storePath := t.TempDir()
+	store, err := NewBootstrapTokenStore(storePath)
+	require.NoError(t, err)
+
+	policy := &BootstrapTokenPolicy{
+		ID:         "bt-disk",
+		Subject:    "metadata-service",
+		Audience:   "smd",
+		TokenHash:  HashBootstrapToken("disk"),
+		TTL:        10 * time.Minute,
+		RefreshTTL: 24 * time.Hour,
+		CreatedAt:  time.Now(),
+		ExpiresAt:  time.Now().Add(10 * time.Minute),
+	}
+	writePolicyFileForTest(t, storePath, policy)
+
+	found, err := store.GetLatestPolicyBySubject("metadata-service")
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.Equal(t, policy.TokenHash, found.TokenHash)
+}

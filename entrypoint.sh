@@ -12,4 +12,7 @@ exec /usr/local/bin/tokensmith serve \
   --key-dir="$TOKENSMITH_KEY_DIR" \
   --rfc8693-bootstrap-store="$TOKENSMITH_RFC8693_BOOTSTRAP_STORE" \
   --rfc8693-refresh-store="$TOKENSMITH_RFC8693_REFRESH_STORE" \
+  --service-identity-ca="$TOKENSMITH_SERVICE_IDENTITY_CA" \
+  --tls-cert-file="$TOKENSMITH_TLS_CERT_FILE" \
+  --tls-key-file="$TOKENSMITH_TLS_KEY_FILE" \
   "$@"

@@ -20,6 +20,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/authz"
 	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/oidc"
 	tstoken "github.com/openchami/tokensmith/pkg/token"
 	"github.com/rs/zerolog/log"
 )
@@ -328,17 +329,7 @@ func refreshAllJWKS(ctx context.Context, cache *jwksCache, now time.Time, urls [
 }
 
 func bearerToken(authzHeader string) (string, bool) {
-	parts := strings.SplitN(strings.TrimSpace(authzHeader), " ", 2)
-	if len(parts) != 2 {
-		return "", false
-	}
-	if !strings.EqualFold(parts[0], "Bearer") {
-		return "", false
-	}
-	if parts[1] == "" {
-		return "", false
-	}
-	return parts[1], true
+	return oidc.ParseBearerToken(authzHeader)
 }
 
 func stringInSlice(s string, list []string) bool {

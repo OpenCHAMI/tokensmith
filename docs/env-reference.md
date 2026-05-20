@@ -16,6 +16,9 @@ This page lists environment variables currently used by TokenSmith code paths.
 | `OIDC_CLIENT_SECRET` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-client-secret` |
 | `TOKENSMITH_RFC8693_BOOTSTRAP_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--rfc8693-bootstrap-store`; default `./data/bootstrap-tokens` |
 | `TOKENSMITH_RFC8693_REFRESH_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--rfc8693-refresh-store`; default `./data/refresh-tokens` |
+| `TOKENSMITH_SERVICE_IDENTITY_CA` | `cmd/tokenservice/serve.go` | Fallback value for `--service-identity-ca` (PEM CA bundle for inbound mTLS client cert trust) |
+| `TOKENSMITH_TLS_CERT_FILE` | `cmd/tokenservice/serve.go` | Fallback value for `--tls-cert-file` (TokenSmith HTTPS server certificate) |
+| `TOKENSMITH_TLS_KEY_FILE` | `cmd/tokenservice/serve.go` | Fallback value for `--tls-key-file` (TokenSmith HTTPS server private key) |
 
 OIDC runtime configuration notes:
 
@@ -54,14 +57,16 @@ Notes:
 | --- | --- | --- |
 | `TOKENSMITH_URL` | Consumer services using `pkg/tokenservice` | Base URL of the TokenSmith service, used to call `POST /oauth/token` |
 | `TOKENSMITH_BOOTSTRAP_TOKEN` | `pkg/tokenservice/client.go` | One-time startup bootstrap token redeemed at `POST /oauth/token` |
+| `TOKENSMITH_SERVICE_IDENTITY_CERT` | `pkg/tokenservice/client.go` | Optional path to service mTLS client certificate used with `POST /service-identity/session` |
+| `TOKENSMITH_SERVICE_IDENTITY_KEY` | `pkg/tokenservice/client.go` | Optional path to service mTLS client private key used with `POST /service-identity/session` |
 | `TOKENSMITH_TARGET_SERVICE` | Consumer service configuration | Common config convention for intended audience service |
 | `TOKENSMITH_SCOPES` | Consumer service configuration | Common config convention for intended scopes |
 | `TOKENSMITH_REFRESH_SKEW_SEC` | Consumer service configuration | Common config convention for refresh lead time |
 
 Notes:
 
-- only `TOKENSMITH_BOOTSTRAP_TOKEN` is read directly by current `pkg/tokenservice/client.go` defaults
-- current `ServiceClient` uses RFC 8693 bootstrap and refresh form fields only
+- `ServiceClient` prefers `TOKENSMITH_SERVICE_IDENTITY_CERT` + `TOKENSMITH_SERVICE_IDENTITY_KEY` when both files are readable, then falls back to `TOKENSMITH_BOOTSTRAP_TOKEN`
+- bootstrap and refresh paths still use RFC 8693 form fields against `POST /oauth/token`
 - target service and scopes are currently authoritative on the server side from bootstrap-token policy and refresh-token family state
 - many consumer services still map `TOKENSMITH_TARGET_SERVICE`, `TOKENSMITH_SCOPES`, and `TOKENSMITH_REFRESH_SKEW_SEC` into explicit client options for local configuration consistency
 

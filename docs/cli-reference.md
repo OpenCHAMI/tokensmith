@@ -72,6 +72,9 @@ Starts the TokenSmith service.
 | `--enable-local-user-mint` | Enable break-glass local user token creation endpoint | `false` |
 | `--rfc8693-bootstrap-store` | Path to the bootstrap token policy store, or `TOKENSMITH_RFC8693_BOOTSTRAP_STORE` | `./data/bootstrap-tokens` |
 | `--rfc8693-refresh-store` | Path to the refresh token family store, or `TOKENSMITH_RFC8693_REFRESH_STORE` | `./data/refresh-tokens` |
+| `--service-identity-ca` | PEM CA bundle trusted for inbound service-identity mTLS client certificates, or `TOKENSMITH_SERVICE_IDENTITY_CA` | `""` |
+| `--tls-cert-file` | HTTPS server certificate PEM, or `TOKENSMITH_TLS_CERT_FILE` | `""` |
+| `--tls-key-file` | HTTPS server private key PEM, or `TOKENSMITH_TLS_KEY_FILE` | `""` |
 | `--non-enforcing` | Skip strict validation checks and only log errors | `false` |
 | `--config` | Path to JSON config file | `""` |
 
@@ -81,6 +84,7 @@ Starts the TokenSmith service.
 - If `--key-file` is not set, TokenSmith generates an RSA keypair and writes it to `--key-dir` as `private.pem` and `public.pem`.
 - If `--oidc-client-id` or `--oidc-client-secret` are omitted, TokenSmith reads `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
 - If RFC 8693 store flags are omitted, TokenSmith falls back to environment variables and then the defaults shown above.
+- If `--service-identity-ca` is set, TokenSmith requires `--tls-cert-file` and `--tls-key-file` so mTLS service identity exchange can be enforced.
 
 ### Minimal run example
 
@@ -102,6 +106,7 @@ The `serve` command exposes:
 - `GET /.well-known/jwks.json`
 - `POST /oauth/token`
 - `POST /token` (alias for the service-token flow)
+- `POST /service-identity/session` (mTLS service-identity session mint)
 
 See `docs/http-endpoints.md` for request and response formats.
 

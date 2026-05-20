@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -133,6 +134,53 @@ func (s *BootstrapTokenStore) GetPolicy(tokenHash string) (*BootstrapTokenPolicy
 	return policy, nil
 }
 
+// GetLatestPolicyBySubject finds the most recently-created bootstrap policy for a subject.
+// This supports service-identity minting where subject -> policy mapping is required.
+func (s *BootstrapTokenStore) GetLatestPolicyBySubject(subject string) (*BootstrapTokenPolicy, error) {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return nil, fmt.Errorf("subject is required")
+	}
+
+	var best *BootstrapTokenPolicy
+
+	s.mu.RLock()
+	for _, policy := range s.policies {
+		if policy == nil || policy.Subject != subject {
+			continue
+		}
+		if best == nil || policy.CreatedAt.After(best.CreatedAt) {
+			best = policy
+		}
+	}
+	s.mu.RUnlock()
+
+	// Fast path: prefer in-memory cache when available to avoid repeated full disk scans.
+	if best != nil {
+		return best, nil
+	}
+
+	diskBest, err := s.loadLatestPolicyBySubjectFromDisk(subject)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("bootstrap token policy not found for subject %q", subject)
+		}
+		return nil, err
+	}
+
+	// Promote to memory cache for subsequent O(1) retrieval by hash.
+	s.mu.Lock()
+	if existing, exists := s.policies[diskBest.TokenHash]; exists {
+		best = existing
+	} else {
+		s.policies[diskBest.TokenHash] = diskBest
+		best = diskBest
+	}
+	s.mu.Unlock()
+
+	return best, nil
+}
+
 // loadPolicyFromDisk reads and validates a single bootstrap policy file by token hash.
 func (s *BootstrapTokenStore) loadPolicyFromDisk(tokenHash string) (*BootstrapTokenPolicy, error) {
 	filePath := filepath.Join(s.storePath, tokenHash+".json")
@@ -155,6 +203,46 @@ func (s *BootstrapTokenStore) loadPolicyFromDisk(tokenHash string) (*BootstrapTo
 	}
 
 	return &policy, nil
+}
+
+func (s *BootstrapTokenStore) loadLatestPolicyBySubjectFromDisk(subject string) (*BootstrapTokenPolicy, error) {
+	entries, err := os.ReadDir(s.storePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, os.ErrNotExist
+		}
+		return nil, fmt.Errorf("failed to read bootstrap token store directory: %w", err)
+	}
+
+	var best *BootstrapTokenPolicy
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		filePath := filepath.Join(s.storePath, entry.Name())
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		var policy BootstrapTokenPolicy
+		if err := json.Unmarshal(data, &policy); err != nil {
+			continue
+		}
+		if policy.Subject != subject || strings.TrimSpace(policy.TokenHash) == "" {
+			continue
+		}
+		if best == nil || policy.CreatedAt.After(best.CreatedAt) {
+			policyCopy := policy
+			best = &policyCopy
+		}
+	}
+
+	if best == nil {
+		return nil, os.ErrNotExist
+	}
+	return best, nil
 }
 
 // UpdatePolicy updates a bootstrap token policy (e.g., mark as consumed).

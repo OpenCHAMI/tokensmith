@@ -16,6 +16,23 @@ type TokenCtxKey struct{}
 // IntrospectionCtxKey is the context key for the OIDC introspection result
 type IntrospectionCtxKey struct{}
 
+// ParseBearerToken extracts a bearer token from an Authorization header.
+// It accepts case-insensitive bearer schemes per RFC 6750.
+func ParseBearerToken(authHeader string) (string, bool) {
+	parts := strings.SplitN(strings.TrimSpace(authHeader), " ", 2)
+	if len(parts) != 2 {
+		return "", false
+	}
+	if !strings.EqualFold(parts[0], "Bearer") {
+		return "", false
+	}
+	token := strings.TrimSpace(parts[1])
+	if token == "" {
+		return "", false
+	}
+	return token, true
+}
+
 // RequireToken is middleware that validates the presence and format of an OIDC token
 func RequireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,15 +43,14 @@ func RequireToken(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check if it's a Bearer token
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
+		token, ok := ParseBearerToken(authHeader)
+		if !ok {
 			http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
 			return
 		}
 
 		// Add token to request context for downstream handlers
-		ctx := context.WithValue(r.Context(), TokenCtxKey{}, parts[1])
+		ctx := context.WithValue(r.Context(), TokenCtxKey{}, token)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

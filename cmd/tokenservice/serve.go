@@ -43,6 +43,15 @@ var serveCmd = &cobra.Command{
 				rfc8693RefreshStorePath = "./data/refresh-tokens"
 			}
 		}
+		if serviceIdentityCAPath == "" {
+			serviceIdentityCAPath = os.Getenv("TOKENSMITH_SERVICE_IDENTITY_CA")
+		}
+		if tlsCertFile == "" {
+			tlsCertFile = os.Getenv("TOKENSMITH_TLS_CERT_FILE")
+		}
+		if tlsKeyFile == "" {
+			tlsKeyFile = os.Getenv("TOKENSMITH_TLS_KEY_FILE")
+		}
 
 		// Create token service configuration
 		serviceConfig := tokenservice.Config{
@@ -57,6 +66,9 @@ var serveCmd = &cobra.Command{
 			OIDCClientSecret:          oidcClientSecret,
 			RFC8693BootstrapStorePath: rfc8693BootstrapStorePath,
 			RFC8693RefreshStorePath:   rfc8693RefreshStorePath,
+			ServiceIdentityCAPath:     serviceIdentityCAPath,
+			TLSCertFile:               tlsCertFile,
+			TLSKeyFile:                tlsKeyFile,
 		}
 
 		// Create key manager
@@ -115,10 +127,11 @@ func init() {
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")
 	serveCmd.Flags().BoolVar(&enableLocalUserMint, "enable-local-user-mint", false, "Enable local user-token mint mode (break-glass path)")
+	serveCmd.Flags().StringVar(&serviceIdentityCAPath, "service-identity-ca", "", "Path to PEM CA bundle trusted for inbound service identity client certificates (or set TOKENSMITH_SERVICE_IDENTITY_CA)")
+	serveCmd.Flags().StringVar(&tlsCertFile, "tls-cert-file", "", "Path to TLS server certificate PEM (or set TOKENSMITH_TLS_CERT_FILE)")
+	serveCmd.Flags().StringVar(&tlsKeyFile, "tls-key-file", "", "Path to TLS server private key PEM (or set TOKENSMITH_TLS_KEY_FILE)")
 
 	rootCmd.AddCommand(serveCmd)
 	serveCmd.Flags().StringVar(&rfc8693BootstrapStorePath, "rfc8693-bootstrap-store", "", "Path to RFC 8693 bootstrap token store (or set TOKENSMITH_RFC8693_BOOTSTRAP_STORE; default: ./data/bootstrap-tokens)")
 	serveCmd.Flags().StringVar(&rfc8693RefreshStorePath, "rfc8693-refresh-store", "", "Path to RFC 8693 refresh token family store (or set TOKENSMITH_RFC8693_REFRESH_STORE; default: ./data/refresh-tokens)")
-
-	rootCmd.AddCommand(serveCmd)
 }
