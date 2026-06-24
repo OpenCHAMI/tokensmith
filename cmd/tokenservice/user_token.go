@@ -6,8 +6,11 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/keys"
@@ -89,7 +92,11 @@ var userTokenCreateCmd = &cobra.Command{
 			return fmt.Errorf("failed to generate user token: %w", err)
 		}
 
-		fmt.Println(tok)
+		if term.IsTerminal(int(os.Stdout.Fd())) {
+			fmt.Println(tok)
+		} else {
+			fmt.Print(tok)
+		}
 		return nil
 	},
 }

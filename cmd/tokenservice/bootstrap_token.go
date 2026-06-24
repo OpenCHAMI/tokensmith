@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	tokenservice "github.com/openchami/tokensmith/pkg/tokenservice"
 	"github.com/spf13/cobra"
 )
@@ -135,7 +137,11 @@ Example:
 				},
 			}
 			jsonBytes, _ := json.MarshalIndent(output, "", "  ")
-			fmt.Println(string(jsonBytes))
+			if term.IsTerminal(int(os.Stdout.Fd())) {
+				fmt.Println(string(jsonBytes))
+			} else {
+				fmt.Print(string(jsonBytes))
+			}
 
 		case "text":
 			fmt.Printf("Bootstrap Token:  %s\n", opaqueToken)
