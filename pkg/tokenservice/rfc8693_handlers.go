@@ -254,7 +254,7 @@ func (s *TokenService) handleBootstrapTokenExchange(w http.ResponseWriter, r *ht
 		}
 
 		// Validate and inherit claims
-		validator := NewHierarchyValidator(nil) // Storage integration TODO: Phase 3
+		validator := NewHierarchyValidator(s.hierarchyStorage)
 		hierarchyResult, err = validator.ValidateAndInheritClaims(context.Background(), ClaimInheritanceRequest{
 			ParentClaims: parentClaims,
 			ChildClaims:  childClaims,
@@ -283,6 +283,24 @@ func (s *TokenService) handleBootstrapTokenExchange(w http.ResponseWriter, r *ht
 			s.writeOAuthError(w, http.StatusInternalServerError, "server_error",
 				"An internal server error occurred")
 			return
+		}
+
+		// Save hierarchy record to storage
+		if s.hierarchyStorageAdapter != nil {
+			hierarchy := &TokenHierarchy{
+				ParentTokenID: parentClaims.ID,
+				ChildTokenID:  childClaims.ID,
+				Subject:       parentClaims.Subject,
+				Depth:         hierarchyResult.Depth,
+			}
+
+			if err := s.hierarchyStorageAdapter.SaveHierarchy(context.Background(), hierarchy, &hierarchyResult.InheritedClaims); err != nil {
+				log.Warn().
+					Err(err).
+					Str("parent_token_id", parentClaims.ID).
+					Str("child_token_id", childClaims.ID).
+					Msg("Failed to persist token hierarchy record (non-fatal)")
+			}
 		}
 
 		log.Info().
