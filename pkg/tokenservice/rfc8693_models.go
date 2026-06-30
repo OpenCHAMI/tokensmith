@@ -34,8 +34,7 @@ type OAuthTokenRequest struct {
 	SubjectToken     string `json:"subject_token,omitempty"`
 	SubjectTokenType string `json:"subject_token_type,omitempty"`
 	RefreshToken     string `json:"refresh_token,omitempty"`
-	// Other RFC 8693 parameters (not used in bootstrap):
-	// ActorToken, ActorTokenType, Scope, Resource, Audience
+	ParentTokenID    string `json:"parent_token_id,omitempty"`
 }
 
 // OAuthTokenResponse is the RFC 8693 token response.

@@ -10,3 +10,4 @@ groups:
     resources:
       - BootstrapTokenPolicy
       - RefreshTokenFamily
+      - TokenHierarchy

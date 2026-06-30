@@ -131,3 +131,50 @@ func ListrefreshtokenfamilysByLabels(ctx context.Context, labels map[string]stri
 	}
 	return out, nil
 }
+
+// Querytokenhierarchys returns a query builder for tokenhierarchys
+func Querytokenhierarchys(ctx context.Context) *ent.ResourceQuery {
+	return QueryResources(ctx, "TokenHierarchy")
+}
+
+// GetTokenHierarchyByUID loads a single TokenHierarchy by UID
+func GetTokenHierarchyByUID(ctx context.Context, uid string) (*v1.TokenHierarchy, error) {
+	ensureEntClient()
+	r, err := entClient.Resource.Query().
+		Where(entresource.UIDEQ(uid), entresource.KindEQ("TokenHierarchy")).
+		WithLabels().
+		WithAnnotations().
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to load TokenHierarchy %s: %w", uid, err)
+	}
+	v, err := FromEntResource(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	return v.(*v1.TokenHierarchy), nil
+}
+
+// ListtokenhierarchysByLabels returns tokenhierarchys matching all provided labels
+func ListtokenhierarchysByLabels(ctx context.Context, labels map[string]string) ([]*v1.TokenHierarchy, error) {
+	q, err := QueryResourcesByLabels(ctx, "TokenHierarchy", labels)
+	if err != nil {
+		return nil, err
+	}
+	rs, err := q.WithLabels().WithAnnotations().All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*v1.TokenHierarchy, 0, len(rs))
+	for _, r := range rs {
+		v, err := FromEntResource(ctx, r)
+		if err != nil {
+			continue
+		}
+		out = append(out, v.(*v1.TokenHierarchy))
+	}
+	return out, nil
+}

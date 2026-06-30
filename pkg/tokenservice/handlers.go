@@ -244,7 +244,12 @@ func (s *TokenService) RevokeTokenHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	if claims.ExpiresAt != nil {
-		s.revocationStore.Revoke(claims.ID, claims.ExpiresAt.Time)
+		if err := s.RevokeWithCascade(r.Context(), claims.ID, claims.ExpiresAt.Time); err != nil {
+			log.Warn().
+				Err(err).
+				Str("jti", claims.ID).
+				Msg("Cascade revocation encountered non-fatal errors")
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
