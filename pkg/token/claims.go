@@ -207,41 +207,23 @@ func (c *TSClaims) ValidateAt(enforce bool, now time.Time) error {
 		logs = append(logs, "Missing audience claim")
 	}
 
-	// NIST SP 800-63B requirements
+	// Optional NIST SP 800-63B requirements
 	if c.AuthLevel == "" {
-		if enforce {
-			return errors.New("auth_level claim is required")
-		}
 		logs = append(logs, "Missing auth_level claim")
 	}
-	if c.AuthFactors < 2 {
-		if enforce {
-			return errors.New("at least 2 authentication factors are required")
-		}
-		logs = append(logs, "Less than 2 authentication factors")
+	if c.AuthFactors == 0 {
+		logs = append(logs, "No authentication factors specified")
 	}
 	if len(c.AuthMethods) == 0 {
-		if enforce {
-			return errors.New("auth_methods claim is required")
-		}
 		logs = append(logs, "Missing auth_methods claim")
 	}
 	if c.SessionID == "" {
-		if enforce {
-			return errors.New("session_id claim is required")
-		}
 		logs = append(logs, "Missing session_id claim")
 	}
 	if c.SessionExp == 0 {
-		if enforce {
-			return errors.New("session_exp claim is required")
-		}
 		logs = append(logs, "Missing session_exp claim")
 	}
 	if len(c.AuthEvents) == 0 {
-		if enforce {
-			return errors.New("auth_events claim is required")
-		}
 		logs = append(logs, "Missing auth_events claim")
 	}
 	iat := int64(0)
