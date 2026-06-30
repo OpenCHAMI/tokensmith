@@ -288,6 +288,9 @@ func (s *TokenService) newRouter(logger zerolog.Logger) http.Handler {
 			r.Use(oidc.RequireToken)
 			r.Use(s.withCurrentOIDCProvider)
 			r.Post("/exchange", s.TokenExchangeHandler)
+			// Issue #36: Session Token Management API
+			// Requires OIDC authentication to extract MFA claims from id_token
+			r.Post("/session", s.CreateSessionToken)
 		})
 		r.Post("/revoke", s.RevokeTokenHandler)
 	})
