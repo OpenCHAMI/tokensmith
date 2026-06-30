@@ -216,6 +216,40 @@ func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// RevokeTokenHandler handles token revocation requests per RFC 7009.
+// POST /oauth/revoke with parameters: token (required), token_type_hint (optional).
+// Per RFC 7009 Section 2.2, the endpoint MUST return 200 OK regardless of whether
+// the token was valid, already revoked, or never existed (prevent token scanning).
+func (s *TokenService) RevokeTokenHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	tokenString := r.FormValue("token")
+	if tokenString == "" {
+		http.Error(w, "missing token parameter", http.StatusBadRequest)
+		return
+	}
+
+	claims, _, err := s.TokenManager.ParseToken(tokenString)
+	if err != nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if claims.ExpiresAt != nil {
+		s.revocationStore.Revoke(claims.ID, claims.ExpiresAt.Time)
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // HealthHandler provides a health check endpoint.
 func (s *TokenService) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -250,6 +284,7 @@ func (s *TokenService) newRouter(logger zerolog.Logger) http.Handler {
 			r.Use(s.withCurrentOIDCProvider)
 			r.Post("/exchange", s.TokenExchangeHandler)
 		})
+		r.Post("/revoke", s.RevokeTokenHandler)
 	})
 	r.Route("/admin/oidc", func(r chi.Router) {
 		r.Get("/config", s.OIDCConfigStatusHandler)

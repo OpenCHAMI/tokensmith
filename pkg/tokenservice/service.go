@@ -97,6 +97,9 @@ type TokenService struct {
 	// (NIST SP 800-63-4 Section 5.2.2)
 	replayLimiter *replayLimiter
 
+	// RFC 7009: Token revocation store for invalidated JTIs
+	revocationStore *RevocationStore
+
 	// Trust roots for inbound mTLS service identity certificates.
 	serviceIdentityCAPool *x509.CertPool
 }
@@ -120,14 +123,15 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	)
 
 	svc := &TokenService{
-		TokenManager:  tokenManager,
-		Config:        config,
-		Issuer:        config.Issuer,
-		GroupScopes:   config.GroupScopes,
-		ClusterID:     config.ClusterID,
-		OpenCHAMIID:   config.OpenCHAMIID,
-		OIDCProvider:  oidcProvider,
-		replayLimiter: newReplayLimiter(),
+		TokenManager:    tokenManager,
+		Config:          config,
+		Issuer:          config.Issuer,
+		GroupScopes:     config.GroupScopes,
+		ClusterID:       config.ClusterID,
+		OpenCHAMIID:     config.OpenCHAMIID,
+		OIDCProvider:    oidcProvider,
+		replayLimiter:   newReplayLimiter(),
+		revocationStore: NewRevocationStore(),
 	}
 
 	if strings.TrimSpace(config.ServiceIdentityCAPath) != "" {
