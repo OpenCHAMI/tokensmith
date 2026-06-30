@@ -336,6 +336,65 @@ go test ./pkg/authn
 go test ./pkg/authz
 ```
 
+### Local Development with Fabrica
+
+TokenSmith uses [Fabrica](https://github.com/openchami/fabrica) for storage code generation. During development, you may need to work with local unpublished Fabrica branches.
+
+#### Using Local Fabrica (Unpublished Changes)
+
+**Branch:** `integration/wormhole` uses local Fabrica branch `62-rfd-per-resource-storage-schemas-with-annotations`
+
+**Setup:**
+
+```bash
+# 1. Clone Fabrica alongside tokensmith
+cd /path/to/OpenCHAMI
+git clone https://github.com/openchami/fabrica.git
+cd fabrica
+git checkout 62-rfd-per-resource-storage-schemas-with-annotations
+
+# 2. TokenSmith already has go.mod replace directive pointing to ../fabrica
+cd ../tokensmith
+cat go.mod | grep fabrica
+# Output: replace github.com/openchami/fabrica => ../fabrica
+
+# 3. Build local Fabrica CLI
+cd ../fabrica
+make build
+./bin/fabrica --version
+```
+
+**Generate Storage Code:**
+
+```bash
+# From fabrica directory
+cd /path/to/OpenCHAMI/fabrica
+
+# Generate storage adapters for tokensmith
+./bin/fabrica generate \
+  --input ../tokensmith/pkg/tokenservice/rfc8693_models.go \
+  --output ../tokensmith/internal/storage/postgres
+```
+
+**When Fabrica Publishes:**
+
+Once Fabrica Issue #62 merges to main:
+
+```bash
+# Remove local replace directive
+cd /path/to/OpenCHAMI/tokensmith
+# Delete the line: replace github.com/openchami/fabrica => ../fabrica
+# from go.mod
+
+# Update to published version
+go get github.com/openchami/fabrica@latest
+go mod tidy
+```
+
+**Documentation:**
+
+See `~/Documents/Obsidian/OpenCHAMI/tokensmith/plans/storage-annotations-migration.md` for complete migration plan.
+
 ## Contributing
 
 1. Fork the repository

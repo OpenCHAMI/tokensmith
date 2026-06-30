@@ -21,7 +21,8 @@ func writePolicyFileForTest(t *testing.T, storePath string, policy *BootstrapTok
 	t.Helper()
 
 	filePath := filepath.Join(storePath, policy.TokenHash+".json")
-	data, err := json.MarshalIndent(policy, "", "  ")
+	storagePolicy := policy.toStorage()
+	data, err := json.MarshalIndent(storagePolicy, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filePath, data, 0600))
 }

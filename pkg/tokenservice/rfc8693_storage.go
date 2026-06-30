@@ -88,9 +88,10 @@ func (s *BootstrapTokenStore) SavePolicy(policy *BootstrapTokenPolicy) error {
 
 	s.policies[policy.TokenHash] = policy
 
-	// Persist to disk
+	// Persist to disk using storage format (includes TokenHash)
 	filePath := filepath.Join(s.storePath, policy.TokenHash+".json")
-	data, err := json.MarshalIndent(policy, "", "  ")
+	storagePolicy := policy.toStorage()
+	data, err := json.MarshalIndent(storagePolicy, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal bootstrap policy: %w", err)
 	}
@@ -193,16 +194,17 @@ func (s *BootstrapTokenStore) loadPolicyFromDisk(tokenHash string) (*BootstrapTo
 		return nil, fmt.Errorf("failed to read bootstrap policy file: %w", err)
 	}
 
-	var policy BootstrapTokenPolicy
-	if err := json.Unmarshal(data, &policy); err != nil {
+	var storagePolicy bootstrapTokenPolicyStorage
+	if err := json.Unmarshal(data, &storagePolicy); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal bootstrap policy file: %w", err)
 	}
 
+	policy := storagePolicy.fromStorage()
 	if policy.TokenHash != tokenHash {
 		return nil, fmt.Errorf("bootstrap token hash mismatch: expected %s, got %s", tokenHash, policy.TokenHash)
 	}
 
-	return &policy, nil
+	return policy, nil
 }
 
 func (s *BootstrapTokenStore) loadLatestPolicyBySubjectFromDisk(subject string) (*BootstrapTokenPolicy, error) {
@@ -226,16 +228,17 @@ func (s *BootstrapTokenStore) loadLatestPolicyBySubjectFromDisk(subject string) 
 			continue
 		}
 
-		var policy BootstrapTokenPolicy
-		if err := json.Unmarshal(data, &policy); err != nil {
+		var storagePolicy bootstrapTokenPolicyStorage
+		if err := json.Unmarshal(data, &storagePolicy); err != nil {
 			continue
 		}
+
+		policy := storagePolicy.fromStorage()
 		if policy.Subject != subject || strings.TrimSpace(policy.TokenHash) == "" {
 			continue
 		}
 		if best == nil || policy.CreatedAt.After(best.CreatedAt) {
-			policyCopy := policy
-			best = &policyCopy
+			best = policy
 		}
 	}
 
@@ -258,9 +261,10 @@ func (s *RefreshTokenStore) SaveFamily(family *RefreshTokenFamily) error {
 
 	s.families[family.FamilyID] = family
 
-	// Persist to disk
+	// Persist to disk using storage format (includes CurrentTokenHash)
 	filePath := filepath.Join(s.storePath, family.FamilyID+".json")
-	data, err := json.MarshalIndent(family, "", "  ")
+	storageFamily := family.toStorage()
+	data, err := json.MarshalIndent(storageFamily, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal refresh token family: %w", err)
 	}
@@ -335,13 +339,14 @@ func (s *BootstrapTokenStore) load() error {
 			continue
 		}
 
-		var policy BootstrapTokenPolicy
-		if err := json.Unmarshal(data, &policy); err != nil {
+		var storagePolicy bootstrapTokenPolicyStorage
+		if err := json.Unmarshal(data, &storagePolicy); err != nil {
 			log.Warn().Err(err).Str("file", entry.Name()).Msg("Failed to unmarshal bootstrap policy")
 			continue
 		}
 
-		s.policies[policy.TokenHash] = &policy
+		policy := storagePolicy.fromStorage()
+		s.policies[policy.TokenHash] = policy
 	}
 
 	return nil
@@ -369,13 +374,14 @@ func (s *RefreshTokenStore) load() error {
 			continue
 		}
 
-		var family RefreshTokenFamily
-		if err := json.Unmarshal(data, &family); err != nil {
+		var storageFamily refreshTokenFamilyStorage
+		if err := json.Unmarshal(data, &storageFamily); err != nil {
 			log.Warn().Err(err).Str("file", entry.Name()).Msg("Failed to unmarshal refresh token family")
 			continue
 		}
 
-		s.families[family.FamilyID] = &family
+		family := storageFamily.fromStorage()
+		s.families[family.FamilyID] = family
 	}
 
 	return nil
