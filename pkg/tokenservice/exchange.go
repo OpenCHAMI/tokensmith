@@ -70,37 +70,56 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		claims.EmailVerified = emailVerified
 	}
 
+	// Extract standard OIDC MFA claims (amr, acr, auth_time)
+	// Per OIDC Core 1.0 Section 2: Authentication Methods Reference (amr)
+	amr := extractStringArrayFromClaims(introspection.Claims, "amr")
+	if len(amr) > 0 {
+		claims.AMR = amr
+	}
+
+	// Authentication Context Class Reference (acr)
+	if acr, ok := introspection.Claims["acr"].(string); ok && acr != "" {
+		claims.ACR = acr
+	}
+
+	// Authentication time (auth_time) - when user actually authenticated
+	if authTime, ok := introspection.Claims["auth_time"].(float64); ok {
+		claims.AuthTime = int64(authTime)
+	}
+
+	// Extract custom NIST claims (optional for backward compatibility)
+	// If present, use them; otherwise derive from standard OIDC claims
 	if authLevel, ok := introspection.Claims["auth_level"].(string); ok {
 		claims.AuthLevel = authLevel
-	} else {
-		return "", fmt.Errorf("missing required claim: auth_level")
 	}
+
+	// Derive AuthFactors from AMR if not explicitly provided
 	if authFactors, ok := introspection.Claims["auth_factors"].(float64); ok {
 		claims.AuthFactors = int(authFactors)
-	} else if _, exists := introspection.Claims["auth_factors"]; !exists {
-		return "", fmt.Errorf("missing required claim: auth_factors")
-	} else {
-		return "", fmt.Errorf("invalid type for claim auth_factors: expected number")
+	} else if len(amr) > 0 {
+		// Derive auth factors by counting distinct factor categories from AMR
+		// Per NIST SP 800-63B: knowledge (pwd), possession (otp, sms), inherence (bio, fido2)
+		claims.AuthFactors = deriveAuthFactorsFromAMR(amr)
 	}
 
+	// Extract auth_methods from custom claim or map from AMR for backward compatibility
 	authMethods := extractStringArrayFromClaims(introspection.Claims, "auth_methods")
-	if len(authMethods) == 0 {
-		return "", fmt.Errorf("missing required claim: auth_methods")
+	if len(authMethods) > 0 {
+		claims.AuthMethods = authMethods
+	} else if len(amr) > 0 {
+		// Map AMR to AuthMethods for backward compatibility
+		claims.AuthMethods = amr
 	}
-	claims.AuthMethods = authMethods
 
+	// Extract custom session claims (optional)
 	if sessionID, ok := introspection.Claims["session_id"].(string); ok {
 		claims.SessionID = sessionID
-	} else {
-		return "", fmt.Errorf("missing required claim: session_id")
 	}
 	if sessionExp, ok := introspection.Claims["session_exp"].(float64); ok {
 		claims.SessionExp = int64(sessionExp)
-	} else if _, exists := introspection.Claims["session_exp"]; !exists {
-		return "", fmt.Errorf("missing required claim: session_exp")
-	} else {
-		return "", fmt.Errorf("invalid type for claim session_exp: expected number")
 	}
+
+	// Extract auth_events (optional)
 	if authEvents, ok := introspection.Claims["auth_events"].([]interface{}); ok {
 		claims.AuthEvents = make([]string, len(authEvents))
 		for index, value := range authEvents {
@@ -108,8 +127,6 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 				claims.AuthEvents[index] = authEvent
 			}
 		}
-	} else {
-		return "", fmt.Errorf("missing required claim: auth_events")
 	}
 
 	if groupsRaw, ok := introspection.Claims["groups"]; ok {
@@ -170,4 +187,23 @@ func extractStringArrayFromClaims(claims map[string]interface{}, key string) []s
 	}
 
 	return strings
+}
+
+func deriveAuthFactorsFromAMR(amr []string) int {
+	factorCategories := make(map[string]bool)
+
+	for _, method := range amr {
+		switch method {
+		case "pwd", "pin", "kba":
+			factorCategories["knowledge"] = true
+		case "otp", "sms", "hwk", "swk":
+			factorCategories["possession"] = true
+		case "bio", "fido2", "fido", "face", "fpt", "iris", "retina", "vbm":
+			factorCategories["inherence"] = true
+		default:
+			factorCategories["other"] = true
+		}
+	}
+
+	return len(factorCategories)
 }
