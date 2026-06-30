@@ -127,6 +127,11 @@ type TSClaims struct {
 	// OpenCHAMIID is an OpenCHAMI claim for the unique entity ID.
 	// JSON key: "openchami_id"
 	OpenCHAMIID string `json:"openchami_id,omitempty"`
+
+	// ParentID is the JWT ID (jti) of the parent token for hierarchical tokens.
+	// JSON key: "parent_id"
+	// Used for claim inheritance and cascade revocation (Issue #37).
+	ParentID string `json:"parent_id,omitempty"`
 }
 
 // NewClaims creates a new Claims instance with default timestamps:

@@ -73,6 +73,22 @@ type UpdateRefreshTokenFamilyRequest struct {
 	Annotations map[string]string         `json:"annotations,omitempty" yaml:"annotations,omitempty"`
 }
 
+// CreateTokenHierarchyRequest represents a request to create a TokenHierarchy
+type CreateTokenHierarchyRequest struct {
+	Metadata    fabrica.Metadata      `json:"metadata" yaml:"metadata" validate:"required"`
+	Spec        v1.TokenHierarchySpec `json:"spec" yaml:"spec" validate:"required"`
+	Labels      map[string]string     `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Annotations map[string]string     `json:"annotations,omitempty" yaml:"annotations,omitempty"`
+}
+
+// UpdateTokenHierarchyRequest represents a request to update a TokenHierarchy
+type UpdateTokenHierarchyRequest struct {
+	Metadata    fabrica.Metadata      `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	Spec        v1.TokenHierarchySpec `json:"spec,omitempty" yaml:"spec,omitempty" validate:"omitempty"`
+	Labels      map[string]string     `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Annotations map[string]string     `json:"annotations,omitempty" yaml:"annotations,omitempty"`
+}
+
 // DeleteResponse represents a successful deletion response
 type DeleteResponse struct {
 	Message string `json:"message"`

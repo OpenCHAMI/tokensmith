@@ -100,6 +100,12 @@ type TokenService struct {
 	// RFC 7009: Token revocation store for invalidated JTIs
 	revocationStore *RevocationStore
 
+	// Issue #37: Token hierarchy storage for parent-child relationships
+	hierarchyStorage        TokenHierarchyStorage
+	hierarchyStorageAdapter interface {
+		SaveHierarchy(ctx context.Context, hierarchy *TokenHierarchy, inheritedClaims *InheritedClaims) error
+	}
+
 	// Trust roots for inbound mTLS service identity certificates.
 	serviceIdentityCAPool *x509.CertPool
 }

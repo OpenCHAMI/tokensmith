@@ -5,6 +5,7 @@
 package tokenservice
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/rs/zerolog/log"
 )
 
@@ -39,6 +41,7 @@ func (s *TokenService) OAuthTokenHandler(w http.ResponseWriter, r *http.Request)
 	req.SubjectToken = r.FormValue("subject_token")
 	req.SubjectTokenType = r.FormValue("subject_token_type")
 	req.RefreshToken = r.FormValue("refresh_token")
+	req.ParentTokenID = r.FormValue("parent_token_id")
 
 	if strings.TrimSpace(req.GrantType) == "" {
 		s.writeOAuthError(w, http.StatusBadRequest, "invalid_request", "Missing grant_type parameter")
@@ -174,6 +177,53 @@ func (s *TokenService) handleBootstrapTokenExchange(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// Handle parent-child token hierarchy if parent_token_id is provided (Issue #37)
+	var parentClaims *token.TSClaims
+	var hierarchyResult *ClaimInheritanceResult
+	if req.ParentTokenID != "" {
+		parentClaims, _, err = s.TokenManager.ParseToken(req.ParentTokenID)
+		if err != nil {
+			log.Warn().
+				Err(err).
+				Str("component", "tokenservice").
+				Str("handler", "oauth_token").
+				Str("client_ip", clientIP).
+				Msg("Failed to parse parent token")
+
+			s.writeOAuthError(w, http.StatusBadRequest, "invalid_request",
+				"Invalid parent_token_id parameter")
+			return
+		}
+
+		// Validate parent token hasn't expired
+		validator := NewHierarchyValidator(nil) // Storage not needed for parent validation
+		if err := validator.ValidateParentToken(parentClaims, time.Now()); err != nil {
+			log.Warn().
+				Err(err).
+				Str("component", "tokenservice").
+				Str("handler", "oauth_token").
+				Str("parent_token_id", parentClaims.ID).
+				Msg("Parent token validation failed")
+
+			s.writeOAuthError(w, http.StatusBadRequest, "invalid_request",
+				"Parent token has expired or is invalid")
+			return
+		}
+
+		// Check if parent is revoked
+		if s.revocationStore.IsRevoked(parentClaims.ID) {
+			log.Warn().
+				Str("component", "tokenservice").
+				Str("handler", "oauth_token").
+				Str("parent_token_id", parentClaims.ID).
+				Msg("Parent token has been revoked")
+
+			s.writeOAuthError(w, http.StatusBadRequest, "invalid_request",
+				"Parent token has been revoked")
+			return
+		}
+	}
+
 	// Generate service token (access token) with server-determined scopes
 	accessToken, err := s.GenerateServiceToken(policy.Subject, policy.Audience, policy.Scopes, 3600*time.Second)
 	if err != nil {
@@ -187,6 +237,80 @@ func (s *TokenService) handleBootstrapTokenExchange(w http.ResponseWriter, r *ht
 		s.writeOAuthError(w, http.StatusInternalServerError, "server_error",
 			"An internal server error occurred")
 		return
+	}
+
+	// If parent token provided, inherit claims and create hierarchy
+	if parentClaims != nil {
+		childClaims, _, err := s.TokenManager.ParseToken(accessToken)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("component", "tokenservice").
+				Msg("Failed to parse generated child token")
+
+			s.writeOAuthError(w, http.StatusInternalServerError, "server_error",
+				"An internal server error occurred")
+			return
+		}
+
+		// Validate and inherit claims
+		validator := NewHierarchyValidator(s.hierarchyStorage)
+		hierarchyResult, err = validator.ValidateAndInheritClaims(context.Background(), ClaimInheritanceRequest{
+			ParentClaims: parentClaims,
+			ChildClaims:  childClaims,
+		})
+		if err != nil {
+			log.Warn().
+				Err(err).
+				Str("component", "tokenservice").
+				Str("parent_token_id", parentClaims.ID).
+				Str("child_token_id", childClaims.ID).
+				Msg("Claim inheritance validation failed")
+
+			s.writeOAuthError(w, http.StatusBadRequest, "invalid_request",
+				fmt.Sprintf("Claim inheritance failed: %v", err))
+			return
+		}
+
+		// Regenerate token with inherited claims
+		accessToken, err = s.TokenManager.GenerateToken(childClaims)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("component", "tokenservice").
+				Msg("Failed to regenerate token with inherited claims")
+
+			s.writeOAuthError(w, http.StatusInternalServerError, "server_error",
+				"An internal server error occurred")
+			return
+		}
+
+		// Save hierarchy record to storage
+		if s.hierarchyStorageAdapter != nil {
+			hierarchy := &TokenHierarchy{
+				ParentTokenID: parentClaims.ID,
+				ChildTokenID:  childClaims.ID,
+				Subject:       parentClaims.Subject,
+				Depth:         hierarchyResult.Depth,
+			}
+
+			if err := s.hierarchyStorageAdapter.SaveHierarchy(context.Background(), hierarchy, &hierarchyResult.InheritedClaims); err != nil {
+				log.Warn().
+					Err(err).
+					Str("parent_token_id", parentClaims.ID).
+					Str("child_token_id", childClaims.ID).
+					Msg("Failed to persist token hierarchy record (non-fatal)")
+			}
+		}
+
+		log.Info().
+			Str("component", "tokenservice").
+			Str("parent_token_id", parentClaims.ID).
+			Str("child_token_id", childClaims.ID).
+			Int("depth", hierarchyResult.Depth).
+			Strs("inherited_amr", hierarchyResult.InheritedClaims.AMR).
+			Str("inherited_acr", hierarchyResult.InheritedClaims.ACR).
+			Msg("Child token created with inherited MFA claims")
 	}
 
 	// Generate refresh token and create token family
