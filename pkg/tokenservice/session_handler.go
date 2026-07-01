@@ -133,7 +133,19 @@ func (s *TokenService) CreateSessionToken(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// TODO: Store session token for revocation (session_store implementation)
+	// Store session token for revocation tracking
+	sessionToken := &SessionToken{
+		SessionID: sessionID,
+		TokenID:   tokenID,
+		Subject:   subject,
+		CreatedAt: now,
+		ExpiresAt: expiresAt,
+		Revoked:   false,
+	}
+	if err := s.sessionStore.SaveSession(sessionToken); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to store session: %v", err), http.StatusInternalServerError)
+		return
+	}
 
 	// Build response
 	response := SessionTokenResponse{

@@ -37,6 +37,7 @@ func TestCreateSessionToken(t *testing.T) {
 		Issuer:       "test-issuer",
 		ClusterID:    "test-cluster",
 		OpenCHAMIID:  "test-openchami",
+		sessionStore: NewSessionStore(),
 		Config: Config{
 			Issuer:      "test-issuer",
 			ClusterID:   "test-cluster",

@@ -106,6 +106,9 @@ type TokenService struct {
 		SaveHierarchy(ctx context.Context, hierarchy *TokenHierarchy, inheritedClaims *InheritedClaims) error
 	}
 
+	// Issue #36: Session token storage for revocation tracking
+	sessionStore *SessionStore
+
 	// Trust roots for inbound mTLS service identity certificates.
 	serviceIdentityCAPool *x509.CertPool
 }
@@ -138,6 +141,7 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		OIDCProvider:    oidcProvider,
 		replayLimiter:   newReplayLimiter(),
 		revocationStore: NewRevocationStore(),
+		sessionStore:    NewSessionStore(),
 	}
 
 	if strings.TrimSpace(config.ServiceIdentityCAPath) != "" {
