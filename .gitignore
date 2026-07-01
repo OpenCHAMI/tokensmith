@@ -52,3 +52,4 @@ tests/integration/authelia/config/oidc-key.pem
 # LLM files
 CLAUDE.md
 CURSOR/
+bin/

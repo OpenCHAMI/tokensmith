@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 OpenCHAMI Contributors
+#
+# SPDX-License-Identifier: MIT
+
+project:
+  name: tokensmith
+  module: github.com/openchami/tokensmith
+  description: RFC 8693 Token Exchange service with Fabrica-generated PostgreSQL storage
+  created: 2026-06-30T00:00:00Z
+
+features:
+  validation:
+    enabled: true
+    mode: strict
+  events:
+    enabled: false
+  conditional:
+    enabled: false
+  auth:
+    enabled: false  # TokenSmith IS the auth service
+  security:
+    authn:
+      enabled: false
+    authz:
+      enabled: false
+  storage:
+    enabled: true
+    type: ent  # Ent ORM for PostgreSQL storage
+  metrics:
+    enabled: false
+
+generation:
+  handlers: false  # We already have custom RFC 8693 handlers
+  storage: true    # Generate storage interfaces and PostgreSQL adapters
+  client: false    # No client SDK needed
+  openapi: false   # We already have custom OpenAPI spec
+  events: false
+  middleware: false  # We already have custom middleware
+  reconciliation: false
