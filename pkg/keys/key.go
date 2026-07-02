@@ -152,8 +152,19 @@ func canonicalECJWK(k *ecdsa.PublicKey) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	x := base64.RawURLEncoding.EncodeToString(k.X.Bytes())
-	y := base64.RawURLEncoding.EncodeToString(k.Y.Bytes())
+
+	bytes, err := k.Bytes()
+	if err != nil {
+		return "", fmt.Errorf("failed to encode EC public key: %w", err)
+	}
+
+	if len(bytes) < 1 || bytes[0] != 0x04 {
+		return "", fmt.Errorf("unexpected EC public key format")
+	}
+
+	coordLen := (len(bytes) - 1) / 2
+	x := base64.RawURLEncoding.EncodeToString(bytes[1 : 1+coordLen])
+	y := base64.RawURLEncoding.EncodeToString(bytes[1+coordLen:])
 
 	return fmt.Sprintf(`{"crv":"%s","kty":"EC","x":"%s","y":"%s"}`,
 		curve,

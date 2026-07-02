@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-.PHONY: help build test lint clean install run docker-build docker-run check-no-legacy-middleware
+.PHONY: help build test test-integration test-integration-postgres lint clean install run docker-build docker-run check-no-legacy-middleware
 
 # Variables
 BINARY_NAME=tokensmith
@@ -22,6 +22,12 @@ build: ## Build the application
 
 test:  ## Run tests
 	$(GO) test $(GOFLAGS) -race -coverprofile=coverage.out -covermode=atomic $$(go list ./... 2>/dev/null | grep -v /examples/)
+
+test-integration: ## Run integration tests (requires Docker/Podman)
+	$(GO) test $(GOFLAGS) -tags=integration -v ./pkg/tokenservice -timeout 5m
+
+test-integration-postgres: ## Run postgres integration tests only
+	$(GO) test $(GOFLAGS) -tags=integration -run TestPostgresIntegration -v ./pkg/tokenservice -timeout 5m
 
 test-coverage: test ## Run tests with coverage report
 	$(GO) tool cover -html=coverage.out -o coverage.html
