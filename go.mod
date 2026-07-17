@@ -70,9 +70,3 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/openchami/tokensmith => ./
-
-// Local Fabrica with storage annotations (unpublished)
-// Branch: 62-rfd-per-resource-storage-schemas-with-annotations
-replace github.com/openchami/fabrica => ../fabrica
