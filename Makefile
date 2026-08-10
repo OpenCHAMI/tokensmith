@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-.PHONY: help build test lint clean install run docker-build docker-run check-no-legacy-middleware
+.PHONY: help build test lint clean install run docker-build docker-run check-no-legacy-middleware rpm-build rpm-clean
 
 # Variables
 BINARY_NAME=tokensmith
@@ -13,6 +13,14 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS=-ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
+
+# RPM version/release: strip the leading 'v' and drop git-describe's
+# '-N-gHASH[-dirty]' suffix (hyphens aren't allowed in an RPM Version
+# field anyway). An exact tag like v0.1.2 becomes 0.1.2.
+RPM_VERSION ?= $(shell echo "$(VERSION)" | sed -e 's/^v//' -e 's/-.*//')
+RPM_RELEASE ?= 1
+RPM_TOPDIR ?= $(CURDIR)/dist/rpmbuild
+RPM_NAME ?= tokensmith-quadlet
 
 help: ## Display this help screen
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
@@ -55,6 +63,24 @@ docker-run: docker-build ## Build and run Docker container
 
 release-snapshot: ## Create a snapshot release with GoReleaser
 	goreleaser release --snapshot --clean
+
+rpm-build: ## Build the tokensmith RPM (VERSION/RPM_RELEASE override the derived defaults)
+	@command -v rpmbuild >/dev/null 2>&1 || { echo "rpmbuild is required but not installed."; exit 1; }
+	rm -rf $(RPM_TOPDIR)
+	mkdir -p $(RPM_TOPDIR)/SOURCES/$(RPM_NAME)-$(RPM_VERSION)/LICENSES
+	cp packaging/rpm-quadlet/systemd/* $(RPM_TOPDIR)/SOURCES/$(RPM_NAME)-$(RPM_VERSION)/
+	cp packaging/rpm-quadlet/configs/* $(RPM_TOPDIR)/SOURCES/$(RPM_NAME)-$(RPM_VERSION)/
+	cp LICENSES/MIT.txt $(RPM_TOPDIR)/SOURCES/$(RPM_NAME)-$(RPM_VERSION)/LICENSES/
+	tar -C $(RPM_TOPDIR)/SOURCES -czf $(RPM_TOPDIR)/SOURCES/$(RPM_NAME)-$(RPM_VERSION).tar.gz \
+		$(RPM_NAME)-$(RPM_VERSION)
+	rpmbuild --define "_topdir $(RPM_TOPDIR)" \
+		--define "version $(RPM_VERSION)" \
+		--define "rel $(RPM_RELEASE)" \
+		-bb packaging/rpm-quadlet/$(RPM_NAME).spec
+	@echo "Built: $(RPM_TOPDIR)/RPMS/noarch/$$(ls $(RPM_TOPDIR)/RPMS/noarch)"
+
+rpm-clean: ## Remove local RPM build artifacts
+	rm -rf $(RPM_TOPDIR)
 
 fmt: ## Format code
 	$(GO) fmt ./...
