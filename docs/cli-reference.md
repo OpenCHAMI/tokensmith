@@ -68,6 +68,7 @@ Starts the TokenSmith service.
 | `--oidc-client-id` | OIDC client ID, or `OIDC_CLIENT_ID` | `""` |
 | `--oidc-client-secret` | OIDC client secret, or `OIDC_CLIENT_SECRET` | `""` |
 | `--oidc-claim-policy` | OIDC claim policy (`enriched` or `csm-keycloak`), or `TOKENSMITH_OIDC_CLAIM_POLICY` | `""` |
+| `--oidc-ca` | PEM CA bundle trusted for upstream OIDC TLS, or `TOKENSMITH_OIDC_CA` | `""` |
 | `--key-file` | Existing private key path | `""` |
 | `--key-dir` | Directory where generated keys are saved when `--key-file` is not set | `""` |
 | `--enable-local-user-mint` | Enable break-glass local user token creation endpoint | `false` |
@@ -85,8 +86,9 @@ Starts the TokenSmith service.
 - If `--key-file` is not set, TokenSmith generates an RSA keypair and writes it to `--key-dir` as `private.pem` and `public.pem`.
 - If `--oidc-client-id` or `--oidc-client-secret` are omitted, TokenSmith reads `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
 - If `--oidc-claim-policy` is omitted, TokenSmith reads `TOKENSMITH_OIDC_CLAIM_POLICY`; empty defaults to `enriched`.
+- If `--oidc-ca` is omitted, TokenSmith reads `TOKENSMITH_OIDC_CA`; empty uses the system trust store for upstream OIDC TLS.
 - If RFC 8693 store flags are omitted, TokenSmith falls back to environment variables and then the defaults shown above.
-- If `--service-identity-ca` is set, TokenSmith requires `--tls-cert-file` and `--tls-key-file` so mTLS service identity exchange can be enforced.
+- `--oidc-ca` validates outbound TLS to Keycloak/OIDC; `--service-identity-ca` validates inbound mTLS client certificates and requires `--tls-cert-file` plus `--tls-key-file`.
 
 ### Minimal run example
 
@@ -97,6 +99,7 @@ tokensmith serve \
   --oidc-issuer https://issuer.example \
   --oidc-client-id your-client-id \
   --oidc-claim-policy enriched \
+  --oidc-ca /etc/openchami/tls/keycloak-ca.pem \
   --rfc8693-bootstrap-store ./data/bootstrap-tokens \
   --rfc8693-refresh-store ./data/refresh-tokens
 ```

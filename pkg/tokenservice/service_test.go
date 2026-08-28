@@ -260,6 +260,127 @@ user2, data1, write
 	})
 }
 
+func TestNewTokenService_UsesOIDCCABundleForUpstreamTLS(t *testing.T) {
+	server := newOIDCTLSTestServer(t)
+	caPath := writeServerCABundle(t, server)
+	service := newOIDCTLSService(t, Config{
+		OIDCIssuerURL:    server.URL,
+		OIDCClientID:     "tokensmith",
+		OIDCClientSecret: "secret",
+		OIDCCAPath:       caPath,
+	})
+
+	metadata, err := service.OIDCProvider.GetProviderMetadata(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, server.URL, metadata.Issuer)
+	assert.Equal(t, server.URL+"/token/introspect", metadata.IntrospectionEndpoint)
+}
+
+func TestNewTokenService_RejectsInvalidOIDCCABundle(t *testing.T) {
+	invalidCAPath := filepath.Join(t.TempDir(), "invalid-ca.pem")
+	require.NoError(t, os.WriteFile(invalidCAPath, []byte("not a certificate"), 0600))
+	keyManager := keys.NewKeyManager()
+	require.NoError(t, keyManager.GenerateRSAKeyPair())
+
+	service, err := NewTokenService(keyManager, Config{
+		Issuer:           "http://tokensmith.test",
+		ClusterID:        "cluster-test",
+		OpenCHAMIID:      "openchami-test",
+		OIDCIssuerURL:    "https://keycloak.example/realms/csm",
+		OIDCClientID:     "tokensmith",
+		OIDCClientSecret: "secret",
+		OIDCCAPath:       invalidCAPath,
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, service)
+	assert.Contains(t, err.Error(), "upstream OIDC CA bundle")
+}
+
+func TestApplyOIDCProviderConfig_UsesOIDCCABundleForUpstreamTLS(t *testing.T) {
+	server := newOIDCTLSTestServer(t)
+	caPath := writeServerCABundle(t, server)
+	service := newOIDCTLSService(t, Config{
+		OIDCClientSecret: "secret",
+		OIDCCAPath:       caPath,
+	})
+
+	status, oidcStatus, err := service.ApplyOIDCProviderConfig(context.Background(), OIDCProviderConfigUpdate{
+		IssuerURL: server.URL,
+		ClientID:  "tokensmith",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "created", status)
+	assert.True(t, oidcStatus.Configured)
+	assert.Equal(t, server.URL, oidcStatus.IssuerURL)
+}
+
+func TestApplyOIDCProviderConfig_FailsWithoutOIDCCABundleForUpstreamTLS(t *testing.T) {
+	server := newOIDCTLSTestServer(t)
+	service := newOIDCTLSService(t, Config{
+		OIDCClientSecret: "secret",
+	})
+
+	status, _, err := service.ApplyOIDCProviderConfig(context.Background(), OIDCProviderConfigUpdate{
+		IssuerURL: server.URL,
+		ClientID:  "tokensmith",
+	})
+
+	require.Error(t, err)
+	assert.Empty(t, status)
+	assert.Contains(t, err.Error(), "OIDC provider validation failed")
+}
+
+func newOIDCTLSService(t *testing.T, config Config) *TokenService {
+	t.Helper()
+	keyManager := keys.NewKeyManager()
+	require.NoError(t, keyManager.GenerateRSAKeyPair())
+	if config.Issuer == "" {
+		config.Issuer = "http://tokensmith.test"
+	}
+	if config.ClusterID == "" {
+		config.ClusterID = "cluster-test"
+	}
+	if config.OpenCHAMIID == "" {
+		config.OpenCHAMIID = "openchami-test"
+	}
+	service, err := NewTokenService(keyManager, config)
+	require.NoError(t, err)
+	return service
+}
+
+func newOIDCTLSTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"issuer":"https://` + r.Host + `","token_introspection_endpoint":"https://` + r.Host + `/token/introspect","jwks_uri":"https://` + r.Host + `/jwks"}`))
+		case "/jwks":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"keys":[]}`))
+		case "/token/introspect":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"active":true,"username":"csm-admin","exp":4102444800,"iat":1700000000,"claims":{"sub":"csm-admin"},"token_type":"Bearer"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func writeServerCABundle(t *testing.T, server *httptest.Server) string {
+	t.Helper()
+	caPath := filepath.Join(t.TempDir(), "upstream-oidc-ca.pem")
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	require.NotEmpty(t, certPEM)
+	require.NoError(t, os.WriteFile(caPath, certPEM, 0600))
+	return caPath
+}
+
 func TestTokenService_GenerateServiceToken(t *testing.T) {
 	// Generate test RSA key
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)

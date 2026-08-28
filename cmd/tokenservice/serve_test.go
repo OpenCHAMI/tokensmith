@@ -20,3 +20,11 @@ func TestServeCommandRegisteredOnce(t *testing.T) {
 
 	assert.Equal(t, 1, count, "serve command should only be registered once")
 }
+
+func TestServeCommandHasOIDCCAFlag(t *testing.T) {
+	flag := serveCmd.Flags().Lookup("oidc-ca")
+
+	if assert.NotNil(t, flag) {
+		assert.Contains(t, flag.Usage, "TOKENSMITH_OIDC_CA")
+	}
+}

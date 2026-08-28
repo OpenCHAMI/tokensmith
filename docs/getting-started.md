@@ -58,10 +58,11 @@ tokensmith serve \
   --key-dir ./keys \
   --oidc-issuer https://issuer.example \
   --oidc-client-id your-client-id \
-  --oidc-claim-policy enriched
+  --oidc-claim-policy enriched \
+  --oidc-ca /etc/openchami/tls/oidc-ca.pem
 ```
 
-If `--oidc-client-id`, `--oidc-client-secret`, or `--oidc-claim-policy` are not provided, TokenSmith falls back to `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `TOKENSMITH_OIDC_CLAIM_POLICY`. Empty claim policy defaults to `enriched`; use `csm-keycloak` for CSM Keycloak bearer-token exchange.
+If `--oidc-client-id`, `--oidc-client-secret`, `--oidc-claim-policy`, or `--oidc-ca` are not provided, TokenSmith falls back to `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `TOKENSMITH_OIDC_CLAIM_POLICY`, and `TOKENSMITH_OIDC_CA`. Empty claim policy defaults to `enriched`; empty OIDC CA uses the system trust store.
 
 See full command options in `docs/cli-reference.md`.
 

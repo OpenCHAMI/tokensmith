@@ -96,6 +96,40 @@ func TestSimpleProvider_IntrospectTokenRemotelyAcceptsTokenIntrospectionEndpoint
 	assert.Equal(t, "csm-admin", introspection.Username)
 }
 
+func TestSimpleProvider_IntrospectTokenUsesConfiguredHTTPClientForTLS(t *testing.T) {
+	const tokenValue = "opaque-token"
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"issuer":"issuer","token_introspection_endpoint":"` + serverURL(r, "/token/introspect") + `","jwks_uri":"` + serverURL(r, "/jwks") + `"}`))
+		case "/token/introspect":
+			require.NoError(t, r.ParseForm())
+			require.Equal(t, tokenValue, r.FormValue("token"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"active":true,"username":"csm-admin","exp":4102444800,"iat":1700000000,"claims":{"sub":"csm-admin"},"token_type":"Bearer"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	defaultProvider := NewSimpleProvider(server.URL, "client", "secret")
+	_, err := defaultProvider.IntrospectToken(context.Background(), tokenValue)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrProviderMetadata), "error %v should match %v", err, ErrProviderMetadata)
+
+	trustedProvider := NewSimpleProvider(server.URL, "client", "secret", WithHTTPClient(server.Client()))
+	introspection, err := trustedProvider.IntrospectToken(context.Background(), tokenValue)
+	require.NoError(t, err)
+	assert.True(t, introspection.Active)
+	assert.Equal(t, "csm-admin", introspection.Username)
+}
+
+func serverURL(r *http.Request, path string) string {
+	return "https://" + r.Host + path
+}
+
 func TestSimpleProvider_GetProviderMetadataNormalizesIntrospectionEndpointAliases(t *testing.T) {
 	tests := []struct {
 		name     string

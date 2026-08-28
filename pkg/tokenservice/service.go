@@ -6,8 +6,10 @@ package tokenservice
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -47,6 +49,7 @@ type Config struct {
 	OIDCClientID     string
 	OIDCClientSecret string
 	OIDCClaimPolicy  OIDCClaimPolicy
+	OIDCCAPath       string
 }
 
 // OIDCProviderConfigUpdate captures mutable single-provider OIDC settings.
@@ -103,6 +106,7 @@ type TokenService struct {
 
 	// Trust roots for inbound mTLS service identity certificates.
 	serviceIdentityCAPool *x509.CertPool
+	oidcHTTPClient        *http.Client
 }
 
 // NewTokenService creates a new TokenService instance
@@ -112,6 +116,14 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		return nil, err
 	}
 	config.OIDCClaimPolicy = claimPolicy
+	oidcHTTPClient, err := newOIDCHTTPClient(config.OIDCCAPath)
+	if err != nil {
+		return nil, err
+	}
+	oidcOptions := []oidc.SimpleProviderOption{}
+	if oidcHTTPClient != nil {
+		oidcOptions = append(oidcOptions, oidc.WithHTTPClient(oidcHTTPClient))
+	}
 
 	// Initialize the token manager
 	tokenManager := token.NewTokenManager(
@@ -127,17 +139,19 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		config.OIDCIssuerURL,
 		config.OIDCClientID,
 		config.OIDCClientSecret,
+		oidcOptions...,
 	)
 
 	svc := &TokenService{
-		TokenManager:  tokenManager,
-		Config:        config,
-		Issuer:        config.Issuer,
-		GroupScopes:   config.GroupScopes,
-		ClusterID:     config.ClusterID,
-		OpenCHAMIID:   config.OpenCHAMIID,
-		OIDCProvider:  oidcProvider,
-		replayLimiter: newReplayLimiter(),
+		TokenManager:   tokenManager,
+		Config:         config,
+		Issuer:         config.Issuer,
+		GroupScopes:    config.GroupScopes,
+		ClusterID:      config.ClusterID,
+		OpenCHAMIID:    config.OpenCHAMIID,
+		OIDCProvider:   oidcProvider,
+		replayLimiter:  newReplayLimiter(),
+		oidcHTTPClient: oidcHTTPClient,
 	}
 
 	if strings.TrimSpace(config.ServiceIdentityCAPath) != "" {
@@ -198,6 +212,31 @@ func loadCertPoolFromPEMFile(path string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
+func newOIDCHTTPClient(caPath string) (*http.Client, error) {
+	if strings.TrimSpace(caPath) == "" {
+		return nil, nil
+	}
+
+	caPool, err := loadCertPoolFromPEMFile(caPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load upstream OIDC CA bundle: %w", err)
+	}
+
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		transport = &http.Transport{}
+	}
+	clone := transport.Clone()
+	if clone.TLSClientConfig == nil {
+		clone.TLSClientConfig = &tls.Config{}
+	} else {
+		clone.TLSClientConfig = clone.TLSClientConfig.Clone()
+	}
+	clone.TLSClientConfig.RootCAs = caPool
+
+	return &http.Client{Transport: clone}, nil
+}
+
 func (s *TokenService) currentOIDCProvider() oidc.Provider {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -253,7 +292,11 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 		return "", s.GetOIDCProviderStatus(), fmt.Errorf("OIDC provider already configured; use --replace-existing to overwrite")
 	}
 
-	provider := oidc.NewSimpleProvider(issuerURL, clientID, secret)
+	oidcOptions := []oidc.SimpleProviderOption{}
+	if s.oidcHTTPClient != nil {
+		oidcOptions = append(oidcOptions, oidc.WithHTTPClient(s.oidcHTTPClient))
+	}
+	provider := oidc.NewSimpleProvider(issuerURL, clientID, secret, oidcOptions...)
 	if _, err := provider.GetProviderMetadata(ctx); err != nil {
 		return "", s.GetOIDCProviderStatus(), fmt.Errorf("OIDC provider validation failed: %w", err)
 	}

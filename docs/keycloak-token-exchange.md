@@ -18,6 +18,7 @@ TokenSmith needs an OIDC issuer, client ID, client secret, and claim policy. For
 export OIDC_CLIENT_ID="tokensmith"
 export OIDC_CLIENT_SECRET="<keycloak-client-secret>"
 export TOKENSMITH_OIDC_CLAIM_POLICY="csm-keycloak"
+export TOKENSMITH_OIDC_CA="/etc/openchami/tls/keycloak-ca.pem"
 
 tokensmith serve \
   --config ./config.json \
@@ -25,6 +26,8 @@ tokensmith serve \
   --issuer http://localhost:8080 \
   --oidc-issuer https://keycloak.example/realms/csm
 ```
+
+Set `TOKENSMITH_OIDC_CA` or `--oidc-ca` when Keycloak uses a private CA. This bundle is used only for outbound TLS validation when TokenSmith calls OIDC discovery, JWKS, and introspection endpoints. Do not replace this with `--service-identity-ca`; that option trusts inbound service-identity mTLS client certificates.
 
 The default claim policy is `enriched`. It preserves the stricter TokenSmith claim contract and expects upstream tokens to include `auth_level`, `auth_factors`, `auth_methods`, `session_id`, `session_exp`, and `auth_events`.
 

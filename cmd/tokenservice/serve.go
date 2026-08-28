@@ -34,6 +34,9 @@ var serveCmd = &cobra.Command{
 		if oidcClaimPolicy == "" {
 			oidcClaimPolicy = os.Getenv("TOKENSMITH_OIDC_CLAIM_POLICY")
 		}
+		if oidcCAPath == "" {
+			oidcCAPath = os.Getenv("TOKENSMITH_OIDC_CA")
+		}
 		claimPolicy, err := tokenservice.ParseOIDCClaimPolicy(oidcClaimPolicy)
 		if err != nil {
 			return err
@@ -72,6 +75,7 @@ var serveCmd = &cobra.Command{
 			OIDCClientID:              oidcClientID,
 			OIDCClientSecret:          oidcClientSecret,
 			OIDCClaimPolicy:           claimPolicy,
+			OIDCCAPath:                oidcCAPath,
 			RFC8693BootstrapStorePath: rfc8693BootstrapStorePath,
 			RFC8693RefreshStorePath:   rfc8693RefreshStorePath,
 			ServiceIdentityCAPath:     serviceIdentityCAPath,
@@ -132,6 +136,7 @@ func init() {
 	serveCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OIDC client ID (or set OIDC_CLIENT_ID env var)")
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
 	serveCmd.Flags().StringVar(&oidcClaimPolicy, "oidc-claim-policy", "", "OIDC claim policy: enriched or csm-keycloak (or set TOKENSMITH_OIDC_CLAIM_POLICY)")
+	serveCmd.Flags().StringVar(&oidcCAPath, "oidc-ca", "", "Path to PEM CA bundle trusted for upstream OIDC TLS (or set TOKENSMITH_OIDC_CA)")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")

@@ -26,21 +26,37 @@ type SimpleProvider struct {
 	clientID         string
 	clientSecret     string
 	discoveryURL     string
+	httpClient       *http.Client
 	metadata         *ProviderMetadata
 	jwks             map[string]interface{}
 	lastJWKSUpdate   time.Time
 	jwksUpdatePeriod time.Duration
 }
 
+type SimpleProviderOption func(*SimpleProvider)
+
+func WithHTTPClient(client *http.Client) SimpleProviderOption {
+	return func(provider *SimpleProvider) {
+		if client != nil {
+			provider.httpClient = client
+		}
+	}
+}
+
 // NewSimpleProvider creates a new simplified OIDC provider
-func NewSimpleProvider(issuerURL, clientID, clientSecret string) *SimpleProvider {
-	return &SimpleProvider{
+func NewSimpleProvider(issuerURL, clientID, clientSecret string, options ...SimpleProviderOption) *SimpleProvider {
+	provider := &SimpleProvider{
 		issuerURL:        issuerURL,
 		clientID:         clientID,
 		clientSecret:     clientSecret,
 		discoveryURL:     fmt.Sprintf("%s/.well-known/openid-configuration", issuerURL),
+		httpClient:       &http.Client{},
 		jwksUpdatePeriod: 24 * time.Hour,
 	}
+	for _, option := range options {
+		option(provider)
+	}
+	return provider
 }
 
 // IntrospectToken introspects a token using the OIDC provider
@@ -74,7 +90,7 @@ func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMeta
 		return nil, providerError("create provider metadata request", ErrProviderMetadata, err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, providerError("get provider metadata", ErrProviderMetadata, err)
 	}
@@ -146,7 +162,7 @@ func (p *SimpleProvider) updateJWKS(ctx context.Context) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
@@ -286,7 +302,7 @@ func (p *SimpleProvider) introspectTokenRemotely(ctx context.Context, token stri
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(p.clientID, p.clientSecret)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, providerError("introspect token", ErrUpstreamUnavailable, err)
 	}

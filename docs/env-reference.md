@@ -15,6 +15,7 @@ This page lists environment variables currently used by TokenSmith code paths.
 | `OIDC_CLIENT_ID` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-client-id` |
 | `OIDC_CLIENT_SECRET` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-client-secret` |
 | `TOKENSMITH_OIDC_CLAIM_POLICY` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-claim-policy`; valid values: `enriched`, `csm-keycloak` |
+| `TOKENSMITH_OIDC_CA` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-ca` (PEM CA bundle for upstream OIDC TLS validation) |
 | `TOKENSMITH_RFC8693_BOOTSTRAP_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--rfc8693-bootstrap-store`; default `./data/bootstrap-tokens` |
 | `TOKENSMITH_RFC8693_REFRESH_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--rfc8693-refresh-store`; default `./data/refresh-tokens` |
 | `TOKENSMITH_SERVICE_IDENTITY_CA` | `cmd/tokenservice/serve.go` | Fallback value for `--service-identity-ca` (PEM CA bundle for inbound mTLS client cert trust) |
@@ -26,6 +27,7 @@ OIDC runtime configuration notes:
 - `OIDC_CLIENT_SECRET` is environment-only and is not persisted by OIDC runtime configure workflows.
 - `tokensmith oidc configure` updates issuer/client-id and, when supplied, claim policy. It expects the running service to already have `OIDC_CLIENT_SECRET` set.
 - `TOKENSMITH_OIDC_CLAIM_POLICY` defaults to `enriched`; use `csm-keycloak` only for CSM Keycloak bearer-token exchange.
+- `TOKENSMITH_OIDC_CA` affects outbound HTTPS validation for OIDC discovery, JWKS, and introspection only. It is separate from `TOKENSMITH_SERVICE_IDENTITY_CA`, which trusts inbound service-identity client certificates.
 
 Precedence for these values:
 
