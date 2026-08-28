@@ -10,7 +10,7 @@ This guide addresses common issues and how to diagnose and resolve them.
 
 ## Token exchange fails
 
-### Symptom: "401 Unauthorized" when exchanging OIDC code for TokenSmith JWT
+### Symptom: "401 Unauthorized" when exchanging an OIDC token for a TokenSmith JWT
 
 **Cause**: TokenSmith is not correctly configured or cannot reach the OIDC provider.
 
@@ -35,12 +35,12 @@ This guide addresses common issues and how to diagnose and resolve them.
    ```
 
 4. Test token validation with a known OIDC token:
-   ```bash
-   # If you have a valid token from your OIDC provider:
-   curl -X POST "http://localhost:8080/token" \
-     -H "Content-Type: application/x-www-form-urlencoded" \
-     -d "grant_type=urn:ietf:params:oauth:grant-type:token-exchange&subject_token=<OIDC_TOKEN>&subject_token_type=urn:ietf:params:oauth:token-type:id_token"
-   ```
+    ```bash
+    curl -X POST "http://localhost:8080/oauth/exchange" \
+      -H "Authorization: Bearer $KEYCLOAK_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"target_service":"smd"}'
+    ```
 
 **Resolution**:
 
@@ -54,8 +54,8 @@ This guide addresses common issues and how to diagnose and resolve them.
    - Verify `$OIDC_CLIENT_SECRET` is correct (try rotating the secret in OIDC provider if unsure)
 
 3. Check token validity:
-   - Ensure the OIDC token is not expired
-   - Verify the token includes required claims
+    - Ensure the OIDC token is not expired
+    - Verify the token includes the Keycloak fields described in [Keycloak token exchange](./keycloak-token-exchange.md)
 
 ---
 

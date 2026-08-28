@@ -24,6 +24,7 @@ type contextKey string
 const (
 	ScopeContextKey         contextKey = "scope"
 	TargetServiceContextKey contextKey = "target_service"
+	socketPeerContextKey    contextKey = "socket_peer"
 )
 
 // Config holds the configuration for the token service

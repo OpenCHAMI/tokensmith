@@ -59,6 +59,59 @@ func TestExchangeToken_CSMKeycloakPolicyMapsStandardClaims(t *testing.T) {
 	assert.Contains(t, claims.Scope, "admin")
 }
 
+func TestExchangeToken_CSMKeycloakPolicyAcceptsObservedServiceAccountShape(t *testing.T) {
+	now := time.Now()
+	service := newExchangePolicyService(t, OIDCClaimPolicyCSMKeycloak, map[string]interface{}{
+		"exp":                float64(now.Add(5 * time.Minute).Unix()),
+		"iat":                float64(now.Unix()),
+		"jti":                "7836e8d0-6928-4db8-90ee-dea5a7888dc7",
+		"iss":                "https://api.cmn.prealps.cscs.ch/keycloak/realms/shasta",
+		"aud":                "account",
+		"sub":                "5eca73ee-c3f3-4a0c-a5ef-e1f25ed764a4",
+		"typ":                "Bearer",
+		"azp":                "openchami-tokensmith",
+		"acr":                "1",
+		"scope":              "email offline_access openid profile",
+		"preferred_username": "service-account-openchami-tokensmith",
+		"client_id":          "openchami-tokensmith",
+	})
+
+	tokenValue, err := service.ExchangeToken(context.Background(), "keycloak-token")
+
+	require.NoError(t, err)
+	claims, _, err := service.TokenManager.ParseToken(tokenValue)
+	require.NoError(t, err)
+	assert.Equal(t, "admin-user", claims.Subject)
+	assert.Equal(t, []string{"account"}, []string(claims.Audience))
+	assert.Equal(t, "1", claims.AuthLevel)
+	assert.Equal(t, 2, claims.AuthFactors)
+	assert.Equal(t, []string{"keycloak", "client_credentials"}, claims.AuthMethods)
+	assert.Equal(t, "7836e8d0-6928-4db8-90ee-dea5a7888dc7", claims.SessionID)
+	assert.Equal(t, now.Add(5*time.Minute).Unix(), claims.SessionExp)
+	assert.Equal(t, []string{"token_exchange"}, claims.AuthEvents)
+}
+
+func TestExchangeToken_PreservesStringAudience(t *testing.T) {
+	now := time.Now()
+	service := newExchangePolicyService(t, OIDCClaimPolicyCSMKeycloak, map[string]interface{}{
+		"sub":         "admin-user",
+		"aud":         "tokensmith",
+		"groups":      []interface{}{"admin"},
+		"acr":         "IAL2",
+		"amr":         []interface{}{"pwd", "otp"},
+		"sid":         "keycloak-session-1",
+		"exp":         float64(now.Add(time.Hour).Unix()),
+		"auth_events": []interface{}{"login"},
+	})
+
+	tokenValue, err := service.ExchangeToken(context.Background(), "keycloak-token")
+
+	require.NoError(t, err)
+	claims, _, err := service.TokenManager.ParseToken(tokenValue)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tokensmith"}, []string(claims.Audience))
+}
+
 func TestExchangeToken_RequestedScopesCannotExceedDerivedScopes(t *testing.T) {
 	now := time.Now()
 	service := newExchangePolicyService(t, OIDCClaimPolicyCSMKeycloak, map[string]interface{}{
@@ -111,32 +164,28 @@ func TestExchangeToken_CSMKeycloakPolicyPreservesExplicitEnrichedClaims(t *testi
 	assert.ElementsMatch(t, []string{"login", "step_up"}, claims.AuthEvents)
 }
 
-func TestExchangeToken_CSMKeycloakPolicyRequiresEnoughAuthMethods(t *testing.T) {
+func TestExchangeToken_CSMKeycloakPolicyFallsBackWhenAuthMethodsAreMissing(t *testing.T) {
 	now := time.Now()
 	service := newExchangePolicyService(t, OIDCClaimPolicyCSMKeycloak, map[string]interface{}{
-		"sub":         "admin-user",
-		"groups":      []interface{}{"admin"},
-		"acr":         "IAL1",
-		"amr":         []interface{}{"pwd"},
-		"sid":         "keycloak-session-1",
-		"exp":         float64(now.Add(time.Hour).Unix()),
-		"auth_events": []interface{}{"login"},
+		"sub":    "admin-user",
+		"aud":    "account",
+		"groups": []interface{}{"admin"},
+		"acr":    "IAL1",
+		"sid":    "keycloak-session-1",
+		"exp":    float64(now.Add(time.Hour).Unix()),
 	})
 
 	tokenValue, err := service.ExchangeToken(context.Background(), "keycloak-token")
 
-	require.Error(t, err)
-	assert.Empty(t, tokenValue)
-	assert.True(t, errors.Is(err, ErrExchangeInvalidClaim), "error %v should be invalid-claim", err)
-	var claimsErr *ExchangeClaimsError
-	require.True(t, errors.As(err, &claimsErr))
-	assert.Equal(t, []string{"auth_factors"}, claimsErr.Claims)
+	require.NoError(t, err)
+	assert.NotEmpty(t, tokenValue)
 }
 
-func TestExchangeToken_CSMKeycloakPolicyCountsDistinctFactorCategories(t *testing.T) {
+func TestExchangeToken_CSMKeycloakPolicyFallsBackForSingleFactorCategory(t *testing.T) {
 	now := time.Now()
 	service := newExchangePolicyService(t, OIDCClaimPolicyCSMKeycloak, map[string]interface{}{
 		"sub":         "admin-user",
+		"aud":         "account",
 		"groups":      []interface{}{"admin"},
 		"acr":         "IAL2",
 		"amr":         []interface{}{"otp", "webauthn"},
@@ -147,33 +196,34 @@ func TestExchangeToken_CSMKeycloakPolicyCountsDistinctFactorCategories(t *testin
 
 	tokenValue, err := service.ExchangeToken(context.Background(), "keycloak-token")
 
-	require.Error(t, err)
-	assert.Empty(t, tokenValue)
-	assert.True(t, errors.Is(err, ErrExchangeInvalidClaim), "error %v should be invalid-claim", err)
+	require.NoError(t, err)
+	claims, _, err := service.TokenManager.ParseToken(tokenValue)
+	require.NoError(t, err)
+	assert.Equal(t, 2, claims.AuthFactors)
 }
 
-func TestExchangeToken_CSMKeycloakPolicyRequiresUpstreamAuthEvents(t *testing.T) {
+func TestExchangeToken_CSMKeycloakPolicyFallsBackWhenAuthEventsAreMissing(t *testing.T) {
 	now := time.Now()
 	service := newExchangePolicyService(t, OIDCClaimPolicyCSMKeycloak, map[string]interface{}{
 		"sub":    "admin-user",
+		"aud":    "account",
 		"groups": []interface{}{"admin"},
 		"acr":    "IAL2",
-		"amr":    []interface{}{"pwd", "otp"},
 		"sid":    "keycloak-session-1",
 		"exp":    float64(now.Add(time.Hour).Unix()),
 	})
 
 	tokenValue, err := service.ExchangeToken(context.Background(), "keycloak-token")
 
-	require.Error(t, err)
-	assert.Empty(t, tokenValue)
-	assert.True(t, errors.Is(err, ErrExchangeMissingClaims), "error %v should be missing-claims", err)
+	require.NoError(t, err)
+	assert.NotEmpty(t, tokenValue)
 }
 
-func TestExchangeToken_CSMKeycloakPolicyRejectsOpaqueNumericACR(t *testing.T) {
+func TestExchangeToken_CSMKeycloakPolicyAcceptsOpaqueACR(t *testing.T) {
 	now := time.Now()
 	service := newExchangePolicyService(t, OIDCClaimPolicyCSMKeycloak, map[string]interface{}{
 		"sub":         "admin-user",
+		"aud":         "account",
 		"groups":      []interface{}{"admin"},
 		"acr":         "2",
 		"amr":         []interface{}{"pwd", "otp"},
@@ -184,9 +234,8 @@ func TestExchangeToken_CSMKeycloakPolicyRejectsOpaqueNumericACR(t *testing.T) {
 
 	tokenValue, err := service.ExchangeToken(context.Background(), "keycloak-token")
 
-	require.Error(t, err)
-	assert.Empty(t, tokenValue)
-	assert.True(t, errors.Is(err, ErrExchangeMissingClaims), "error %v should be missing-claims", err)
+	require.NoError(t, err)
+	assert.NotEmpty(t, tokenValue)
 }
 
 func TestParseOIDCClaimPolicy(t *testing.T) {

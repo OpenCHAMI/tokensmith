@@ -255,10 +255,23 @@ func (p *SimpleProvider) validateCoreClaims(claims jwt.MapClaims) error {
 	if !ok || issuer != p.issuerURL {
 		return fmt.Errorf("invalid token issuer")
 	}
-	if !claimHasAudience(claims["aud"], p.clientID) {
+	if !claimMatchesClient(claims, p.clientID) {
 		return fmt.Errorf("invalid token audience")
 	}
 	return nil
+}
+
+func claimMatchesClient(claims map[string]interface{}, expected string) bool {
+	if claimHasAudience(claims["aud"], expected) {
+		return true
+	}
+	if azp, ok := claims["azp"].(string); ok && azp == expected {
+		return true
+	}
+	if clientID, ok := claims["client_id"].(string); ok && clientID == expected {
+		return true
+	}
+	return false
 }
 
 func claimHasAudience(value interface{}, expected string) bool {
@@ -314,12 +327,110 @@ func (p *SimpleProvider) introspectTokenRemotely(ctx context.Context, token stri
 		return nil, providerStatusError("introspect token", ErrUpstreamRejected, resp.StatusCode)
 	}
 
-	var introspection IntrospectionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&introspection); err != nil {
+	introspection, err := decodeIntrospectionResponse(resp.Body)
+	if err != nil {
 		return nil, providerError("decode token introspection response", ErrInvalidResponse, err)
 	}
+	if err := p.validateRemoteIntrospection(token, introspection); err != nil {
+		return nil, err
+	}
 
-	return &introspection, nil
+	return introspection, nil
+}
+
+func decodeIntrospectionResponse(reader io.Reader) (*IntrospectionResponse, error) {
+	var raw map[string]interface{}
+	if err := json.NewDecoder(reader).Decode(&raw); err != nil {
+		return nil, err
+	}
+
+	claims := map[string]interface{}{}
+	if nestedClaims, ok := raw["claims"].(map[string]interface{}); ok {
+		for key, value := range nestedClaims {
+			claims[key] = value
+		}
+	}
+	for key, value := range raw {
+		switch key {
+		case "active", "claims":
+			continue
+		default:
+			claims[key] = value
+		}
+	}
+
+	return &IntrospectionResponse{
+		Active:    boolFromRaw(raw["active"]),
+		Username:  firstNonEmptyString(stringFromRaw(raw["username"]), stringFromRaw(raw["preferred_username"]), stringFromRaw(raw["sub"])),
+		ExpiresAt: int64FromRaw(raw["exp"]),
+		IssuedAt:  int64FromRaw(raw["iat"]),
+		Claims:    claims,
+		TokenType: stringFromRaw(raw["token_type"]),
+		Scope:     stringFromRaw(raw["scope"]),
+		ClientID:  firstNonEmptyString(stringFromRaw(raw["client_id"]), audienceString(raw["aud"])),
+	}, nil
+}
+
+func (p *SimpleProvider) validateRemoteIntrospection(token string, introspection *IntrospectionResponse) error {
+	if introspection == nil || !introspection.Active {
+		return nil
+	}
+	issuerValue, _ := introspection.Claims["iss"].(string)
+	if issuerValue != p.issuerURL {
+		return providerError("validate introspection issuer", ErrInvalidToken, fmt.Errorf("invalid token issuer"))
+	}
+	if !claimMatchesClient(introspection.Claims, p.clientID) {
+		return providerError("validate introspection audience", ErrInvalidToken, fmt.Errorf("invalid token audience"))
+	}
+	return nil
+}
+
+func boolFromRaw(value interface{}) bool {
+	result, _ := value.(bool)
+	return result
+}
+
+func int64FromRaw(value interface{}) int64 {
+	switch typed := value.(type) {
+	case float64:
+		return int64(typed)
+	case int64:
+		return typed
+	case int:
+		return int64(typed)
+	default:
+		return 0
+	}
+}
+
+func stringFromRaw(value interface{}) string {
+	result, _ := value.(string)
+	return result
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func audienceString(value interface{}) string {
+	switch audience := value.(type) {
+	case string:
+		return audience
+	case []interface{}:
+		if len(audience) == 1 {
+			return stringFromRaw(audience[0])
+		}
+	case []string:
+		if len(audience) == 1 {
+			return audience[0]
+		}
+	}
+	return ""
 }
 
 // findKeyByID finds a key by ID in the JWKS

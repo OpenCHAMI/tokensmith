@@ -9,11 +9,13 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -127,6 +129,40 @@ func TestOIDCConfigHandler_LocalOnly(t *testing.T) {
 
 	svc.OIDCConfigStatusHandler(resp, req)
 	assert.Equal(t, http.StatusForbidden, resp.Code)
+}
+
+func TestOIDCConfigHandler_LocalOnlyRejectsSpoofedForwardedHeaders(t *testing.T) {
+	svc := newTestTokenService(t, Config{
+		Issuer:           "test-issuer",
+		ClusterID:        "cl-test",
+		OpenCHAMIID:      "oc-test",
+		OIDCClientSecret: "secret-from-env",
+	})
+	req := httptest.NewRequest(http.MethodGet, "/admin/oidc/config", nil)
+	req.RemoteAddr = "198.51.100.10:41234"
+	req.Header.Set("X-Real-IP", "127.0.0.1")
+	req.Header.Set("X-Forwarded-For", "127.0.0.1")
+	resp := httptest.NewRecorder()
+
+	svc.newRouter(zerolog.New(io.Discard)).ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusForbidden, resp.Code)
+}
+
+func TestOIDCConfigHandler_LocalOnlyAcceptsSocketLoopbackThroughRouter(t *testing.T) {
+	svc := newTestTokenService(t, Config{
+		Issuer:           "test-issuer",
+		ClusterID:        "cl-test",
+		OpenCHAMIID:      "oc-test",
+		OIDCClientSecret: "secret-from-env",
+	})
+	req := httptest.NewRequest(http.MethodGet, "/admin/oidc/config", nil)
+	req.RemoteAddr = "[::1]:41234"
+	resp := httptest.NewRecorder()
+
+	svc.newRouter(zerolog.New(io.Discard)).ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusOK, resp.Code)
 }
 
 func TestGetOIDCProviderStatus_ReflectsLocalUserMintEnabled(t *testing.T) {

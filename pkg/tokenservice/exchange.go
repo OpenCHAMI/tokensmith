@@ -52,18 +52,8 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		OpenCHAMIID: s.OpenCHAMIID,
 	}
 
-	if aud, ok := introspection.Claims["aud"].([]string); ok && len(aud) > 0 {
-		claims.Audience = aud
-	} else if audI, ok := introspection.Claims["aud"].([]interface{}); ok && len(audI) > 0 {
-		out := make([]string, 0, len(audI))
-		for _, value := range audI {
-			if audience, ok := value.(string); ok {
-				out = append(out, audience)
-			}
-		}
-		if len(out) > 0 {
-			claims.Audience = out
-		}
+	if audience := normalizeAudienceClaim(introspection.Claims["aud"]); len(audience) > 0 {
+		claims.Audience = audience
 	}
 	if name, ok := introspection.Claims["name"].(string); ok {
 		claims.Name = name
@@ -125,6 +115,28 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	}
 
 	return tokenValue, nil
+}
+
+func normalizeAudienceClaim(value interface{}) []string {
+	switch audience := value.(type) {
+	case string:
+		if audience == "" {
+			return nil
+		}
+		return []string{audience}
+	case []string:
+		return compactStrings(audience)
+	case []interface{}:
+		out := make([]string, 0, len(audience))
+		for _, item := range audience {
+			if value, ok := item.(string); ok && value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func constrainRequestedScopes(allowed []string, requested []string) ([]string, error) {

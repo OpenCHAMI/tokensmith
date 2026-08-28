@@ -333,6 +333,44 @@ func TestApplyOIDCProviderConfig_FailsWithoutOIDCCABundleForUpstreamTLS(t *testi
 	assert.Contains(t, err.Error(), "OIDC provider validation failed")
 }
 
+func TestNewTokenService_OIDCCABundleDoesNotConfigureServiceIdentityMTLS(t *testing.T) {
+	server := newOIDCTLSTestServer(t)
+	caPath := writeServerCABundle(t, server)
+	service := newOIDCTLSService(t, Config{
+		OIDCIssuerURL:    server.URL,
+		OIDCClientID:     "tokensmith",
+		OIDCClientSecret: "secret",
+		OIDCCAPath:       caPath,
+	})
+
+	assert.Nil(t, service.serviceIdentityCAPool)
+	assert.NotNil(t, service.oidcHTTPClient)
+}
+
+func TestStart_ServiceIdentityCAErrorNamesInboundMTLS(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	keyManager := keys.NewKeyManager()
+	require.NoError(t, keyManager.SetKeyPair(privateKey, &privateKey.PublicKey))
+	caPEM, _ := generateClientIdentityCertificate(t, "boot-service")
+	caPath := filepath.Join(t.TempDir(), "service-identity-ca.pem")
+	require.NoError(t, os.WriteFile(caPath, caPEM, 0600))
+	service, err := NewTokenService(keyManager, Config{
+		Issuer:                "http://tokensmith.test",
+		ClusterID:             "cluster-a",
+		OpenCHAMIID:           "openchami-a",
+		ServiceIdentityCAPath: caPath,
+	})
+	require.NoError(t, err)
+
+	err = service.Start(0)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--service-identity-ca")
+	assert.Contains(t, err.Error(), "TOKENSMITH_SERVICE_IDENTITY_CA")
+	assert.Contains(t, err.Error(), "--oidc-ca only for outbound upstream OIDC TLS")
+}
+
 func newOIDCTLSService(t *testing.T, config Config) *TokenService {
 	t.Helper()
 	keyManager := keys.NewKeyManager()

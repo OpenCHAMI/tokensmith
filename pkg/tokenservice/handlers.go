@@ -73,7 +73,10 @@ func (s *TokenService) JWKSHandler(w http.ResponseWriter, r *http.Request) {
 
 func isLoopbackRequest(r *http.Request) bool {
 	host := r.RemoteAddr
-	if parsedHost, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+	if socketPeer, ok := r.Context().Value(socketPeerContextKey).(string); ok && socketPeer != "" {
+		host = socketPeer
+	}
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
 		host = parsedHost
 	}
 
@@ -83,6 +86,13 @@ func isLoopbackRequest(r *http.Request) bool {
 
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func preserveSocketPeer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), socketPeerContextKey, r.RemoteAddr)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func (s *TokenService) requireLocalRequest(w http.ResponseWriter, r *http.Request) bool {
@@ -236,6 +246,7 @@ func (s *TokenService) HealthHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *TokenService) newRouter(logger zerolog.Logger) http.Handler {
 	r := chi.NewRouter()
+	r.Use(preserveSocketPeer)
 	r.Use(openchami_logger.OpenCHAMILogger(logger))
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -297,7 +308,7 @@ func (s *TokenService) Start(port int) error {
 		return server.ListenAndServeTLS(tlsCert, tlsKey)
 	default:
 		if s.serviceIdentityCAPool != nil {
-			return fmt.Errorf("service identity CA is configured but TLS server cert/key are not; mTLS requires --tls-cert-file and --tls-key-file")
+			return fmt.Errorf("service identity CA is configured via --service-identity-ca or TOKENSMITH_SERVICE_IDENTITY_CA, but TLS server cert/key are not; inbound service identity mTLS requires --tls-cert-file and --tls-key-file; use --oidc-ca only for outbound upstream OIDC TLS")
 		}
 		fmt.Printf("Starting server on %s\n", addr)
 		return server.ListenAndServe()

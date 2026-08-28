@@ -49,7 +49,7 @@ func TestSimpleProvider_IntrospectTokenRemotelyEncodesFormToken(t *testing.T) {
 			require.Equal(t, tokenValue, r.FormValue("token"))
 
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"active":true,"username":"csm-admin","exp":4102444800,"iat":1700000000,"claims":{"sub":"csm-admin"},"token_type":"Bearer"}`))
+			_, _ = w.Write([]byte(`{"active":true,"username":"csm-admin","iss":"http://` + r.Host + `","aud":"` + clientID + `","exp":4102444800,"iat":1700000000,"claims":{"sub":"csm-admin"},"token_type":"Bearer"}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -79,7 +79,7 @@ func TestSimpleProvider_IntrospectTokenRemotelyAcceptsTokenIntrospectionEndpoint
 			require.NoError(t, r.ParseForm())
 			require.Equal(t, tokenValue, r.FormValue("token"))
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"active":true,"username":"csm-admin","exp":4102444800,"iat":1700000000,"claims":{"sub":"csm-admin"},"token_type":"Bearer"}`))
+			_, _ = w.Write([]byte(`{"active":true,"username":"csm-admin","iss":"http://` + r.Host + `","aud":"client","exp":4102444800,"iat":1700000000,"claims":{"sub":"csm-admin"},"token_type":"Bearer"}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -107,7 +107,7 @@ func TestSimpleProvider_IntrospectTokenUsesConfiguredHTTPClientForTLS(t *testing
 			require.NoError(t, r.ParseForm())
 			require.Equal(t, tokenValue, r.FormValue("token"))
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"active":true,"username":"csm-admin","exp":4102444800,"iat":1700000000,"claims":{"sub":"csm-admin"},"token_type":"Bearer"}`))
+			_, _ = w.Write([]byte(`{"active":true,"username":"csm-admin","iss":"https://` + r.Host + `","aud":"client","exp":4102444800,"iat":1700000000,"claims":{"sub":"csm-admin"},"token_type":"Bearer"}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -271,6 +271,164 @@ func TestSimpleProvider_IntrospectTokenRemotelyClassifiesUnavailableProvider(t *
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrUpstreamUnavailable), "error %v should match %v", err, ErrUpstreamUnavailable)
 	assert.NotContains(t, err.Error(), "secret-token-never-log")
+}
+
+func TestSimpleProvider_IntrospectTokenRemotelyPreservesTopLevelKeycloakClaims(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			writeProviderMetadata(t, w, r, ProviderMetadata{
+				Issuer:                "issuer",
+				IntrospectionEndpoint: "http://" + r.Host + "/introspect",
+				JWKSURI:               "http://" + r.Host + "/jwks",
+			})
+		case "/introspect":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"active":true,"sub":"csm-admin","iss":"http://` + r.Host + `","aud":"tokensmith","groups":["admin"],"acr":"IAL2","amr":["pwd","otp"],"sid":"session-1","auth_events":["login"],"exp":4102444800,"iat":1700000000,"token_type":"Bearer"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewSimpleProvider(server.URL, "tokensmith", "secret")
+	introspection, err := provider.IntrospectToken(context.Background(), "opaque-token")
+
+	require.NoError(t, err)
+	require.NotNil(t, introspection)
+	assert.True(t, introspection.Active)
+	assert.Equal(t, "csm-admin", introspection.Username)
+	assert.Equal(t, int64(4102444800), introspection.ExpiresAt)
+	assert.Equal(t, int64(1700000000), introspection.IssuedAt)
+	assert.Equal(t, "Bearer", introspection.TokenType)
+	assert.Equal(t, "tokensmith", introspection.ClientID)
+	assert.Equal(t, "csm-admin", introspection.Claims["sub"])
+	assert.Equal(t, server.URL, introspection.Claims["iss"])
+	assert.Equal(t, "tokensmith", introspection.Claims["aud"])
+	assert.Equal(t, "Bearer", introspection.Claims["token_type"])
+	assert.Equal(t, []interface{}{"admin"}, introspection.Claims["groups"])
+	assert.Equal(t, []interface{}{"pwd", "otp"}, introspection.Claims["amr"])
+}
+
+func TestSimpleProvider_IntrospectTokenRemotelyAcceptsClientIDWhenAudienceIsAccount(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			writeProviderMetadata(t, w, r, ProviderMetadata{
+				Issuer:                "issuer",
+				IntrospectionEndpoint: "http://" + r.Host + "/introspect",
+				JWKSURI:               "http://" + r.Host + "/jwks",
+			})
+		case "/introspect":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"active":true,"sub":"service-account","iss":"http://` + r.Host + `","aud":"account","client_id":"openchami-tokensmith","exp":4102444800,"iat":1700000000}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewSimpleProvider(server.URL, "openchami-tokensmith", "secret")
+	introspection, err := provider.IntrospectToken(context.Background(), "opaque-token")
+
+	require.NoError(t, err)
+	require.NotNil(t, introspection)
+	assert.Equal(t, "openchami-tokensmith", introspection.Claims["client_id"])
+}
+
+func TestSimpleProvider_IntrospectTokenRemotelyRejectsActiveTokenWithWrongIssuerOrAudience(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "wrong issuer", body: `{"active":true,"sub":"csm-admin","iss":"https://evil.example/realms/csm","aud":"tokensmith","exp":4102444800}`},
+		{name: "wrong audience and authorized party", body: `{"active":true,"sub":"csm-admin","iss":"$ISSUER","aud":"other-client","azp":"other-client","exp":4102444800}`},
+		{name: "missing issuer", body: `{"active":true,"sub":"csm-admin","aud":"tokensmith","exp":4102444800}`},
+		{name: "missing client binding", body: `{"active":true,"sub":"csm-admin","iss":"$ISSUER","exp":4102444800}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/.well-known/openid-configuration":
+					writeProviderMetadata(t, w, r, ProviderMetadata{
+						Issuer:                "issuer",
+						IntrospectionEndpoint: "http://" + r.Host + "/introspect",
+						JWKSURI:               "http://" + r.Host + "/jwks",
+					})
+				case "/introspect":
+					w.Header().Set("Content-Type", "application/json")
+					body := strings.ReplaceAll(test.body, "$ISSUER", "http://"+r.Host)
+					_, _ = w.Write([]byte(body))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			provider := NewSimpleProvider(server.URL, "tokensmith", "secret")
+			_, err := provider.IntrospectToken(context.Background(), "opaque-token")
+
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrInvalidToken), "error %v should match %v", err, ErrInvalidToken)
+		})
+	}
+}
+
+func TestSimpleProvider_IntrospectTokenRemotelyAcceptsAuthorizedPartyWhenAudienceIsAccount(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			writeProviderMetadata(t, w, r, ProviderMetadata{
+				Issuer:                "issuer",
+				IntrospectionEndpoint: "http://" + r.Host + "/introspect",
+				JWKSURI:               "http://" + r.Host + "/jwks",
+			})
+		case "/introspect":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"active":true,"sub":"service-account","iss":"http://` + r.Host + `","aud":"account","azp":"openchami-tokensmith","client_id":"openchami-tokensmith","exp":4102444800,"iat":1700000000}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewSimpleProvider(server.URL, "openchami-tokensmith", "secret")
+	introspection, err := provider.IntrospectToken(context.Background(), "opaque-token")
+
+	require.NoError(t, err)
+	require.NotNil(t, introspection)
+	assert.Equal(t, "service-account", introspection.Username)
+	assert.Equal(t, "account", introspection.Claims["aud"])
+	assert.Equal(t, "openchami-tokensmith", introspection.Claims["azp"])
+	assert.Equal(t, "openchami-tokensmith", introspection.ClientID)
+}
+
+func TestSimpleProvider_IntrospectTokenRemotelyAllowsInactiveResponseWithoutIssuerAudience(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			writeProviderMetadata(t, w, r, ProviderMetadata{
+				Issuer:                "issuer",
+				IntrospectionEndpoint: "http://" + r.Host + "/introspect",
+				JWKSURI:               "http://" + r.Host + "/jwks",
+			})
+		case "/introspect":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"active":false}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewSimpleProvider(server.URL, "tokensmith", "secret")
+	introspection, err := provider.IntrospectToken(context.Background(), "opaque-token")
+
+	require.NoError(t, err)
+	require.NotNil(t, introspection)
+	assert.False(t, introspection.Active)
 }
 
 func writeProviderMetadata(t *testing.T, w http.ResponseWriter, r *http.Request, metadata ProviderMetadata) {
@@ -461,6 +619,30 @@ func TestSimpleProvider_ValidateTokenLocallyRejectsWrongIssuerOrAudience(t *test
 	}
 }
 
+func TestSimpleProvider_ValidateTokenLocallyAcceptsAuthorizedPartyWhenAudienceIsAccount(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	provider := NewSimpleProvider("https://keycloak.example/realms/csm", "openchami-tokensmith", "secret")
+	provider.jwks = decodedJWKS(t, rsaJWKS("key-1", &privateKey.PublicKey))
+	tokenValue := signedRS256Token(t, privateKey, "key-1", jwt.MapClaims{
+		"iss":       "https://keycloak.example/realms/csm",
+		"aud":       "account",
+		"azp":       "openchami-tokensmith",
+		"client_id": "openchami-tokensmith",
+		"sub":       "service-account",
+		"iat":       float64(time.Now().Add(-time.Minute).Unix()),
+		"exp":       float64(time.Now().Add(time.Hour).Unix()),
+	})
+
+	introspection, err := provider.validateTokenLocally(tokenValue)
+
+	require.NoError(t, err)
+	require.NotNil(t, introspection)
+	assert.Equal(t, "service-account", introspection.Username)
+	assert.Equal(t, "account", introspection.Claims["aud"])
+	assert.Equal(t, "openchami-tokensmith", introspection.Claims["azp"])
+}
+
 func TestSimpleProvider_IntrospectTokenDoesNotIntrospectWrongAudienceJWT(t *testing.T) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -521,4 +703,13 @@ func rsaJWKS(kid string, publicKey *rsa.PublicKey) map[string]interface{} {
 			},
 		},
 	}
+}
+
+func decodedJWKS(t *testing.T, jwks map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	data, err := json.Marshal(jwks)
+	require.NoError(t, err)
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	return decoded
 }

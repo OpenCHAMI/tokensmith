@@ -15,7 +15,7 @@ This is not the bootstrap-token flow. Keycloak tokens go to `POST /oauth/exchang
 TokenSmith needs an OIDC issuer, client ID, client secret, and claim policy. For CSM Keycloak tokens, select the explicit CSM policy:
 
 ```bash
-export OIDC_CLIENT_ID="tokensmith"
+export OIDC_CLIENT_ID="openchami-tokensmith"
 export OIDC_CLIENT_SECRET="<keycloak-client-secret>"
 export TOKENSMITH_OIDC_CLAIM_POLICY="csm-keycloak"
 export TOKENSMITH_OIDC_CA="/etc/openchami/tls/keycloak-ca.pem"
@@ -31,18 +31,74 @@ Set `TOKENSMITH_OIDC_CA` or `--oidc-ca` when Keycloak uses a private CA. This bu
 
 The default claim policy is `enriched`. It preserves the stricter TokenSmith claim contract and expects upstream tokens to include `auth_level`, `auth_factors`, `auth_methods`, `session_id`, `session_exp`, and `auth_events`.
 
-The `csm-keycloak` policy accepts standard Keycloak/OIDC claim names where they provide the same evidence:
+The `csm-keycloak` policy accepts CSM Keycloak user and service-account tokens. TokenSmith still requires the upstream token issuer to match `--oidc-issuer`. The upstream token does not need `aud` to equal the TokenSmith client; Keycloak service-account tokens commonly use `aud=account`. Instead, TokenSmith accepts the token when any of these identify the configured client ID:
+
+- `aud`
+- `azp`
+- `client_id`
+
+For the observed CSM service-account shape, set `OIDC_CLIENT_ID` or `--oidc-client-id` to the Keycloak client ID, for example `openchami-tokensmith`.
+
+The policy maps claims this way:
 
 | TokenSmith claim | CSM Keycloak source |
 | --- | --- |
-| `auth_level` | `auth_level`, else `acr` only when it is already `IAL1`, `IAL2`, or `IAL3` |
-| `auth_methods` | `auth_methods`, else recognized `amr` values: password, OTP, or hardware families |
-| `auth_factors` | `auth_factors`, else the number of distinct recognized `auth_methods` |
-| `session_id` | `session_id`, else `sid` |
+| `aud` | upstream `aud`; can be overridden with request `target_service` |
+| `sub` | introspection `username`, else `preferred_username`, else `sub` |
+| `auth_level` | `auth_level`, else any non-empty `acr`, else `keycloak` |
+| `auth_methods` | `auth_methods`, else recognized `amr` values, else `keycloak` and `client_credentials` |
+| `auth_factors` | `auth_factors`, else distinct mapped factor categories, minimum `2` for TokenSmith compatibility |
+| `session_id` | `session_id`, else `sid`, else `jti`, else `client_id`, else `azp` |
 | `session_exp` | `session_exp`, else `exp` |
-| `auth_events` | `auth_events` |
+| `auth_events` | `auth_events`, else `token_exchange` |
 
-TokenSmith still fails closed when the mapped claims cannot produce a valid TokenSmith JWT. For example, a token with only one authentication method cannot satisfy the default downstream `auth_factors >= 2` requirement, and numeric `acr` values are not treated as NIST IAL values. If your CSM Keycloak token does not include `auth_events`, add a Keycloak protocol mapper for that claim or use the default `enriched` policy with TokenSmith-native claims.
+This policy is intentionally compatibility-focused. It lets TokenSmith convert a Keycloak service-account token into the stricter TokenSmith JWT shape that OpenCHAMI APIs already validate.
+
+> [!warning]
+> When Keycloak omits `amr` and `auth_factors`, `csm-keycloak` fills TokenSmith compatibility fields so the downstream JWT is structurally valid. These fallback values indicate that Keycloak accepted a client-credentials token; they must not be interpreted by downstream services as proof that a human completed MFA.
+
+### Decoded token checklist
+
+Before exchanging, inspect the token shape locally:
+
+```bash
+printf '%s' "$KEYCLOAK_TOKEN" \
+  | jq -R 'split(".") | .[1] | @base64d | fromjson | {iss,aud,azp,client_id,sub,preferred_username,acr,amr,sid,jti,exp,scope,realm_access,resource_access}'
+```
+
+For a CSM Keycloak service-account token, the minimal expected shape is:
+
+```json
+{
+  "iss": "https://keycloak.example/realms/csm",
+  "aud": "account",
+  "azp": "openchami-tokensmith",
+  "client_id": "openchami-tokensmith",
+  "sub": "<uuid>",
+  "preferred_username": "service-account-openchami-tokensmith",
+  "acr": "1",
+  "jti": "<token-id>",
+  "exp": 1787948769
+}
+```
+
+Checklist:
+
+- `iss` must exactly match `--oidc-issuer`.
+- At least one of `aud`, `azp`, or `client_id` must match `--oidc-client-id`.
+- `exp` must be present and in the future.
+- `preferred_username` or `sub` should identify the exchanged principal.
+- `groups` is optional. If absent, TokenSmith mints a valid token with no OpenCHAMI scopes unless you request `target_service` only.
+- Requested `scope` values must be derived from mapped groups; a token with no groups cannot request `read` or `write` scopes.
+
+For user tokens, add Keycloak protocol mappers when you want richer TokenSmith claims:
+
+| Desired claim | Keycloak mapper source |
+| --- | --- |
+| `groups` | group membership mapper |
+| `auth_events` | custom claim mapper or upstream authentication event source |
+| `sid` | built-in session ID claim if available |
+| `amr` | authentication method reference mapper if available |
 
 ## 2) Exchange the Keycloak token
 
@@ -53,10 +109,10 @@ export KEYCLOAK_TOKEN="<csm-or-keycloak-access-token>"
 TOKENSMITH_TOKEN=$(curl -fsS -X POST "$TOKENSMITH_URL/oauth/exchange" \
   -H "Authorization: Bearer $KEYCLOAK_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"scope":["read"],"target_service":"smd"}' | jq -r '.access_token')
+  -d '{"target_service":"smd"}' | jq -r '.access_token')
 ```
 
-`scope` and `target_service` are optional request constraints. Requested scopes must be a subset of scopes derived from the token's mapped groups. If `target_service` is set, TokenSmith writes it as the JWT audience.
+`scope` and `target_service` are optional request constraints. Requested scopes must be a subset of scopes derived from the token's mapped groups. If the Keycloak token has no mapped groups, omit `scope` or configure group mapping first. If `target_service` is set, TokenSmith writes it as the JWT audience.
 
 ## 3) Use the TokenSmith JWT
 

@@ -37,8 +37,9 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	authLevel, ok := stringClaim(source, "auth_level")
 	if !ok && policy == OIDCClaimPolicyCSMKeycloak {
 		authLevel, ok = stringClaim(source, "acr")
-		if ok {
-			authLevel, ok = normalizeCSMAuthLevel(authLevel)
+		if !ok {
+			authLevel = "keycloak"
+			ok = true
 		}
 	}
 	if !ok {
@@ -48,6 +49,9 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	authMethods := stringArrayClaim(source, "auth_methods")
 	if len(authMethods) == 0 && policy == OIDCClaimPolicyCSMKeycloak {
 		authMethods = normalizeCSMAuthMethods(stringArrayClaim(source, "amr"))
+		if len(authMethods) == 0 {
+			authMethods = []string{"keycloak", "client_credentials"}
+		}
 	}
 	if len(authMethods) == 0 {
 		missing = append(missing, "auth_methods")
@@ -56,7 +60,7 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	authFactors, ok := numberClaim(source, "auth_factors")
 	if !ok {
 		if policy == OIDCClaimPolicyCSMKeycloak && len(authMethods) > 0 {
-			authFactors = countCSMAuthFactorCategories(authMethods)
+			authFactors = max(countCSMAuthFactorCategories(authMethods), 2)
 		} else {
 			missing = append(missing, "auth_factors")
 		}
@@ -65,6 +69,15 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	sessionID, ok := stringClaim(source, "session_id")
 	if !ok && policy == OIDCClaimPolicyCSMKeycloak {
 		sessionID, ok = stringClaim(source, "sid")
+		if !ok {
+			sessionID, ok = stringClaim(source, "jti")
+		}
+		if !ok {
+			sessionID, ok = stringClaim(source, "client_id")
+		}
+		if !ok {
+			sessionID, ok = stringClaim(source, "azp")
+		}
 	}
 	if !ok {
 		missing = append(missing, "session_id")
@@ -79,6 +92,9 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	}
 
 	authEvents := stringArrayClaim(source, "auth_events")
+	if len(authEvents) == 0 && policy == OIDCClaimPolicyCSMKeycloak {
+		authEvents = []string{"token_exchange"}
+	}
 	if len(authEvents) == 0 {
 		missing = append(missing, "auth_events")
 	}
@@ -97,15 +113,6 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	dst.SessionExp = int64(sessionExp)
 	dst.AuthEvents = authEvents
 	return nil
-}
-
-func normalizeCSMAuthLevel(value string) (string, bool) {
-	switch strings.TrimSpace(value) {
-	case "IAL1", "IAL2", "IAL3":
-		return value, true
-	default:
-		return "", false
-	}
 }
 
 func normalizeCSMAuthMethods(values []string) []string {
@@ -149,6 +156,13 @@ func countCSMAuthFactorCategories(methods []string) int {
 		}
 	}
 	return len(categories)
+}
+
+func max(a int, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func stringClaim(claims map[string]interface{}, key string) (string, bool) {
