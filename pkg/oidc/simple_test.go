@@ -66,6 +66,110 @@ func TestSimpleProvider_IntrospectTokenRemotelyEncodesFormToken(t *testing.T) {
 	assert.Equal(t, "csm-admin", introspection.Username)
 }
 
+func TestSimpleProvider_IntrospectTokenRemotelyAcceptsTokenIntrospectionEndpoint(t *testing.T) {
+	const tokenValue = "opaque-token"
+	var sawIntrospection bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"issuer":"issuer","token_introspection_endpoint":"http://` + r.Host + `/token/introspect","jwks_uri":"http://` + r.Host + `/jwks"}`))
+		case "/token/introspect":
+			sawIntrospection = true
+			require.NoError(t, r.ParseForm())
+			require.Equal(t, tokenValue, r.FormValue("token"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"active":true,"username":"csm-admin","exp":4102444800,"iat":1700000000,"claims":{"sub":"csm-admin"},"token_type":"Bearer"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewSimpleProvider(server.URL, "client", "secret")
+	introspection, err := provider.IntrospectToken(context.Background(), tokenValue)
+
+	require.NoError(t, err)
+	require.True(t, sawIntrospection)
+	require.NotNil(t, introspection)
+	assert.True(t, introspection.Active)
+	assert.Equal(t, "csm-admin", introspection.Username)
+}
+
+func TestSimpleProvider_GetProviderMetadataNormalizesIntrospectionEndpointAliases(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantPath string
+	}{
+		{
+			name:     "oauth metadata token introspection endpoint",
+			body:     `{"issuer":"issuer","token_introspection_endpoint":"http://example.test/token/introspect","jwks_uri":"http://example.test/jwks"}`,
+			wantPath: "http://example.test/token/introspect",
+		},
+		{
+			name:     "legacy introspection endpoint",
+			body:     `{"issuer":"issuer","introspection_endpoint":"http://example.test/introspect","jwks_uri":"http://example.test/jwks"}`,
+			wantPath: "http://example.test/introspect",
+		},
+		{
+			name:     "legacy endpoint takes precedence when both exist",
+			body:     `{"issuer":"issuer","introspection_endpoint":"http://example.test/legacy","token_introspection_endpoint":"http://example.test/oauth","jwks_uri":"http://example.test/jwks"}`,
+			wantPath: "http://example.test/legacy",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/.well-known/openid-configuration", r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(test.body))
+			}))
+			t.Cleanup(server.Close)
+
+			provider := NewSimpleProvider(server.URL, "client", "secret")
+			metadata, err := provider.GetProviderMetadata(context.Background())
+
+			require.NoError(t, err)
+			assert.Equal(t, test.wantPath, metadata.IntrospectionEndpoint)
+		})
+	}
+}
+
+func TestSimpleProvider_GetProviderMetadataClassifiesMetadataFailures(t *testing.T) {
+	tests := []struct {
+		name           string
+		code           int
+		body           string
+		wantOperation  string
+		wantStatusCode int
+	}{
+		{name: "bad status", code: http.StatusInternalServerError, body: "nope", wantOperation: "get provider metadata", wantStatusCode: http.StatusInternalServerError},
+		{name: "invalid json", code: http.StatusOK, body: "not-json", wantOperation: "parse provider metadata"},
+		{name: "missing introspection aliases", code: http.StatusOK, body: `{"issuer":"issuer","jwks_uri":"http://example.test/jwks"}`, wantOperation: "validate provider metadata"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, test.body, test.code)
+			}))
+			t.Cleanup(server.Close)
+
+			provider := NewSimpleProvider(server.URL, "client", "secret")
+			_, err := provider.GetProviderMetadata(context.Background())
+
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrProviderMetadata), "error %v should match %v", err, ErrProviderMetadata)
+			var providerErr *ProviderError
+			require.True(t, errors.As(err, &providerErr))
+			assert.Equal(t, test.wantOperation, providerErr.Operation)
+			assert.Equal(t, test.wantStatusCode, providerErr.StatusCode)
+		})
+	}
+}
+
 func TestSimpleProvider_IntrospectTokenRemotelyClassifiesFailures(t *testing.T) {
 	const secretToken = "secret-token-never-log"
 	tests := []struct {

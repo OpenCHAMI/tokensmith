@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -196,5 +197,42 @@ func TestTokenExchangeMiddleware_LogsUpstreamCategoryWithoutToken(t *testing.T) 
 	require.Equal(t, http.StatusUnauthorized, resp.Code)
 	assert.Contains(t, logs.String(), "token_exchange_failed")
 	assert.Contains(t, logs.String(), "upstream_unavailable")
+	assert.NotContains(t, logs.String(), tokenValue)
+}
+
+func TestTokenExchangeMiddleware_LogsProviderMetadataCategory(t *testing.T) {
+	const tokenValue = "secret-metadata-token-never-log"
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	svc := newTestTokenService(t, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-test",
+		OpenCHAMIID: "openchami-test",
+	})
+	provider := oidc.NewMockProvider()
+	provider.IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+		assert.Equal(t, tokenValue, token)
+		return nil, &oidc.ProviderError{
+			Operation: "validate provider metadata",
+			Kind:      oidc.ErrProviderMetadata,
+			Cause:     errors.New("missing required field: introspection_endpoint or token_introspection_endpoint"),
+		}
+	}
+	svc.OIDCProvider = provider
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth/exchange", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+tokenValue)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	svc.newRouter(zerolog.New(io.Discard)).ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusUnauthorized, resp.Code)
+	assert.Contains(t, logs.String(), "token_exchange_failed")
+	assert.Contains(t, logs.String(), "provider_metadata")
+	assert.Contains(t, logs.String(), "provider_operation")
+	assert.Contains(t, logs.String(), "token_introspection_endpoint")
 	assert.NotContains(t, logs.String(), tokenValue)
 }

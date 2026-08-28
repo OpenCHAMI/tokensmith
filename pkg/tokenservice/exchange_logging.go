@@ -30,6 +30,15 @@ func logExchangeFailure(r *http.Request, claimPolicy OIDCClaimPolicy, statusCode
 	if requestID := r.Header.Get("X-Request-Id"); requestID != "" {
 		event = event.Str("request_id", requestID)
 	}
+	if providerErr := exchangeProviderError(err); providerErr != nil {
+		event = event.Str("provider_operation", providerErr.Operation)
+		if providerErr.StatusCode != 0 {
+			event = event.Int("upstream_status_code", providerErr.StatusCode)
+		}
+		if providerErr.Cause != nil && errors.Is(providerErr, oidc.ErrProviderMetadata) {
+			event = event.Str("provider_detail", providerErr.Cause.Error())
+		}
+	}
 	if missingClaims := exchangeMissingClaimNames(err); len(missingClaims) > 0 {
 		event = event.Strs("missing_claims", missingClaims)
 	}
@@ -53,6 +62,8 @@ func exchangeFailureCategory(err error) string {
 		return "invalid_response"
 	case errors.Is(err, oidc.ErrInvalidToken):
 		return "invalid_token"
+	case errors.Is(err, oidc.ErrProviderMetadata):
+		return "provider_metadata"
 	default:
 		return "exchange_failed"
 	}
@@ -64,6 +75,14 @@ func exchangeMissingClaimNames(err error) []string {
 		return nil
 	}
 	return append([]string(nil), claimsErr.Claims...)
+}
+
+func exchangeProviderError(err error) *oidc.ProviderError {
+	var providerErr *oidc.ProviderError
+	if !errors.As(err, &providerErr) {
+		return nil
+	}
+	return providerErr
 }
 
 func exchangeClientIP(r *http.Request) string {

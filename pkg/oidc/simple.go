@@ -71,44 +71,50 @@ func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMeta
 
 	req, err := http.NewRequestWithContext(ctx, "GET", p.discoveryURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, providerError("create provider metadata request", ErrProviderMetadata, err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get provider metadata: %w", err)
+		return nil, providerError("get provider metadata", ErrProviderMetadata, err)
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get provider metadata: status %d", resp.StatusCode)
+		return nil, providerStatusError("get provider metadata", ErrProviderMetadata, resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, providerError("read provider metadata response", ErrProviderMetadata, err)
 	}
 
 	var metadata ProviderMetadata
 	if err := json.Unmarshal(body, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata: %w", err)
+		return nil, providerError("parse provider metadata", ErrProviderMetadata, err)
 	}
+	normalizeProviderMetadata(&metadata)
 
-	// Validate required fields
 	if metadata.Issuer == "" {
-		return nil, fmt.Errorf("missing required field: issuer")
+		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: issuer"))
 	}
 	if metadata.IntrospectionEndpoint == "" {
-		return nil, fmt.Errorf("missing required field: introspection_endpoint")
+		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: introspection_endpoint or token_introspection_endpoint"))
 	}
 	if metadata.JWKSURI == "" {
-		return nil, fmt.Errorf("missing required field: jwks_uri")
+		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: jwks_uri"))
 	}
 
 	p.metadata = &metadata
 	return &metadata, nil
+}
+
+func normalizeProviderMetadata(metadata *ProviderMetadata) {
+	if metadata.IntrospectionEndpoint == "" {
+		metadata.IntrospectionEndpoint = metadata.TokenIntrospectionEndpoint
+	}
 }
 
 // SupportsLocalIntrospection returns true if local introspection is supported
@@ -121,7 +127,7 @@ func (p *SimpleProvider) GetJWKS(ctx context.Context) (interface{}, error) {
 	// Check if we need to update the JWKS
 	if p.jwks == nil || time.Since(p.lastJWKSUpdate) > p.jwksUpdatePeriod {
 		if err := p.updateJWKS(ctx); err != nil {
-			return nil, fmt.Errorf("failed to update JWKS: %w", err)
+			return nil, providerError("update JWKS", ErrProviderMetadata, err)
 		}
 	}
 	return p.jwks, nil
@@ -132,7 +138,7 @@ func (p *SimpleProvider) updateJWKS(ctx context.Context) error {
 	// Get metadata first to get JWKS URI
 	metadata, err := p.GetProviderMetadata(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get metadata: %w", err)
+		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", metadata.JWKSURI, nil)
@@ -266,7 +272,7 @@ func claimHasAudience(value interface{}, expected string) bool {
 func (p *SimpleProvider) introspectTokenRemotely(ctx context.Context, token string) (*IntrospectionResponse, error) {
 	metadata, err := p.GetProviderMetadata(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get metadata: %w", err)
+		return nil, err
 	}
 
 	formData := url.Values{"token": []string{token}}.Encode()
