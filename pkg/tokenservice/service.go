@@ -46,12 +46,14 @@ type Config struct {
 	OIDCIssuerURL    string
 	OIDCClientID     string
 	OIDCClientSecret string
+	OIDCClaimPolicy  OIDCClaimPolicy
 }
 
 // OIDCProviderConfigUpdate captures mutable single-provider OIDC settings.
 type OIDCProviderConfigUpdate struct {
 	IssuerURL       string
 	ClientID        string
+	ClaimPolicy     string
 	ReplaceExisting bool
 	DryRun          bool
 }
@@ -60,6 +62,7 @@ type OIDCProviderConfigUpdate struct {
 type OIDCConfigRequest struct {
 	IssuerURL       string `json:"issuer_url"`
 	ClientID        string `json:"client_id"`
+	ClaimPolicy     string `json:"claim_policy,omitempty"`
 	ReplaceExisting bool   `json:"replace_existing"`
 	DryRun          bool   `json:"dry_run"`
 }
@@ -69,6 +72,7 @@ type OIDCProviderStatus struct {
 	Configured           bool   `json:"configured"`
 	IssuerURL            string `json:"issuer_url"`
 	ClientID             string `json:"client_id"`
+	ClaimPolicy          string `json:"claim_policy"`
 	LocalUserMintEnabled bool   `json:"local_user_mint_enabled"`
 }
 
@@ -103,6 +107,12 @@ type TokenService struct {
 
 // NewTokenService creates a new TokenService instance
 func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService, error) {
+	claimPolicy, err := ParseOIDCClaimPolicy(string(config.OIDCClaimPolicy))
+	if err != nil {
+		return nil, err
+	}
+	config.OIDCClaimPolicy = claimPolicy
+
 	// Initialize the token manager
 	tokenManager := token.NewTokenManager(
 		keyManager,
@@ -209,6 +219,7 @@ func (s *TokenService) GetOIDCProviderStatus() OIDCProviderStatus {
 		Configured:           strings.TrimSpace(s.Config.OIDCIssuerURL) != "" && strings.TrimSpace(s.Config.OIDCClientID) != "",
 		IssuerURL:            s.Config.OIDCIssuerURL,
 		ClientID:             s.Config.OIDCClientID,
+		ClaimPolicy:          string(s.Config.OIDCClaimPolicy),
 		LocalUserMintEnabled: s.Config.EnableLocalUserMint,
 	}
 }
@@ -222,6 +233,14 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 	}
 	if clientID == "" {
 		return "", s.GetOIDCProviderStatus(), fmt.Errorf("client_id is required")
+	}
+	claimPolicy := s.Config.OIDCClaimPolicy
+	if update.ClaimPolicy != "" {
+		parsed, err := ParseOIDCClaimPolicy(update.ClaimPolicy)
+		if err != nil {
+			return "", s.GetOIDCProviderStatus(), err
+		}
+		claimPolicy = parsed
 	}
 
 	secret := strings.TrimSpace(s.Config.OIDCClientSecret)
@@ -251,6 +270,7 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 	s.OIDCProvider = provider
 	s.Config.OIDCIssuerURL = issuerURL
 	s.Config.OIDCClientID = clientID
+	s.Config.OIDCClaimPolicy = claimPolicy
 	s.mu.Unlock()
 
 	if hasExisting {

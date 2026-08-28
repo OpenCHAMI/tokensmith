@@ -20,6 +20,7 @@ var (
 	oidcIssuerURL             string
 	oidcClientID              string
 	oidcClientSecret          string
+	oidcClaimPolicy           string
 	configPath                string
 	keyFile                   string
 	keyDir                    string

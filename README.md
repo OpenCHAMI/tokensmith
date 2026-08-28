@@ -117,6 +117,7 @@ Useful first endpoints:
 
 - `GET /health`
 - `GET /.well-known/jwks.json`
+- `POST /oauth/exchange` for upstream OIDC/Keycloak bearer-token exchange
 - `POST /oauth/token`
 
 For complete startup options and environment variable precedence:
@@ -124,6 +125,7 @@ For complete startup options and environment variable precedence:
 - CLI reference: [`docs/cli-reference.md`](docs/cli-reference.md)
 - Environment reference: [`docs/env-reference.md`](docs/env-reference.md)
 - HTTP endpoints: [`docs/http-endpoints.md`](docs/http-endpoints.md)
+- Keycloak exchange tutorial: [`docs/keycloak-token-exchange.md`](docs/keycloak-token-exchange.md)
 
 ### OpenCHAMI Bootstrap-First Quick Start (RFC 8693)
 
@@ -140,6 +142,12 @@ Important:
 - For Podman Quadlets (common deployment), use `podman exec` into the TokenSmith container when minting bootstrap tokens.
 
 See full guide: [`docs/internal-service-auth.md`](docs/internal-service-auth.md)
+
+### CSM/Keycloak Token Exchange
+
+If you already have a CSM or Keycloak access token and need a TokenSmith JWT for OpenCHAMI APIs, use `POST /oauth/exchange` with the Keycloak token in the bearer Authorization header. Do not send Keycloak tokens to `POST /oauth/token`; that endpoint is for bootstrap and refresh grants.
+
+See the step-by-step guide: [`docs/keycloak-token-exchange.md`](docs/keycloak-token-exchange.md)
 
 ## Project Structure
 

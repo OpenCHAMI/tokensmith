@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/openchami/tokensmith/pkg/token"
 )
 
@@ -20,14 +21,18 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		return "", errors.New("empty token")
 	}
 
-	provider := s.currentOIDCProvider()
-	if provider == nil {
-		return "", errors.New("OIDC provider is not configured")
-	}
+	introspection, ok := ctx.Value(oidc.IntrospectionCtxKey{}).(*oidc.IntrospectionResponse)
+	if !ok {
+		provider := s.currentOIDCProvider()
+		if provider == nil {
+			return "", errors.New("OIDC provider is not configured")
+		}
 
-	introspection, err := provider.IntrospectToken(ctx, idtoken)
-	if err != nil {
-		return "", fmt.Errorf("token introspection failed: %w", err)
+		var err error
+		introspection, err = provider.IntrospectToken(ctx, idtoken)
+		if err != nil {
+			return "", fmt.Errorf("token introspection failed: %w", err)
+		}
 	}
 
 	if !introspection.Active {
@@ -70,46 +75,8 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		claims.EmailVerified = emailVerified
 	}
 
-	if authLevel, ok := introspection.Claims["auth_level"].(string); ok {
-		claims.AuthLevel = authLevel
-	} else {
-		return "", fmt.Errorf("missing required claim: auth_level")
-	}
-	if authFactors, ok := introspection.Claims["auth_factors"].(float64); ok {
-		claims.AuthFactors = int(authFactors)
-	} else if _, exists := introspection.Claims["auth_factors"]; !exists {
-		return "", fmt.Errorf("missing required claim: auth_factors")
-	} else {
-		return "", fmt.Errorf("invalid type for claim auth_factors: expected number")
-	}
-
-	authMethods := extractStringArrayFromClaims(introspection.Claims, "auth_methods")
-	if len(authMethods) == 0 {
-		return "", fmt.Errorf("missing required claim: auth_methods")
-	}
-	claims.AuthMethods = authMethods
-
-	if sessionID, ok := introspection.Claims["session_id"].(string); ok {
-		claims.SessionID = sessionID
-	} else {
-		return "", fmt.Errorf("missing required claim: session_id")
-	}
-	if sessionExp, ok := introspection.Claims["session_exp"].(float64); ok {
-		claims.SessionExp = int64(sessionExp)
-	} else if _, exists := introspection.Claims["session_exp"]; !exists {
-		return "", fmt.Errorf("missing required claim: session_exp")
-	} else {
-		return "", fmt.Errorf("invalid type for claim session_exp: expected number")
-	}
-	if authEvents, ok := introspection.Claims["auth_events"].([]interface{}); ok {
-		claims.AuthEvents = make([]string, len(authEvents))
-		for index, value := range authEvents {
-			if authEvent, ok := value.(string); ok {
-				claims.AuthEvents[index] = authEvent
-			}
-		}
-	} else {
-		return "", fmt.Errorf("missing required claim: auth_events")
+	if err := normalizeExchangeClaims(introspection.Claims, claims, s.Config.OIDCClaimPolicy); err != nil {
+		return "", err
 	}
 
 	if groupsRaw, ok := introspection.Claims["groups"]; ok {
@@ -141,33 +108,36 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		claims.Scope = scopes
 	}
 
-	if scope, ok := ctx.Value(ScopeContextKey).([]string); ok {
-		claims.Scope = scope
+	if scope, ok := ctx.Value(ScopeContextKey).([]string); ok && len(scope) > 0 {
+		filtered, err := constrainRequestedScopes(claims.Scope, scope)
+		if err != nil {
+			return "", err
+		}
+		claims.Scope = filtered
 	}
 	if targetService, ok := ctx.Value(TargetServiceContextKey).(string); ok && targetService != "" {
 		claims.Audience = []string{targetService}
 	}
 
-	idtoken, err = s.TokenManager.GenerateToken(claims)
+	tokenValue, err := s.TokenManager.GenerateToken(claims)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate token: %w", err)
 	}
 
-	return idtoken, nil
+	return tokenValue, nil
 }
 
-func extractStringArrayFromClaims(claims map[string]interface{}, key string) []string {
-	array, ok := claims[key].([]interface{})
-	if !ok || len(array) == 0 {
-		return []string{}
+func constrainRequestedScopes(allowed []string, requested []string) ([]string, error) {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, scope := range allowed {
+		allowedSet[scope] = struct{}{}
 	}
-
-	strings := make([]string, 0, len(array))
-	for _, item := range array {
-		if str, ok := item.(string); ok {
-			strings = append(strings, str)
+	out := make([]string, 0, len(requested))
+	for _, scope := range requested {
+		if _, ok := allowedSet[scope]; !ok {
+			return nil, invalidExchangeClaim("scope")
 		}
+		out = append(out, scope)
 	}
-
-	return strings
+	return out, nil
 }

@@ -67,6 +67,7 @@ Starts the TokenSmith service.
 | `--oidc-issuer` | OIDC issuer URL | `http://hydra:4444` |
 | `--oidc-client-id` | OIDC client ID, or `OIDC_CLIENT_ID` | `""` |
 | `--oidc-client-secret` | OIDC client secret, or `OIDC_CLIENT_SECRET` | `""` |
+| `--oidc-claim-policy` | OIDC claim policy (`enriched` or `csm-keycloak`), or `TOKENSMITH_OIDC_CLAIM_POLICY` | `""` |
 | `--key-file` | Existing private key path | `""` |
 | `--key-dir` | Directory where generated keys are saved when `--key-file` is not set | `""` |
 | `--enable-local-user-mint` | Enable break-glass local user token creation endpoint | `false` |
@@ -83,6 +84,7 @@ Starts the TokenSmith service.
 - If `--key-file` is set, TokenSmith loads that private key.
 - If `--key-file` is not set, TokenSmith generates an RSA keypair and writes it to `--key-dir` as `private.pem` and `public.pem`.
 - If `--oidc-client-id` or `--oidc-client-secret` are omitted, TokenSmith reads `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+- If `--oidc-claim-policy` is omitted, TokenSmith reads `TOKENSMITH_OIDC_CLAIM_POLICY`; empty defaults to `enriched`.
 - If RFC 8693 store flags are omitted, TokenSmith falls back to environment variables and then the defaults shown above.
 - If `--service-identity-ca` is set, TokenSmith requires `--tls-cert-file` and `--tls-key-file` so mTLS service identity exchange can be enforced.
 
@@ -94,6 +96,7 @@ tokensmith serve \
   --key-dir ./keys \
   --oidc-issuer https://issuer.example \
   --oidc-client-id your-client-id \
+  --oidc-claim-policy enriched \
   --rfc8693-bootstrap-store ./data/bootstrap-tokens \
   --rfc8693-refresh-store ./data/refresh-tokens
 ```
@@ -104,6 +107,7 @@ The `serve` command exposes:
 
 - `GET /health`
 - `GET /.well-known/jwks.json`
+- `POST /oauth/exchange` (upstream OIDC/Keycloak bearer-token exchange)
 - `POST /oauth/token`
 - `POST /token` (alias for the service-token flow)
 - `POST /service-identity/session` (mTLS service-identity session mint)
@@ -323,6 +327,7 @@ Flags:
 - `--url` TokenSmith base URL (default `http://127.0.0.1:8080`)
 - `--issuer-url` OIDC issuer URL (required)
 - `--client-id` OIDC client ID (required)
+- `--claim-policy` optional OIDC claim policy (`enriched` or `csm-keycloak`)
 - `--replace-existing` required when replacing an already configured provider
 - `--dry-run` validates and reports create/replace result without applying
 
@@ -338,7 +343,8 @@ Example:
 tokensmith oidc configure \
   --url http://127.0.0.1:8080 \
   --issuer-url https://issuer.example \
-  --client-id tokensmith-client
+  --client-id tokensmith-client \
+  --claim-policy csm-keycloak
 ```
 
 Replace existing provider:

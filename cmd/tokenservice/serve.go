@@ -31,6 +31,13 @@ var serveCmd = &cobra.Command{
 		if oidcClientSecret == "" {
 			oidcClientSecret = os.Getenv("OIDC_CLIENT_SECRET")
 		}
+		if oidcClaimPolicy == "" {
+			oidcClaimPolicy = os.Getenv("TOKENSMITH_OIDC_CLAIM_POLICY")
+		}
+		claimPolicy, err := tokenservice.ParseOIDCClaimPolicy(oidcClaimPolicy)
+		if err != nil {
+			return err
+		}
 		if rfc8693BootstrapStorePath == "" {
 			rfc8693BootstrapStorePath = os.Getenv("TOKENSMITH_RFC8693_BOOTSTRAP_STORE")
 			if rfc8693BootstrapStorePath == "" {
@@ -64,6 +71,7 @@ var serveCmd = &cobra.Command{
 			OIDCIssuerURL:             oidcIssuerURL,
 			OIDCClientID:              oidcClientID,
 			OIDCClientSecret:          oidcClientSecret,
+			OIDCClaimPolicy:           claimPolicy,
 			RFC8693BootstrapStorePath: rfc8693BootstrapStorePath,
 			RFC8693RefreshStorePath:   rfc8693RefreshStorePath,
 			ServiceIdentityCAPath:     serviceIdentityCAPath,
@@ -123,6 +131,7 @@ func init() {
 	serveCmd.Flags().StringVar(&oidcIssuerURL, "oidc-issuer", "http://hydra:4444", "OIDC provider issuer URL")
 	serveCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OIDC client ID (or set OIDC_CLIENT_ID env var)")
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
+	serveCmd.Flags().StringVar(&oidcClaimPolicy, "oidc-claim-policy", "", "OIDC claim policy: enriched or csm-keycloak (or set TOKENSMITH_OIDC_CLAIM_POLICY)")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")

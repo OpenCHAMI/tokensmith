@@ -13,8 +13,9 @@ This guide is the fastest path to running TokenSmith and integrating AuthN/AuthZ
 Start here to find the right guide for your situation:
 
 1. **I have an external OIDC provider (Keycloak, Azure AD, Okta, Dex, etc.) and want to use it for authentication**
-   - Follow section [1) Start the token service](#1-start-the-token-service) below
-   - Details: [Token Flows: Upstream OIDC](./token-flows.md#upstream-oidc-flow-recommended)
+    - Follow section [1) Start the token service](#1-start-the-token-service) below
+    - Details: [Token Flows: Upstream OIDC](./token-flows.md#upstream-oidc-flow-recommended)
+    - CSM Keycloak example: [Keycloak token exchange](./keycloak-token-exchange.md)
 
 2. **TokenSmith is down or I need emergency access without OIDC**
    - Use the break-glass local user token flow: [Break-glass: Local user tokens](#break-glass-local-user-tokens)
@@ -56,10 +57,11 @@ tokensmith serve \
   --config ./config.json \
   --key-dir ./keys \
   --oidc-issuer https://issuer.example \
-  --oidc-client-id your-client-id
+  --oidc-client-id your-client-id \
+  --oidc-claim-policy enriched
 ```
 
-If `--oidc-client-id` or `--oidc-client-secret` are not provided, TokenSmith falls back to `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+If `--oidc-client-id`, `--oidc-client-secret`, or `--oidc-claim-policy` are not provided, TokenSmith falls back to `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `TOKENSMITH_OIDC_CLAIM_POLICY`. Empty claim policy defaults to `enriched`; use `csm-keycloak` for CSM Keycloak bearer-token exchange.
 
 See full command options in `docs/cli-reference.md`.
 

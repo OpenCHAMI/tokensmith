@@ -12,7 +12,7 @@ This guide describes the primary token flows supported by TokenSmith and when to
 
 TokenSmith supports two main token acquisition paths:
 
-1. **Upstream OIDC flow** (primary): Delegate authentication to an external OIDC provider (e.g., Keycloak, Azure AD, Dex).
+1. **Upstream OIDC flow** (primary): Exchange a bearer token from an external OIDC provider (e.g., Keycloak, Azure AD, Dex) for a TokenSmith JWT.
 2. **Local user token flow** (break-glass): Generate tokens directly for local users when upstream OIDC is unavailable or for administrative access.
 
 ## Upstream OIDC flow (recommended)
@@ -21,19 +21,19 @@ This is the standard and recommended flow for production deployments.
 
 ### How it works
 
-1. **Client** initiates login or requests a resource.
-2. **Client** is redirected to the **upstream OIDC provider** (issuer).
-3. **OIDC provider** authenticates the user.
-4. **Client** receives an authorization code from the **upstream OIDC provider**.
-5. **Client** exchanges the authorization code with **TokenSmith** using the RFC 8693 token exchange endpoint.
-6. **TokenSmith** validates the code with the **upstream OIDC provider** and returns a **TokenSmith JWT**.
-7. **Client** uses the **TokenSmith JWT** to access services.
+1. **Client** obtains a bearer token from the **upstream OIDC provider**.
+2. **Client** sends that token to **TokenSmith** at `POST /oauth/exchange`.
+3. **TokenSmith** validates the token through provider JWKS validation or introspection.
+4. **TokenSmith** maps provider claims according to the configured claim policy.
+5. **TokenSmith** returns a **TokenSmith JWT**.
+6. **Client** uses the **TokenSmith JWT** to access services.
 
 ### Requirements
 
 - Upstream OIDC provider must be reachable from TokenSmith.
 - TokenSmith must be configured with the **OIDC issuer URL**, **client ID**, and **client secret**.
 - The OIDC provider must support standard discovery (`.well-known/openid-configuration`).
+- CSM Keycloak tokens require `--oidc-claim-policy csm-keycloak` or `TOKENSMITH_OIDC_CLAIM_POLICY=csm-keycloak`.
 
 ### Configuration
 
@@ -42,6 +42,7 @@ This is the standard and recommended flow for production deployments.
 export OIDC_ISSUER_URL="https://keycloak.example.com/realms/master"
 export OIDC_CLIENT_ID="tokensmith"
 export OIDC_CLIENT_SECRET="<secret>"
+export TOKENSMITH_OIDC_CLAIM_POLICY="csm-keycloak"
 
 # Start TokenSmith
 tokensmith serve
@@ -55,6 +56,7 @@ You can reconfigure the upstream OIDC provider without restarting TokenSmith usi
 tokensmith oidc configure \
   --issuer-url "https://new-provider.example.com" \
   --client-id "new-client-id" \
+  --claim-policy csm-keycloak \
   --replace-existing
 ```
 
@@ -64,6 +66,17 @@ This is useful for:
 - Testing a new provider configuration before full rollout
 
 See [CLI reference](./cli-reference.md) for the complete `oidc configure` command.
+
+### Exchanging a bearer token
+
+```bash
+curl -s -X POST http://localhost:8080/oauth/exchange \
+  -H "Authorization: Bearer $KEYCLOAK_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":["read"],"target_service":"smd"}' | jq .
+```
+
+Do not use `POST /oauth/token` for Keycloak tokens. That endpoint is reserved for bootstrap-token exchange and refresh-token rotation.
 
 ## Local user token flow (break-glass)
 
