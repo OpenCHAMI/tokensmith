@@ -57,6 +57,8 @@ This policy is intentionally compatibility-focused. It lets TokenSmith convert a
 > [!warning]
 > When Keycloak omits `amr` and `auth_factors`, `csm-keycloak` fills TokenSmith compatibility fields so the downstream JWT is structurally valid. These fallback values indicate that Keycloak accepted a client-credentials token; they must not be interpreted by downstream services as proof that a human completed MFA.
 
+By default, TokenSmith caps exchanged-token sessions at `24h` even when Keycloak returns a much longer `exp`. To opt into a longer generated TokenSmith session, set `--max-exchange-session-lifetime` or `TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME` to a Go duration such as `168h`. TokenSmith still never extends the generated token beyond upstream `exp` or upstream `session_exp`.
+
 ### Decoded token checklist
 
 Before exchanging, inspect the token shape locally:
@@ -134,6 +136,7 @@ Common `failure_category` values:
 | `invalid_response` | Provider metadata, JWKS, or introspection JSON was malformed. |
 | `missing_claim` | The token lacked required claim names for the selected claim policy. |
 | `invalid_claim` | A present or mapped claim could not satisfy TokenSmith's JWT contract. |
+| `generated_claim_validation` | TokenSmith built a downstream JWT but its generated claims failed validation. Check generated-token lifetime, audience, and required compatibility fields. |
 | `inactive_token` | The provider reported the token as inactive. |
 
 TokenSmith logs missing claim names, not claim values. It does not log bearer tokens, bootstrap tokens, refresh tokens, client secrets, Authorization headers, or raw upstream responses.

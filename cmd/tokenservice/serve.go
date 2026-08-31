@@ -37,6 +37,17 @@ var serveCmd = &cobra.Command{
 		if oidcCAPath == "" {
 			oidcCAPath = os.Getenv("TOKENSMITH_OIDC_CA")
 		}
+		exchangeSessionLifetime := fileConfig.MaxExchangeSessionLifetime
+		if envLifetime := os.Getenv("TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME"); envLifetime != "" {
+			exchangeSessionLifetime = envLifetime
+		}
+		if maxExchangeSessionLifetime != "" {
+			exchangeSessionLifetime = maxExchangeSessionLifetime
+		}
+		maxExchangeLifetime, err := tokenservice.ParseMaxExchangeSessionLifetime(exchangeSessionLifetime)
+		if err != nil {
+			return err
+		}
 		claimPolicy, err := tokenservice.ParseOIDCClaimPolicy(oidcClaimPolicy)
 		if err != nil {
 			return err
@@ -65,22 +76,23 @@ var serveCmd = &cobra.Command{
 
 		// Create token service configuration
 		serviceConfig := tokenservice.Config{
-			Issuer:                    issuer,
-			GroupScopes:               fileConfig.GroupScopes, // Keep for backward compatibility
-			ClusterID:                 clusterID,
-			OpenCHAMIID:               openCHAMIID,
-			NonEnforcing:              nonEnforcing,
-			EnableLocalUserMint:       enableLocalUserMint,
-			OIDCIssuerURL:             oidcIssuerURL,
-			OIDCClientID:              oidcClientID,
-			OIDCClientSecret:          oidcClientSecret,
-			OIDCClaimPolicy:           claimPolicy,
-			OIDCCAPath:                oidcCAPath,
-			RFC8693BootstrapStorePath: rfc8693BootstrapStorePath,
-			RFC8693RefreshStorePath:   rfc8693RefreshStorePath,
-			ServiceIdentityCAPath:     serviceIdentityCAPath,
-			TLSCertFile:               tlsCertFile,
-			TLSKeyFile:                tlsKeyFile,
+			Issuer:                     issuer,
+			GroupScopes:                fileConfig.GroupScopes, // Keep for backward compatibility
+			ClusterID:                  clusterID,
+			OpenCHAMIID:                openCHAMIID,
+			NonEnforcing:               nonEnforcing,
+			EnableLocalUserMint:        enableLocalUserMint,
+			OIDCIssuerURL:              oidcIssuerURL,
+			OIDCClientID:               oidcClientID,
+			OIDCClientSecret:           oidcClientSecret,
+			OIDCClaimPolicy:            claimPolicy,
+			OIDCCAPath:                 oidcCAPath,
+			MaxExchangeSessionLifetime: maxExchangeLifetime,
+			RFC8693BootstrapStorePath:  rfc8693BootstrapStorePath,
+			RFC8693RefreshStorePath:    rfc8693RefreshStorePath,
+			ServiceIdentityCAPath:      serviceIdentityCAPath,
+			TLSCertFile:                tlsCertFile,
+			TLSKeyFile:                 tlsKeyFile,
 		}
 
 		// Create key manager
@@ -137,6 +149,7 @@ func init() {
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
 	serveCmd.Flags().StringVar(&oidcClaimPolicy, "oidc-claim-policy", "", "OIDC claim policy: enriched or csm-keycloak (or set TOKENSMITH_OIDC_CLAIM_POLICY)")
 	serveCmd.Flags().StringVar(&oidcCAPath, "oidc-ca", "", "Path to PEM CA bundle trusted for upstream OIDC TLS (or set TOKENSMITH_OIDC_CA)")
+	serveCmd.Flags().StringVar(&maxExchangeSessionLifetime, "max-exchange-session-lifetime", "", "Maximum TokenSmith session lifetime for exchanged OIDC tokens, e.g. 24h or 168h (or set TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME)")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")
 	serveCmd.Flags().StringVar(&keyDir, "key-dir", "", "Directory to save key files")
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")

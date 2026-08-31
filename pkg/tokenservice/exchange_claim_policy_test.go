@@ -91,6 +91,80 @@ func TestExchangeToken_CSMKeycloakPolicyAcceptsObservedServiceAccountShape(t *te
 	assert.Equal(t, []string{"token_exchange"}, claims.AuthEvents)
 }
 
+func TestExchangeToken_CapsLongUpstreamSessionByDefault(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	service := newExchangePolicyServiceWithConfig(t, OIDCClaimPolicyCSMKeycloak, Config{}, map[string]interface{}{
+		"exp":                float64(now.Add(365 * 24 * time.Hour).Unix()),
+		"iat":                float64(now.Unix()),
+		"jti":                "device-flow-session",
+		"aud":                []interface{}{"openchami-tokensmith", "account"},
+		"sub":                "09979c65-647e-4f64-b2da-67713a0725f1",
+		"azp":                "openchami-tokensmith",
+		"acr":                "0",
+		"groups":             []interface{}{"admin"},
+		"preferred_username": "testuser",
+	})
+
+	tokenValue, err := service.ExchangeToken(context.Background(), "keycloak-token")
+
+	require.NoError(t, err)
+	claims, _, err := service.TokenManager.ParseToken(tokenValue)
+	require.NoError(t, err)
+	wantDeadline := now.Add(DefaultMaxExchangeSessionLifetime).Unix()
+	assert.Equal(t, wantDeadline, claims.ExpiresAt.Unix())
+	assert.Equal(t, wantDeadline, claims.SessionExp)
+}
+
+func TestExchangeToken_DoesNotExtendShortUpstreamSession(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	shortExpiry := now.Add(2 * time.Hour).Unix()
+	service := newExchangePolicyServiceWithConfig(t, OIDCClaimPolicyCSMKeycloak, Config{}, map[string]interface{}{
+		"exp":                float64(shortExpiry),
+		"iat":                float64(now.Unix()),
+		"jti":                "short-session",
+		"aud":                "account",
+		"azp":                "openchami-tokensmith",
+		"sub":                "09979c65-647e-4f64-b2da-67713a0725f1",
+		"acr":                "0",
+		"groups":             []interface{}{"admin"},
+		"preferred_username": "testuser",
+	})
+
+	tokenValue, err := service.ExchangeToken(context.Background(), "keycloak-token")
+
+	require.NoError(t, err)
+	claims, _, err := service.TokenManager.ParseToken(tokenValue)
+	require.NoError(t, err)
+	assert.Equal(t, shortExpiry, claims.ExpiresAt.Unix())
+	assert.Equal(t, shortExpiry, claims.SessionExp)
+}
+
+func TestExchangeToken_AllowsExplicitLongerExchangeSessionLifetime(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	service := newExchangePolicyServiceWithConfig(t, OIDCClaimPolicyCSMKeycloak, Config{
+		MaxExchangeSessionLifetime: 7 * 24 * time.Hour,
+	}, map[string]interface{}{
+		"exp":                float64(now.Add(365 * 24 * time.Hour).Unix()),
+		"iat":                float64(now.Unix()),
+		"jti":                "week-session",
+		"aud":                []interface{}{"openchami-tokensmith", "account"},
+		"sub":                "09979c65-647e-4f64-b2da-67713a0725f1",
+		"azp":                "openchami-tokensmith",
+		"acr":                "0",
+		"groups":             []interface{}{"admin"},
+		"preferred_username": "testuser",
+	})
+
+	tokenValue, err := service.ExchangeToken(context.Background(), "keycloak-token")
+
+	require.NoError(t, err)
+	claims, _, err := service.TokenManager.ParseToken(tokenValue)
+	require.NoError(t, err)
+	wantDeadline := now.Add(7 * 24 * time.Hour).Unix()
+	assert.Equal(t, wantDeadline, claims.ExpiresAt.Unix())
+	assert.Equal(t, wantDeadline, claims.SessionExp)
+}
+
 func TestExchangeToken_PreservesStringAudience(t *testing.T) {
 	now := time.Now()
 	service := newExchangePolicyService(t, OIDCClaimPolicyCSMKeycloak, map[string]interface{}{
@@ -265,24 +339,35 @@ func TestParseOIDCClaimPolicy(t *testing.T) {
 }
 
 func newExchangePolicyService(t *testing.T, policy OIDCClaimPolicy, claims map[string]interface{}) *TokenService {
+	return newExchangePolicyServiceWithConfig(t, policy, Config{}, claims)
+}
+
+func newExchangePolicyServiceWithConfig(t *testing.T, policy OIDCClaimPolicy, config Config, claims map[string]interface{}) *TokenService {
 	t.Helper()
 	now := time.Now()
-	service := newTestTokenService(t, Config{
-		Issuer:          "tokensmith-test",
-		ClusterID:       "cl-test",
-		OpenCHAMIID:     "oc-test",
-		OIDCClaimPolicy: policy,
-		GroupScopes: map[string][]string{
-			"admin": {"read", "write", "admin"},
-		},
-	})
+	config.Issuer = "tokensmith-test"
+	config.ClusterID = "cl-test"
+	config.OpenCHAMIID = "oc-test"
+	config.OIDCClaimPolicy = policy
+	config.GroupScopes = map[string][]string{
+		"admin": {"read", "write", "admin"},
+	}
+	service := newTestTokenService(t, config)
 	provider := oidc.NewMockProvider()
 	provider.IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+		expiresAt := now.Add(time.Hour).Unix()
+		if exp, ok := numberClaim(claims, "exp"); ok {
+			expiresAt = int64(exp)
+		}
+		issuedAt := now.Unix()
+		if iat, ok := numberClaim(claims, "iat"); ok {
+			issuedAt = int64(iat)
+		}
 		return &oidc.IntrospectionResponse{
 			Active:    true,
 			Username:  "admin-user",
-			ExpiresAt: now.Add(time.Hour).Unix(),
-			IssuedAt:  now.Unix(),
+			ExpiresAt: expiresAt,
+			IssuedAt:  issuedAt,
 			Claims:    claims,
 			TokenType: "Bearer",
 		}, nil

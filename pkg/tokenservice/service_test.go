@@ -760,7 +760,7 @@ func TestTokenService_ValidateToken(t *testing.T) {
 					AuthFactors: 2,
 					AuthMethods: []string{"password", "mfa"},
 					SessionID:   "test-session-123",
-					SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+					SessionExp:  time.Now().Add(time.Hour).Unix(),
 					AuthEvents:  []string{"login", "mfa"},
 				}
 				var err error

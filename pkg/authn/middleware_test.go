@@ -33,7 +33,7 @@ func validTokenSmithClaims(iss string, aud []string) jwt.MapClaims {
 		"auth_factors": 2,
 		"auth_methods": []string{"service", "certificate"},
 		"session_id":   "service-u1-100",
-		"session_exp":  now.Add(24 * time.Hour).Unix(),
+		"session_exp":  now.Add(5 * time.Minute).Unix(),
 		"auth_events":  []string{"service_auth"},
 	}
 }

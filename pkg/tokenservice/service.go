@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
@@ -20,6 +21,8 @@ import (
 )
 
 type contextKey string
+
+const DefaultMaxExchangeSessionLifetime = 24 * time.Hour
 
 const (
 	ScopeContextKey         contextKey = "scope"
@@ -46,11 +49,12 @@ type Config struct {
 	TLSKeyFile            string
 
 	// OIDC provider configuration
-	OIDCIssuerURL    string
-	OIDCClientID     string
-	OIDCClientSecret string
-	OIDCClaimPolicy  OIDCClaimPolicy
-	OIDCCAPath       string
+	OIDCIssuerURL              string
+	OIDCClientID               string
+	OIDCClientSecret           string
+	OIDCClaimPolicy            OIDCClaimPolicy
+	OIDCCAPath                 string
+	MaxExchangeSessionLifetime time.Duration
 }
 
 // OIDCProviderConfigUpdate captures mutable single-provider OIDC settings.
@@ -117,6 +121,12 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		return nil, err
 	}
 	config.OIDCClaimPolicy = claimPolicy
+	if config.MaxExchangeSessionLifetime == 0 {
+		config.MaxExchangeSessionLifetime = DefaultMaxExchangeSessionLifetime
+	}
+	if config.MaxExchangeSessionLifetime < 0 {
+		return nil, fmt.Errorf("max exchange session lifetime must be greater than zero")
+	}
 	oidcHTTPClient, err := newOIDCHTTPClient(config.OIDCCAPath)
 	if err != nil {
 		return nil, err

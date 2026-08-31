@@ -28,3 +28,11 @@ func TestServeCommandHasOIDCCAFlag(t *testing.T) {
 		assert.Contains(t, flag.Usage, "TOKENSMITH_OIDC_CA")
 	}
 }
+
+func TestServeCommandHasMaxExchangeSessionLifetimeFlag(t *testing.T) {
+	flag := serveCmd.Flags().Lookup("max-exchange-session-lifetime")
+
+	if assert.NotNil(t, flag) {
+		assert.Contains(t, flag.Usage, "TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME")
+	}
+}

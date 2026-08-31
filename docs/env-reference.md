@@ -16,6 +16,7 @@ This page lists environment variables currently used by TokenSmith code paths.
 | `OIDC_CLIENT_SECRET` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-client-secret` |
 | `TOKENSMITH_OIDC_CLAIM_POLICY` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-claim-policy`; valid values: `enriched`, `csm-keycloak` |
 | `TOKENSMITH_OIDC_CA` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-ca` (PEM CA bundle for upstream OIDC TLS validation) |
+| `TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME` | `cmd/tokenservice/serve.go` | Fallback value for `--max-exchange-session-lifetime`; Go duration such as `24h` or `168h` |
 | `TOKENSMITH_RFC8693_BOOTSTRAP_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--rfc8693-bootstrap-store`; default `./data/bootstrap-tokens` |
 | `TOKENSMITH_RFC8693_REFRESH_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--rfc8693-refresh-store`; default `./data/refresh-tokens` |
 | `TOKENSMITH_SERVICE_IDENTITY_CA` | `cmd/tokenservice/serve.go` | Fallback value for `--service-identity-ca` (PEM CA bundle for inbound mTLS client cert trust) |
@@ -28,12 +29,14 @@ OIDC runtime configuration notes:
 - `tokensmith oidc configure` updates issuer/client-id and, when supplied, claim policy. It expects the running service to already have `OIDC_CLIENT_SECRET` set.
 - `TOKENSMITH_OIDC_CLAIM_POLICY` defaults to `enriched`; use `csm-keycloak` only for CSM Keycloak bearer-token exchange.
 - `TOKENSMITH_OIDC_CA` affects outbound HTTPS validation for OIDC discovery, JWKS, and introspection only. It is separate from `TOKENSMITH_SERVICE_IDENTITY_CA`, which trusts inbound service-identity client certificates.
+- `TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME` defaults to `24h`. Longer values are explicit risk acceptance for longer generated TokenSmith tokens; exchanged tokens are still capped by upstream `exp` and `session_exp`.
 
 Precedence for these values:
 
 1. explicit CLI flag value
 2. environment variable fallback
-3. built-in default
+3. JSON config file value, where supported
+4. built-in default
 
 ## AuthZ policy loading
 

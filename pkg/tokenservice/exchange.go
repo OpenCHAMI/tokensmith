@@ -68,6 +68,7 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	if err := normalizeExchangeClaims(introspection.Claims, claims, s.Config.OIDCClaimPolicy); err != nil {
 		return "", err
 	}
+	capExchangeSession(claims, s.Config.MaxExchangeSessionLifetime)
 
 	if groupsRaw, ok := introspection.Claims["groups"]; ok {
 		scopes := make([]string, 0)
@@ -111,10 +112,36 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 
 	tokenValue, err := s.TokenManager.GenerateToken(claims)
 	if err != nil {
+		if errors.Is(err, token.ErrInvalidClaims) {
+			return "", fmt.Errorf("%w: %w", ErrExchangeGeneratedClaimValidation, err)
+		}
 		return "", fmt.Errorf("failed to generate token: %w", err)
 	}
 
 	return tokenValue, nil
+}
+
+func capExchangeSession(claims *token.TSClaims, maxLifetime time.Duration) {
+	if claims == nil || claims.IssuedAt == nil {
+		return
+	}
+	if maxLifetime <= 0 {
+		maxLifetime = DefaultMaxExchangeSessionLifetime
+	}
+
+	deadline := claims.IssuedAt.Add(maxLifetime)
+	if claims.ExpiresAt != nil && claims.ExpiresAt.Before(deadline) {
+		deadline = claims.ExpiresAt.Time
+	}
+	if claims.SessionExp > 0 {
+		sessionDeadline := time.Unix(claims.SessionExp, 0)
+		if sessionDeadline.Before(deadline) {
+			deadline = sessionDeadline
+		}
+	}
+
+	claims.ExpiresAt = jwt.NewNumericDate(deadline)
+	claims.SessionExp = deadline.Unix()
 }
 
 func normalizeAudienceClaim(value interface{}) []string {

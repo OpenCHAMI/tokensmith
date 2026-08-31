@@ -248,11 +248,17 @@ func (c *TSClaims) ValidateAt(enforce bool, now time.Time) error {
 	if c.IssuedAt != nil {
 		iat = c.IssuedAt.Unix()
 	}
-	if c.SessionExp-iat > 86400 {
+	if c.SessionExp < iat {
 		if enforce {
-			return errors.New("session duration exceeds maximum allowed (24 hours)")
+			return errors.New("session expiration is before issued-at time")
 		}
-		logs = append(logs, "Session duration exceeds maximum allowed (24 hours)")
+		logs = append(logs, "Session expiration is before issued-at time")
+	}
+	if c.ExpiresAt != nil && c.SessionExp > c.ExpiresAt.Unix() {
+		if enforce {
+			return errors.New("session expiration exceeds token expiration")
+		}
+		logs = append(logs, "Session expiration exceeds token expiration")
 	}
 
 	if !enforce && len(logs) > 0 {

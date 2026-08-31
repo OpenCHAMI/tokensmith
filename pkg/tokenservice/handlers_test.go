@@ -236,3 +236,54 @@ func TestTokenExchangeMiddleware_LogsProviderMetadataCategory(t *testing.T) {
 	assert.Contains(t, logs.String(), "token_introspection_endpoint")
 	assert.NotContains(t, logs.String(), tokenValue)
 }
+
+func TestTokenExchangeHandler_LogsGeneratedClaimValidationCategory(t *testing.T) {
+	const tokenValue = "secret-invalid-generated-claims-token-never-log"
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	now := time.Now()
+	svc := newTestTokenService(t, Config{
+		Issuer:          "http://tokensmith.test",
+		ClusterID:       "cluster-test",
+		OpenCHAMIID:     "openchami-test",
+		OIDCClaimPolicy: OIDCClaimPolicyCSMKeycloak,
+		GroupScopes: map[string][]string{
+			"admin": {"read", "write", "admin"},
+		},
+	})
+	provider := oidc.NewMockProvider()
+	provider.IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+		assert.Equal(t, tokenValue, token)
+		return &oidc.IntrospectionResponse{
+			Active:    true,
+			Username:  "testuser",
+			ExpiresAt: now.Add(48 * time.Hour).Unix(),
+			IssuedAt:  now.Unix(),
+			Claims: map[string]interface{}{
+				"sub":         "testuser",
+				"groups":      []interface{}{"admin"},
+				"acr":         "0",
+				"sid":         "session-1",
+				"exp":         float64(now.Add(48 * time.Hour).Unix()),
+				"auth_events": []interface{}{"login"},
+			},
+			TokenType: "Bearer",
+		}, nil
+	}
+	svc.OIDCProvider = provider
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth/exchange", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+tokenValue)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	svc.newRouter(zerolog.New(io.Discard)).ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusUnauthorized, resp.Code)
+	assert.Contains(t, logs.String(), "token_exchange_failed")
+	assert.Contains(t, logs.String(), "generated_claim_validation")
+	assert.Contains(t, logs.String(), "generate_token")
+	assert.NotContains(t, logs.String(), tokenValue)
+}

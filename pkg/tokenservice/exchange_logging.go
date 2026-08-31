@@ -42,6 +42,9 @@ func logExchangeFailure(r *http.Request, claimPolicy OIDCClaimPolicy, statusCode
 	if missingClaims := exchangeMissingClaimNames(err); len(missingClaims) > 0 {
 		event = event.Strs("missing_claims", missingClaims)
 	}
+	if errors.Is(err, ErrExchangeGeneratedClaimValidation) {
+		event = event.Str("failure_stage", "generate_token")
+	}
 
 	event.Msg(exchangeFailureEvent)
 }
@@ -54,6 +57,8 @@ func exchangeFailureCategory(err error) string {
 		return "missing_claim"
 	case errors.Is(err, ErrExchangeInvalidClaim):
 		return "invalid_claim"
+	case errors.Is(err, ErrExchangeGeneratedClaimValidation):
+		return "generated_claim_validation"
 	case errors.Is(err, oidc.ErrUpstreamUnavailable):
 		return "upstream_unavailable"
 	case errors.Is(err, oidc.ErrUpstreamRejected):

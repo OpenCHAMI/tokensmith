@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	ErrExchangeMissingClaims = errors.New("exchange missing required claims")
-	ErrExchangeInvalidClaim  = errors.New("exchange invalid claim")
+	ErrExchangeMissingClaims            = errors.New("exchange missing required claims")
+	ErrExchangeInvalidClaim             = errors.New("exchange invalid claim")
+	ErrExchangeGeneratedClaimValidation = errors.New("exchange generated claim validation failed")
 )
 
 type ExchangeClaimsError struct {
