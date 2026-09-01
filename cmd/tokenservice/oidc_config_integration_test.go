@@ -59,7 +59,8 @@ func TestOIDCConfigureCLI_ReplaceProtection(t *testing.T) {
 			})
 		case http.MethodPost:
 			var payload struct {
-				ReplaceExisting bool `json:"replace_existing"`
+				ReplaceExisting bool   `json:"replace_existing"`
+				ClaimPolicy     string `json:"claim_policy"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				http.Error(w, "bad payload", http.StatusBadRequest)
@@ -83,6 +84,7 @@ func TestOIDCConfigureCLI_ReplaceProtection(t *testing.T) {
 					"configured":              true,
 					"issuer_url":              "https://issuer.example",
 					"client_id":               "client-id",
+					"claim_policy":            payload.ClaimPolicy,
 					"local_user_mint_enabled": false,
 				},
 			})
@@ -115,6 +117,7 @@ func TestOIDCConfigureCLI_ReplaceProtection(t *testing.T) {
 		"--url", server.URL,
 		"--issuer-url", "https://issuer-b.example",
 		"--client-id", "client-b",
+		"--claim-policy", "csm-keycloak",
 		"--replace-existing",
 	})
 	require.NoError(t, rootCmd.Execute())
@@ -133,6 +136,7 @@ func TestOIDCStatusCLI_ReportsLocalUserMintEnabled(t *testing.T) {
 				"configured":              true,
 				"issuer_url":              "https://issuer.example",
 				"client_id":               "client-id",
+				"claim_policy":            "csm-keycloak",
 				"local_user_mint_enabled": true,
 			},
 		})
@@ -147,5 +151,6 @@ func TestOIDCStatusCLI_ReportsLocalUserMintEnabled(t *testing.T) {
 	assert.Contains(t, output, "Configured: true")
 	assert.Contains(t, output, "Issuer URL: https://issuer.example")
 	assert.Contains(t, output, "Client ID: client-id")
+	assert.Contains(t, output, "Claim Policy: csm-keycloak")
 	assert.Contains(t, output, "Local User Mint Enabled: true")
 }

@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 // FileConfig represents the configuration stored in a file
 type FileConfig struct {
-	GroupScopes map[string][]string `json:"groupScopes"`
+	GroupScopes                map[string][]string `json:"groupScopes"`
+	MaxExchangeSessionLifetime string              `json:"maxExchangeSessionLifetime,omitempty"`
 }
 
 // DefaultFileConfig returns a default file configuration
@@ -26,6 +29,20 @@ func DefaultFileConfig() *FileConfig {
 			"user":     {"read"},
 		},
 	}
+}
+
+func ParseMaxExchangeSessionLifetime(value string) (time.Duration, error) {
+	if strings.TrimSpace(value) == "" {
+		return DefaultMaxExchangeSessionLifetime, nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid max exchange session lifetime %q: %w", value, err)
+	}
+	if duration <= 0 {
+		return 0, fmt.Errorf("max exchange session lifetime must be greater than zero")
+	}
+	return duration, nil
 }
 
 // LoadFileConfig loads configuration from a file

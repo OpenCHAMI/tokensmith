@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newOIDCTestProviderServer(username string) *httptest.Server {
+func newOIDCTestProviderServer(username string, clientID string) *httptest.Server {
 	now := time.Now().Unix()
 
 	mux := http.NewServeMux()
@@ -40,7 +40,10 @@ func newOIDCTestProviderServer(username string) *httptest.Server {
 			"iat":        now,
 			"token_type": "Bearer",
 			"claims": map[string]interface{}{
+				"iss":          server.URL,
 				"aud":          []string{"svc-target"},
+				"azp":          clientID,
+				"client_id":    clientID,
 				"groups":       []string{"viewer"},
 				"auth_level":   "IAL2",
 				"auth_factors": 2,
@@ -74,10 +77,10 @@ func applyOIDCConfigViaHandler(t *testing.T, svc *TokenService, reqBody map[stri
 }
 
 func TestOIDCRuntimeReplaceIntegration_UpdatesExchangeBehavior(t *testing.T) {
-	providerA := newOIDCTestProviderServer("user-a")
+	providerA := newOIDCTestProviderServer("user-a", "client-a")
 	defer providerA.Close()
 
-	providerB := newOIDCTestProviderServer("user-b")
+	providerB := newOIDCTestProviderServer("user-b", "client-b")
 	defer providerB.Close()
 
 	svc := newTestTokenService(t, Config{
@@ -120,4 +123,135 @@ func TestOIDCRuntimeReplaceIntegration_UpdatesExchangeBehavior(t *testing.T) {
 	claimsB, _, err := svc.TokenManager.ParseToken(tokB)
 	require.NoError(t, err)
 	assert.Equal(t, "user-b", claimsB.Subject)
+}
+
+func TestExchangeToken_WithKeycloakTopLevelIntrospectionClaims(t *testing.T) {
+	provider := newKeycloakTopLevelIntrospectionServer(t)
+	defer provider.Close()
+
+	svc := newTestTokenService(t, Config{
+		Issuer:           "tokensmith-test",
+		ClusterID:        "cl-test",
+		OpenCHAMIID:      "oc-test",
+		OIDCIssuerURL:    provider.URL,
+		OIDCClientID:     "tokensmith",
+		OIDCClientSecret: "secret-from-env",
+		OIDCClaimPolicy:  OIDCClaimPolicyCSMKeycloak,
+		GroupScopes: map[string][]string{
+			"admin": {"read", "write"},
+		},
+	})
+	ctx := context.WithValue(context.Background(), ScopeContextKey, []string{"read"})
+
+	tokenValue, err := svc.ExchangeToken(ctx, "opaque-token")
+
+	require.NoError(t, err)
+	claims, _, err := svc.TokenManager.ParseToken(tokenValue)
+	require.NoError(t, err)
+	assert.Equal(t, "keycloak-admin", claims.Subject)
+	assert.Equal(t, []string{"tokensmith"}, []string(claims.Audience))
+	assert.Equal(t, []string{"read"}, claims.Scope)
+	assert.Equal(t, "IAL2", claims.AuthLevel)
+	assert.Equal(t, 2, claims.AuthFactors)
+	assert.ElementsMatch(t, []string{"password", "otp"}, claims.AuthMethods)
+	assert.Equal(t, "keycloak-session-1", claims.SessionID)
+}
+
+func TestExchangeToken_WithObservedKeycloakServiceAccountShape(t *testing.T) {
+	provider := newObservedKeycloakServiceAccountServer(t)
+	defer provider.Close()
+
+	svc := newTestTokenService(t, Config{
+		Issuer:           "tokensmith-test",
+		ClusterID:        "cl-test",
+		OpenCHAMIID:      "oc-test",
+		OIDCIssuerURL:    provider.URL,
+		OIDCClientID:     "openchami-tokensmith",
+		OIDCClientSecret: "secret-from-env",
+		OIDCClaimPolicy:  OIDCClaimPolicyCSMKeycloak,
+	})
+
+	tokenValue, err := svc.ExchangeToken(context.Background(), "opaque-token")
+
+	require.NoError(t, err)
+	claims, _, err := svc.TokenManager.ParseToken(tokenValue)
+	require.NoError(t, err)
+	assert.Equal(t, "service-account-openchami-tokensmith", claims.Subject)
+	assert.Equal(t, []string{"account"}, []string(claims.Audience))
+	assert.Empty(t, claims.Scope)
+	assert.Equal(t, "1", claims.AuthLevel)
+	assert.Equal(t, 2, claims.AuthFactors)
+	assert.Equal(t, []string{"keycloak", "client_credentials"}, claims.AuthMethods)
+	assert.Equal(t, "7836e8d0-6928-4db8-90ee-dea5a7888dc7", claims.SessionID)
+	assert.Equal(t, []string{"token_exchange"}, claims.AuthEvents)
+}
+
+func newKeycloakTopLevelIntrospectionServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	now := time.Now().Unix()
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"issuer":                       server.URL,
+			"token_introspection_endpoint": server.URL + "/token/introspect",
+			"jwks_uri":                     server.URL + "/jwks",
+		})
+	})
+	mux.HandleFunc("/token/introspect", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"active":      true,
+			"sub":         "keycloak-admin",
+			"iss":         server.URL,
+			"aud":         "tokensmith",
+			"groups":      []string{"admin"},
+			"acr":         "IAL2",
+			"amr":         []string{"pwd", "otp"},
+			"sid":         "keycloak-session-1",
+			"auth_events": []string{"login"},
+			"exp":         now + 3600,
+			"iat":         now,
+			"token_type":  "Bearer",
+		})
+	})
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"keys": []interface{}{}})
+	})
+	return server
+}
+
+func newObservedKeycloakServiceAccountServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	now := time.Now().Unix()
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"issuer":                       server.URL,
+			"token_introspection_endpoint": server.URL + "/token/introspect",
+			"jwks_uri":                     server.URL + "/jwks",
+		})
+	})
+	mux.HandleFunc("/token/introspect", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"active":             true,
+			"exp":                now + 300,
+			"iat":                now,
+			"jti":                "7836e8d0-6928-4db8-90ee-dea5a7888dc7",
+			"iss":                server.URL,
+			"aud":                "account",
+			"sub":                "5eca73ee-c3f3-4a0c-a5ef-e1f25ed764a4",
+			"typ":                "Bearer",
+			"azp":                "openchami-tokensmith",
+			"acr":                "1",
+			"scope":              "email offline_access openid profile",
+			"email_verified":     false,
+			"preferred_username": "service-account-openchami-tokensmith",
+			"client_id":          "openchami-tokensmith",
+		})
+	})
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"keys": []interface{}{}})
+	})
+	return server
 }

@@ -20,6 +20,7 @@ var (
 	oidcAdminURL          string
 	oidcConfigureIssuer   string
 	oidcConfigureClientID string
+	oidcConfigurePolicy   string
 	oidcReplaceExisting   bool
 	oidcDryRun            bool
 )
@@ -52,6 +53,7 @@ var oidcStatusCmd = &cobra.Command{
 		fmt.Printf("Configured: %t\n", out.OIDC.Configured)
 		fmt.Printf("Issuer URL: %s\n", out.OIDC.IssuerURL)
 		fmt.Printf("Client ID: %s\n", out.OIDC.ClientID)
+		fmt.Printf("Claim Policy: %s\n", out.OIDC.ClaimPolicy)
 		fmt.Printf("Local User Mint Enabled: %t\n", out.OIDC.LocalUserMintEnabled)
 		return nil
 	},
@@ -71,6 +73,7 @@ var oidcConfigureCmd = &cobra.Command{
 		payload := tokenservice.OIDCConfigRequest{
 			IssuerURL:       oidcConfigureIssuer,
 			ClientID:        oidcConfigureClientID,
+			ClaimPolicy:     oidcConfigurePolicy,
 			ReplaceExisting: oidcReplaceExisting,
 			DryRun:          oidcDryRun,
 		}
@@ -100,6 +103,7 @@ var oidcConfigureCmd = &cobra.Command{
 		fmt.Printf("Configured: %t\n", out.OIDC.Configured)
 		fmt.Printf("Issuer URL: %s\n", out.OIDC.IssuerURL)
 		fmt.Printf("Client ID: %s\n", out.OIDC.ClientID)
+		fmt.Printf("Claim Policy: %s\n", out.OIDC.ClaimPolicy)
 		return nil
 	},
 }
@@ -109,6 +113,7 @@ func init() {
 
 	oidcConfigureCmd.Flags().StringVar(&oidcConfigureIssuer, "issuer-url", "", "OIDC issuer URL")
 	oidcConfigureCmd.Flags().StringVar(&oidcConfigureClientID, "client-id", "", "OIDC client ID")
+	oidcConfigureCmd.Flags().StringVar(&oidcConfigurePolicy, "claim-policy", "", "OIDC claim policy: enriched or csm-keycloak")
 	oidcConfigureCmd.Flags().BoolVar(&oidcReplaceExisting, "replace-existing", false, "Replace an existing configured OIDC provider")
 	oidcConfigureCmd.Flags().BoolVar(&oidcDryRun, "dry-run", false, "Validate and report create/replace outcome without applying changes")
 

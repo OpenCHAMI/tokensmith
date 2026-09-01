@@ -28,6 +28,9 @@ var (
 	// ErrInvalidToken indicates that the token is invalid
 	ErrInvalidToken = errors.New("invalid token")
 
+	// ErrInvalidClaims indicates that token claims failed validation before signing.
+	ErrInvalidClaims = errors.New("invalid claims")
+
 	// ErrInvalidKey indicates that the key is invalid
 	ErrInvalidKey = errors.New("invalid key")
 

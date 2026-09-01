@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/openchami/tokensmith/pkg/token"
 )
 
@@ -20,14 +21,18 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		return "", errors.New("empty token")
 	}
 
-	provider := s.currentOIDCProvider()
-	if provider == nil {
-		return "", errors.New("OIDC provider is not configured")
-	}
+	introspection, ok := ctx.Value(oidc.IntrospectionCtxKey{}).(*oidc.IntrospectionResponse)
+	if !ok {
+		provider := s.currentOIDCProvider()
+		if provider == nil {
+			return "", errors.New("OIDC provider is not configured")
+		}
 
-	introspection, err := provider.IntrospectToken(ctx, idtoken)
-	if err != nil {
-		return "", fmt.Errorf("token introspection failed: %w", err)
+		var err error
+		introspection, err = provider.IntrospectToken(ctx, idtoken)
+		if err != nil {
+			return "", fmt.Errorf("token introspection failed: %w", err)
+		}
 	}
 
 	if !introspection.Active {
@@ -47,18 +52,8 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		OpenCHAMIID: s.OpenCHAMIID,
 	}
 
-	if aud, ok := introspection.Claims["aud"].([]string); ok && len(aud) > 0 {
-		claims.Audience = aud
-	} else if audI, ok := introspection.Claims["aud"].([]interface{}); ok && len(audI) > 0 {
-		out := make([]string, 0, len(audI))
-		for _, value := range audI {
-			if audience, ok := value.(string); ok {
-				out = append(out, audience)
-			}
-		}
-		if len(out) > 0 {
-			claims.Audience = out
-		}
+	if audience := normalizeAudienceClaim(introspection.Claims["aud"]); len(audience) > 0 {
+		claims.Audience = audience
 	}
 	if name, ok := introspection.Claims["name"].(string); ok {
 		claims.Name = name
@@ -70,47 +65,10 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		claims.EmailVerified = emailVerified
 	}
 
-	if authLevel, ok := introspection.Claims["auth_level"].(string); ok {
-		claims.AuthLevel = authLevel
-	} else {
-		return "", fmt.Errorf("missing required claim: auth_level")
+	if err := normalizeExchangeClaims(introspection.Claims, claims, s.Config.OIDCClaimPolicy); err != nil {
+		return "", err
 	}
-	if authFactors, ok := introspection.Claims["auth_factors"].(float64); ok {
-		claims.AuthFactors = int(authFactors)
-	} else if _, exists := introspection.Claims["auth_factors"]; !exists {
-		return "", fmt.Errorf("missing required claim: auth_factors")
-	} else {
-		return "", fmt.Errorf("invalid type for claim auth_factors: expected number")
-	}
-
-	authMethods := extractStringArrayFromClaims(introspection.Claims, "auth_methods")
-	if len(authMethods) == 0 {
-		return "", fmt.Errorf("missing required claim: auth_methods")
-	}
-	claims.AuthMethods = authMethods
-
-	if sessionID, ok := introspection.Claims["session_id"].(string); ok {
-		claims.SessionID = sessionID
-	} else {
-		return "", fmt.Errorf("missing required claim: session_id")
-	}
-	if sessionExp, ok := introspection.Claims["session_exp"].(float64); ok {
-		claims.SessionExp = int64(sessionExp)
-	} else if _, exists := introspection.Claims["session_exp"]; !exists {
-		return "", fmt.Errorf("missing required claim: session_exp")
-	} else {
-		return "", fmt.Errorf("invalid type for claim session_exp: expected number")
-	}
-	if authEvents, ok := introspection.Claims["auth_events"].([]interface{}); ok {
-		claims.AuthEvents = make([]string, len(authEvents))
-		for index, value := range authEvents {
-			if authEvent, ok := value.(string); ok {
-				claims.AuthEvents[index] = authEvent
-			}
-		}
-	} else {
-		return "", fmt.Errorf("missing required claim: auth_events")
-	}
+	capExchangeSession(claims, s.Config.MaxExchangeSessionLifetime)
 
 	if groupsRaw, ok := introspection.Claims["groups"]; ok {
 		scopes := make([]string, 0)
@@ -141,33 +99,84 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		claims.Scope = scopes
 	}
 
-	if scope, ok := ctx.Value(ScopeContextKey).([]string); ok {
-		claims.Scope = scope
+	if scope, ok := ctx.Value(ScopeContextKey).([]string); ok && len(scope) > 0 {
+		filtered, err := constrainRequestedScopes(claims.Scope, scope)
+		if err != nil {
+			return "", err
+		}
+		claims.Scope = filtered
 	}
 	if targetService, ok := ctx.Value(TargetServiceContextKey).(string); ok && targetService != "" {
 		claims.Audience = []string{targetService}
 	}
 
-	idtoken, err = s.TokenManager.GenerateToken(claims)
+	tokenValue, err := s.TokenManager.GenerateToken(claims)
 	if err != nil {
+		if errors.Is(err, token.ErrInvalidClaims) {
+			return "", fmt.Errorf("%w: %w", ErrExchangeGeneratedClaimValidation, err)
+		}
 		return "", fmt.Errorf("failed to generate token: %w", err)
 	}
 
-	return idtoken, nil
+	return tokenValue, nil
 }
 
-func extractStringArrayFromClaims(claims map[string]interface{}, key string) []string {
-	array, ok := claims[key].([]interface{})
-	if !ok || len(array) == 0 {
-		return []string{}
+func capExchangeSession(claims *token.TSClaims, maxLifetime time.Duration) {
+	if claims == nil || claims.IssuedAt == nil {
+		return
+	}
+	if maxLifetime <= 0 {
+		maxLifetime = DefaultMaxExchangeSessionLifetime
 	}
 
-	strings := make([]string, 0, len(array))
-	for _, item := range array {
-		if str, ok := item.(string); ok {
-			strings = append(strings, str)
+	deadline := claims.IssuedAt.Add(maxLifetime)
+	if claims.ExpiresAt != nil && claims.ExpiresAt.Before(deadline) {
+		deadline = claims.ExpiresAt.Time
+	}
+	if claims.SessionExp > 0 {
+		sessionDeadline := time.Unix(claims.SessionExp, 0)
+		if sessionDeadline.Before(deadline) {
+			deadline = sessionDeadline
 		}
 	}
 
-	return strings
+	claims.ExpiresAt = jwt.NewNumericDate(deadline)
+	claims.SessionExp = deadline.Unix()
+}
+
+func normalizeAudienceClaim(value interface{}) []string {
+	switch audience := value.(type) {
+	case string:
+		if audience == "" {
+			return nil
+		}
+		return []string{audience}
+	case []string:
+		return compactStrings(audience)
+	case []interface{}:
+		out := make([]string, 0, len(audience))
+		for _, item := range audience {
+			if value, ok := item.(string); ok && value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func constrainRequestedScopes(allowed []string, requested []string) ([]string, error) {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, scope := range allowed {
+		allowedSet[scope] = struct{}{}
+	}
+	out := make([]string, 0, len(requested))
+	for _, scope := range requested {
+		if _, ok := allowedSet[scope]; !ok {
+			return nil, invalidExchangeClaim("scope")
+		}
+		out = append(out, scope)
+	}
+	return out, nil
 }

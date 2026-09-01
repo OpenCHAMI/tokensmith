@@ -6,11 +6,14 @@ package tokenservice
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
@@ -19,9 +22,12 @@ import (
 
 type contextKey string
 
+const DefaultMaxExchangeSessionLifetime = 24 * time.Hour
+
 const (
 	ScopeContextKey         contextKey = "scope"
 	TargetServiceContextKey contextKey = "target_service"
+	socketPeerContextKey    contextKey = "socket_peer"
 )
 
 // Config holds the configuration for the token service
@@ -43,15 +49,19 @@ type Config struct {
 	TLSKeyFile            string
 
 	// OIDC provider configuration
-	OIDCIssuerURL    string
-	OIDCClientID     string
-	OIDCClientSecret string
+	OIDCIssuerURL              string
+	OIDCClientID               string
+	OIDCClientSecret           string
+	OIDCClaimPolicy            OIDCClaimPolicy
+	OIDCCAPath                 string
+	MaxExchangeSessionLifetime time.Duration
 }
 
 // OIDCProviderConfigUpdate captures mutable single-provider OIDC settings.
 type OIDCProviderConfigUpdate struct {
 	IssuerURL       string
 	ClientID        string
+	ClaimPolicy     string
 	ReplaceExisting bool
 	DryRun          bool
 }
@@ -60,6 +70,7 @@ type OIDCProviderConfigUpdate struct {
 type OIDCConfigRequest struct {
 	IssuerURL       string `json:"issuer_url"`
 	ClientID        string `json:"client_id"`
+	ClaimPolicy     string `json:"claim_policy,omitempty"`
 	ReplaceExisting bool   `json:"replace_existing"`
 	DryRun          bool   `json:"dry_run"`
 }
@@ -69,6 +80,7 @@ type OIDCProviderStatus struct {
 	Configured           bool   `json:"configured"`
 	IssuerURL            string `json:"issuer_url"`
 	ClientID             string `json:"client_id"`
+	ClaimPolicy          string `json:"claim_policy"`
 	LocalUserMintEnabled bool   `json:"local_user_mint_enabled"`
 }
 
@@ -99,10 +111,31 @@ type TokenService struct {
 
 	// Trust roots for inbound mTLS service identity certificates.
 	serviceIdentityCAPool *x509.CertPool
+	oidcHTTPClient        *http.Client
 }
 
 // NewTokenService creates a new TokenService instance
 func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService, error) {
+	claimPolicy, err := ParseOIDCClaimPolicy(string(config.OIDCClaimPolicy))
+	if err != nil {
+		return nil, err
+	}
+	config.OIDCClaimPolicy = claimPolicy
+	if config.MaxExchangeSessionLifetime == 0 {
+		config.MaxExchangeSessionLifetime = DefaultMaxExchangeSessionLifetime
+	}
+	if config.MaxExchangeSessionLifetime < 0 {
+		return nil, fmt.Errorf("max exchange session lifetime must be greater than zero")
+	}
+	oidcHTTPClient, err := newOIDCHTTPClient(config.OIDCCAPath)
+	if err != nil {
+		return nil, err
+	}
+	oidcOptions := []oidc.SimpleProviderOption{}
+	if oidcHTTPClient != nil {
+		oidcOptions = append(oidcOptions, oidc.WithHTTPClient(oidcHTTPClient))
+	}
+
 	// Initialize the token manager
 	tokenManager := token.NewTokenManager(
 		keyManager,
@@ -117,17 +150,19 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		config.OIDCIssuerURL,
 		config.OIDCClientID,
 		config.OIDCClientSecret,
+		oidcOptions...,
 	)
 
 	svc := &TokenService{
-		TokenManager:  tokenManager,
-		Config:        config,
-		Issuer:        config.Issuer,
-		GroupScopes:   config.GroupScopes,
-		ClusterID:     config.ClusterID,
-		OpenCHAMIID:   config.OpenCHAMIID,
-		OIDCProvider:  oidcProvider,
-		replayLimiter: newReplayLimiter(),
+		TokenManager:   tokenManager,
+		Config:         config,
+		Issuer:         config.Issuer,
+		GroupScopes:    config.GroupScopes,
+		ClusterID:      config.ClusterID,
+		OpenCHAMIID:    config.OpenCHAMIID,
+		OIDCProvider:   oidcProvider,
+		replayLimiter:  newReplayLimiter(),
+		oidcHTTPClient: oidcHTTPClient,
 	}
 
 	if strings.TrimSpace(config.ServiceIdentityCAPath) != "" {
@@ -188,6 +223,31 @@ func loadCertPoolFromPEMFile(path string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
+func newOIDCHTTPClient(caPath string) (*http.Client, error) {
+	if strings.TrimSpace(caPath) == "" {
+		return nil, nil
+	}
+
+	caPool, err := loadCertPoolFromPEMFile(caPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load upstream OIDC CA bundle: %w", err)
+	}
+
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		transport = &http.Transport{}
+	}
+	clone := transport.Clone()
+	if clone.TLSClientConfig == nil {
+		clone.TLSClientConfig = &tls.Config{}
+	} else {
+		clone.TLSClientConfig = clone.TLSClientConfig.Clone()
+	}
+	clone.TLSClientConfig.RootCAs = caPool
+
+	return &http.Client{Transport: clone}, nil
+}
+
 func (s *TokenService) currentOIDCProvider() oidc.Provider {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -209,6 +269,7 @@ func (s *TokenService) GetOIDCProviderStatus() OIDCProviderStatus {
 		Configured:           strings.TrimSpace(s.Config.OIDCIssuerURL) != "" && strings.TrimSpace(s.Config.OIDCClientID) != "",
 		IssuerURL:            s.Config.OIDCIssuerURL,
 		ClientID:             s.Config.OIDCClientID,
+		ClaimPolicy:          string(s.Config.OIDCClaimPolicy),
 		LocalUserMintEnabled: s.Config.EnableLocalUserMint,
 	}
 }
@@ -223,6 +284,14 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 	if clientID == "" {
 		return "", s.GetOIDCProviderStatus(), fmt.Errorf("client_id is required")
 	}
+	claimPolicy := s.Config.OIDCClaimPolicy
+	if update.ClaimPolicy != "" {
+		parsed, err := ParseOIDCClaimPolicy(update.ClaimPolicy)
+		if err != nil {
+			return "", s.GetOIDCProviderStatus(), err
+		}
+		claimPolicy = parsed
+	}
 
 	secret := strings.TrimSpace(s.Config.OIDCClientSecret)
 	if secret == "" {
@@ -234,7 +303,11 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 		return "", s.GetOIDCProviderStatus(), fmt.Errorf("OIDC provider already configured; use --replace-existing to overwrite")
 	}
 
-	provider := oidc.NewSimpleProvider(issuerURL, clientID, secret)
+	oidcOptions := []oidc.SimpleProviderOption{}
+	if s.oidcHTTPClient != nil {
+		oidcOptions = append(oidcOptions, oidc.WithHTTPClient(s.oidcHTTPClient))
+	}
+	provider := oidc.NewSimpleProvider(issuerURL, clientID, secret, oidcOptions...)
 	if _, err := provider.GetProviderMetadata(ctx); err != nil {
 		return "", s.GetOIDCProviderStatus(), fmt.Errorf("OIDC provider validation failed: %w", err)
 	}
@@ -251,6 +324,7 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 	s.OIDCProvider = provider
 	s.Config.OIDCIssuerURL = issuerURL
 	s.Config.OIDCClientID = clientID
+	s.Config.OIDCClaimPolicy = claimPolicy
 	s.mu.Unlock()
 
 	if hasExisting {

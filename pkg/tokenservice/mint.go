@@ -24,12 +24,13 @@ func (s *TokenService) MintServiceToken(ctx context.Context, serviceID, targetSe
 	}
 
 	now := time.Now()
+	expiresAt := now.Add(time.Hour)
 	claims := &token.TSClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.Issuer,
 			Subject:   serviceID,
 			Audience:  []string{targetService},
-			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			NotBefore: jwt.NewNumericDate(now),
 			IssuedAt:  jwt.NewNumericDate(now),
 		},
@@ -40,7 +41,7 @@ func (s *TokenService) MintServiceToken(ctx context.Context, serviceID, targetSe
 		AuthFactors: 2,
 		AuthMethods: []string{"service", "certificate"},
 		SessionID:   fmt.Sprintf("service-%s-%d", serviceID, now.UnixNano()),
-		SessionExp:  now.Add(24 * time.Hour).Unix(),
+		SessionExp:  expiresAt.Unix(),
 		AuthEvents:  []string{"service_auth"},
 	}
 

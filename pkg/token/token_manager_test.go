@@ -102,7 +102,7 @@ func TestTokenOperations(t *testing.T) {
 			AuthFactors: 2,
 			AuthMethods: []string{"password", "mfa"},
 			SessionID:   "test-session",
-			SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+			SessionExp:  time.Now().Add(time.Hour).Unix(),
 			AuthEvents:  []string{"login", "mfa"},
 		}
 
@@ -163,7 +163,7 @@ func TestTokenOperations(t *testing.T) {
 			AuthFactors: 2,
 			AuthMethods: []string{"password", "mfa"},
 			SessionID:   "test-session",
-			SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+			SessionExp:  time.Now().Add(time.Hour).Unix(),
 			AuthEvents:  []string{"login", "mfa"},
 		}
 
@@ -183,6 +183,31 @@ func TestTokenOperations(t *testing.T) {
 		assert.Equal(t, kid, parsedToken.Header["kid"])
 	})
 
+	t.Run("GenerateToken permits explicit longer session within token expiration", func(t *testing.T) {
+		now := time.Now()
+		claims := &TSClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Subject:   "test-subject",
+				Audience:  []string{"test-audience"},
+				ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
+				NotBefore: jwt.NewNumericDate(now),
+				IssuedAt:  jwt.NewNumericDate(now),
+			},
+			AuthLevel:   "IAL2",
+			AuthFactors: 2,
+			AuthMethods: []string{"password", "mfa"},
+			SessionID:   "test-session",
+			SessionExp:  now.Add(7 * 24 * time.Hour).Unix(),
+			AuthEvents:  []string{"login", "mfa"},
+		}
+
+		token, err := tm.GenerateToken(claims)
+
+		require.NoError(t, err)
+		require.NotEmpty(t, token)
+	})
+
 	t.Run("ValidateAt uses provided time", func(t *testing.T) {
 		base := time.Unix(100, 0)
 		claims := &TSClaims{
@@ -198,7 +223,7 @@ func TestTokenOperations(t *testing.T) {
 			AuthFactors: 2,
 			AuthMethods: []string{"password", "mfa"},
 			SessionID:   "test-session",
-			SessionExp:  base.Add(24 * time.Hour).Unix(),
+			SessionExp:  base.Add(5 * time.Minute).Unix(),
 			AuthEvents:  []string{"login", "mfa"},
 		}
 
@@ -220,7 +245,7 @@ func TestTokenOperations(t *testing.T) {
 			AuthFactors: 2,
 			AuthMethods: []string{"password", "mfa"},
 			SessionID:   "test-session",
-			SessionExp:  time.Now().Add(24 * time.Hour).Unix(),
+			SessionExp:  time.Now().Add(time.Hour).Unix(),
 			AuthEvents:  []string{"login", "mfa"},
 		}
 

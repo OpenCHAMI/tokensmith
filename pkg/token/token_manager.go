@@ -154,7 +154,7 @@ func (tm *TokenManager) prepareClaims(claims *TSClaims) (*TSClaims, error) {
 	}
 
 	if err := claims.Validate(tm.enforce); err != nil {
-		return nil, fmt.Errorf("invalid claims: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidClaims, err)
 	}
 
 	return claims, nil

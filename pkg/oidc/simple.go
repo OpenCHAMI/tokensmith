@@ -6,10 +6,14 @@ package oidc
 
 import (
 	"context"
+	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -22,34 +26,57 @@ type SimpleProvider struct {
 	clientID         string
 	clientSecret     string
 	discoveryURL     string
+	httpClient       *http.Client
 	metadata         *ProviderMetadata
 	jwks             map[string]interface{}
 	lastJWKSUpdate   time.Time
 	jwksUpdatePeriod time.Duration
 }
 
+type SimpleProviderOption func(*SimpleProvider)
+
+func WithHTTPClient(client *http.Client) SimpleProviderOption {
+	return func(provider *SimpleProvider) {
+		if client != nil {
+			provider.httpClient = client
+		}
+	}
+}
+
 // NewSimpleProvider creates a new simplified OIDC provider
-func NewSimpleProvider(issuerURL, clientID, clientSecret string) *SimpleProvider {
-	return &SimpleProvider{
+func NewSimpleProvider(issuerURL, clientID, clientSecret string, options ...SimpleProviderOption) *SimpleProvider {
+	provider := &SimpleProvider{
 		issuerURL:        issuerURL,
 		clientID:         clientID,
 		clientSecret:     clientSecret,
 		discoveryURL:     fmt.Sprintf("%s/.well-known/openid-configuration", issuerURL),
+		httpClient:       &http.Client{},
 		jwksUpdatePeriod: 24 * time.Hour,
 	}
+	for _, option := range options {
+		option(provider)
+	}
+	return provider
 }
 
 // IntrospectToken introspects a token using the OIDC provider
 func (p *SimpleProvider) IntrospectToken(ctx context.Context, token string) (*IntrospectionResponse, error) {
-	// Try local validation first if we have JWKS
-	if p.jwks != nil {
+	if looksLikeJWT(token) {
+		if _, err := p.GetJWKS(ctx); err != nil {
+			return p.introspectTokenRemotely(ctx, token)
+		}
 		if response, err := p.validateTokenLocally(token); err == nil {
 			return response, nil
+		} else {
+			return nil, providerError("validate local token", ErrInvalidToken, err)
 		}
 	}
 
-	// Fall back to remote introspection
 	return p.introspectTokenRemotely(ctx, token)
+}
+
+func looksLikeJWT(token string) bool {
+	return strings.Count(token, ".") == 2
 }
 
 // GetProviderMetadata returns the OIDC provider metadata
@@ -60,44 +87,50 @@ func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMeta
 
 	req, err := http.NewRequestWithContext(ctx, "GET", p.discoveryURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, providerError("create provider metadata request", ErrProviderMetadata, err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get provider metadata: %w", err)
+		return nil, providerError("get provider metadata", ErrProviderMetadata, err)
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get provider metadata: status %d", resp.StatusCode)
+		return nil, providerStatusError("get provider metadata", ErrProviderMetadata, resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, providerError("read provider metadata response", ErrProviderMetadata, err)
 	}
 
 	var metadata ProviderMetadata
 	if err := json.Unmarshal(body, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata: %w", err)
+		return nil, providerError("parse provider metadata", ErrProviderMetadata, err)
 	}
+	normalizeProviderMetadata(&metadata)
 
-	// Validate required fields
 	if metadata.Issuer == "" {
-		return nil, fmt.Errorf("missing required field: issuer")
+		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: issuer"))
 	}
 	if metadata.IntrospectionEndpoint == "" {
-		return nil, fmt.Errorf("missing required field: introspection_endpoint")
+		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: introspection_endpoint or token_introspection_endpoint"))
 	}
 	if metadata.JWKSURI == "" {
-		return nil, fmt.Errorf("missing required field: jwks_uri")
+		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: jwks_uri"))
 	}
 
 	p.metadata = &metadata
 	return &metadata, nil
+}
+
+func normalizeProviderMetadata(metadata *ProviderMetadata) {
+	if metadata.IntrospectionEndpoint == "" {
+		metadata.IntrospectionEndpoint = metadata.TokenIntrospectionEndpoint
+	}
 }
 
 // SupportsLocalIntrospection returns true if local introspection is supported
@@ -110,7 +143,7 @@ func (p *SimpleProvider) GetJWKS(ctx context.Context) (interface{}, error) {
 	// Check if we need to update the JWKS
 	if p.jwks == nil || time.Since(p.lastJWKSUpdate) > p.jwksUpdatePeriod {
 		if err := p.updateJWKS(ctx); err != nil {
-			return nil, fmt.Errorf("failed to update JWKS: %w", err)
+			return nil, providerError("update JWKS", ErrProviderMetadata, err)
 		}
 	}
 	return p.jwks, nil
@@ -121,7 +154,7 @@ func (p *SimpleProvider) updateJWKS(ctx context.Context) error {
 	// Get metadata first to get JWKS URI
 	metadata, err := p.GetProviderMetadata(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get metadata: %w", err)
+		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", metadata.JWKSURI, nil)
@@ -129,7 +162,7 @@ func (p *SimpleProvider) updateJWKS(ctx context.Context) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
@@ -175,7 +208,7 @@ func (p *SimpleProvider) validateTokenLocally(token string) (*IntrospectionRespo
 		return nil, fmt.Errorf("key not found: %w", err)
 	}
 
-	// Parse and verify the token with the public key
+	parser = *jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}))
 	parsedToken, err := parser.Parse(token, func(token *jwt.Token) (interface{}, error) {
 		return key, nil
 	})
@@ -186,6 +219,9 @@ func (p *SimpleProvider) validateTokenLocally(token string) (*IntrospectionRespo
 	claims, ok := parsedToken.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, fmt.Errorf("invalid token claims")
+	}
+	if err := p.validateCoreClaims(claims); err != nil {
+		return nil, err
 	}
 
 	// Convert claims to map[string]interface{}
@@ -214,43 +250,187 @@ func (p *SimpleProvider) validateTokenLocally(token string) (*IntrospectionRespo
 	}, nil
 }
 
+func (p *SimpleProvider) validateCoreClaims(claims jwt.MapClaims) error {
+	issuer, ok := claims["iss"].(string)
+	if !ok || issuer != p.issuerURL {
+		return fmt.Errorf("invalid token issuer")
+	}
+	if !claimMatchesClient(claims, p.clientID) {
+		return fmt.Errorf("invalid token audience")
+	}
+	return nil
+}
+
+func claimMatchesClient(claims map[string]interface{}, expected string) bool {
+	if claimHasAudience(claims["aud"], expected) {
+		return true
+	}
+	if azp, ok := claims["azp"].(string); ok && azp == expected {
+		return true
+	}
+	if clientID, ok := claims["client_id"].(string); ok && clientID == expected {
+		return true
+	}
+	return false
+}
+
+func claimHasAudience(value interface{}, expected string) bool {
+	if expected == "" {
+		return false
+	}
+	switch audience := value.(type) {
+	case string:
+		return audience == expected
+	case []string:
+		for _, item := range audience {
+			if item == expected {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, item := range audience {
+			if item == expected {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // introspectTokenRemotely introspects a token using the provider's introspection endpoint
 func (p *SimpleProvider) introspectTokenRemotely(ctx context.Context, token string) (*IntrospectionResponse, error) {
 	metadata, err := p.GetProviderMetadata(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get metadata: %w", err)
+		return nil, err
 	}
 
-	// Create form data
-	formData := fmt.Sprintf("token=%s", token)
+	formData := url.Values{"token": []string{token}}.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", metadata.IntrospectionEndpoint, strings.NewReader(formData))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, providerError("create token introspection request", ErrUpstreamUnavailable, err)
 	}
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(p.clientID, p.clientSecret)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to introspect token: %w", err)
+		return nil, providerError("introspect token", ErrUpstreamUnavailable, err)
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to introspect token: status %d", resp.StatusCode)
+		return nil, providerStatusError("introspect token", ErrUpstreamRejected, resp.StatusCode)
 	}
 
-	var introspection IntrospectionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&introspection); err != nil {
-		return nil, fmt.Errorf("failed to decode introspection response: %w", err)
+	introspection, err := decodeIntrospectionResponse(resp.Body)
+	if err != nil {
+		return nil, providerError("decode token introspection response", ErrInvalidResponse, err)
+	}
+	if err := p.validateRemoteIntrospection(token, introspection); err != nil {
+		return nil, err
 	}
 
-	return &introspection, nil
+	return introspection, nil
+}
+
+func decodeIntrospectionResponse(reader io.Reader) (*IntrospectionResponse, error) {
+	var raw map[string]interface{}
+	if err := json.NewDecoder(reader).Decode(&raw); err != nil {
+		return nil, err
+	}
+
+	claims := map[string]interface{}{}
+	if nestedClaims, ok := raw["claims"].(map[string]interface{}); ok {
+		for key, value := range nestedClaims {
+			claims[key] = value
+		}
+	}
+	for key, value := range raw {
+		switch key {
+		case "active", "claims":
+			continue
+		default:
+			claims[key] = value
+		}
+	}
+
+	return &IntrospectionResponse{
+		Active:    boolFromRaw(raw["active"]),
+		Username:  firstNonEmptyString(stringFromRaw(raw["username"]), stringFromRaw(raw["preferred_username"]), stringFromRaw(raw["sub"])),
+		ExpiresAt: int64FromRaw(raw["exp"]),
+		IssuedAt:  int64FromRaw(raw["iat"]),
+		Claims:    claims,
+		TokenType: stringFromRaw(raw["token_type"]),
+		Scope:     stringFromRaw(raw["scope"]),
+		ClientID:  firstNonEmptyString(stringFromRaw(raw["client_id"]), audienceString(raw["aud"])),
+	}, nil
+}
+
+func (p *SimpleProvider) validateRemoteIntrospection(token string, introspection *IntrospectionResponse) error {
+	if introspection == nil || !introspection.Active {
+		return nil
+	}
+	issuerValue, _ := introspection.Claims["iss"].(string)
+	if issuerValue != p.issuerURL {
+		return providerError("validate introspection issuer", ErrInvalidToken, fmt.Errorf("invalid token issuer"))
+	}
+	if !claimMatchesClient(introspection.Claims, p.clientID) {
+		return providerError("validate introspection audience", ErrInvalidToken, fmt.Errorf("invalid token audience"))
+	}
+	return nil
+}
+
+func boolFromRaw(value interface{}) bool {
+	result, _ := value.(bool)
+	return result
+}
+
+func int64FromRaw(value interface{}) int64 {
+	switch typed := value.(type) {
+	case float64:
+		return int64(typed)
+	case int64:
+		return typed
+	case int:
+		return int64(typed)
+	default:
+		return 0
+	}
+}
+
+func stringFromRaw(value interface{}) string {
+	result, _ := value.(string)
+	return result
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func audienceString(value interface{}) string {
+	switch audience := value.(type) {
+	case string:
+		return audience
+	case []interface{}:
+		if len(audience) == 1 {
+			return stringFromRaw(audience[0])
+		}
+	case []string:
+		if len(audience) == 1 {
+			return audience[0]
+		}
+	}
+	return ""
 }
 
 // findKeyByID finds a key by ID in the JWKS
@@ -267,13 +447,43 @@ func (p *SimpleProvider) findKeyByID(kid string) (interface{}, error) {
 		}
 
 		if keyID, ok := keyMap["kid"].(string); ok && keyID == kid {
-			// This is a simplified key extraction - in production you'd want to properly
-			// parse the JWK and convert it to a Go crypto key
-			return keyMap, nil
+			return rsaPublicKeyFromJWK(keyMap)
 		}
 	}
 
 	return nil, fmt.Errorf("key with ID %s not found", kid)
+}
+
+func rsaPublicKeyFromJWK(keyMap map[string]interface{}) (*rsa.PublicKey, error) {
+	kty, _ := keyMap["kty"].(string)
+	if kty != "RSA" {
+		return nil, fmt.Errorf("unsupported key type %q", kty)
+	}
+
+	nValue, ok := keyMap["n"].(string)
+	if !ok || nValue == "" {
+		return nil, fmt.Errorf("missing RSA modulus")
+	}
+	eValue, ok := keyMap["e"].(string)
+	if !ok || eValue == "" {
+		return nil, fmt.Errorf("missing RSA exponent")
+	}
+
+	nBytes, err := base64.RawURLEncoding.DecodeString(nValue)
+	if err != nil {
+		return nil, fmt.Errorf("invalid RSA modulus: %w", err)
+	}
+	eBytes, err := base64.RawURLEncoding.DecodeString(eValue)
+	if err != nil {
+		return nil, fmt.Errorf("invalid RSA exponent: %w", err)
+	}
+
+	exponent := new(big.Int).SetBytes(eBytes)
+	if !exponent.IsInt64() || exponent.Sign() <= 0 {
+		return nil, fmt.Errorf("invalid RSA exponent")
+	}
+
+	return &rsa.PublicKey{N: new(big.Int).SetBytes(nBytes), E: int(exponent.Int64())}, nil
 }
 
 // Helper functions

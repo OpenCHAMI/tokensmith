@@ -105,9 +105,41 @@ Notes:
 
 ## Service-token endpoints
 
+### `POST /oauth/exchange`
+
+Exchange an upstream OIDC bearer token for a TokenSmith JWT.
+
+Request format:
+
+- method: `POST`
+- authorization: `Bearer <oidc-token>`
+- content type: `application/json`
+
+Optional JSON body:
+
+```json
+{
+  "scope": ["read", "write"],
+  "target_service": "smd"
+}
+```
+
+Example:
+
+```bash
+curl -s -X POST http://localhost:8080/oauth/exchange \
+  -H "Authorization: Bearer $KEYCLOAK_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"scope":["read"],"target_service":"smd"}'
+```
+
+Failure logs use `audit_event=token_exchange_failed` with bounded categories such as `upstream_unavailable`, `upstream_rejected`, `invalid_response`, `missing_claim`, `invalid_claim`, and `inactive_token`.
+
 ### `POST /oauth/token`
 
 Canonical token endpoint for the service-to-service bootstrap and refresh flows.
+
+Do not send upstream Keycloak/OIDC bearer tokens to this endpoint. Use `POST /oauth/exchange` instead.
 
 ### `POST /token`
 
