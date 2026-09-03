@@ -33,6 +33,12 @@ const (
 	LogFieldSubject LogField = "subject"
 	// LogFieldAudience records the token audience or downstream target service.
 	LogFieldAudience LogField = "audience"
+	// LogFieldIssuer records the TokenSmith issuer used in generated tokens.
+	LogFieldIssuer LogField = "issuer"
+	// LogFieldClusterID records the OpenCHAMI cluster identifier in generated tokens.
+	LogFieldClusterID LogField = "cluster_id"
+	// LogFieldOpenCHAMIID records the OpenCHAMI instance identifier in generated tokens.
+	LogFieldOpenCHAMIID LogField = "openchami_id"
 	// LogFieldFailureCategory records a stable bounded reason class for failures.
 	LogFieldFailureCategory LogField = "failure_category"
 	// LogFieldFailureStage identifies the operation stage where a failure happened.
@@ -51,6 +57,22 @@ const (
 	LogFieldOIDCClientID LogField = "oidc_client_id"
 	// LogFieldOIDCClaimPolicy records the claim policy used to map upstream OIDC claims.
 	LogFieldOIDCClaimPolicy LogField = "oidc_claim_policy"
+	// LogFieldOIDCCAConfigured records whether custom upstream OIDC CA trust is configured.
+	LogFieldOIDCCAConfigured LogField = "oidc_ca_configured"
+	// LogFieldMaxExchangeSessionLifetimeSeconds records the exchange-session cap in seconds.
+	LogFieldMaxExchangeSessionLifetimeSeconds LogField = "max_exchange_session_lifetime_seconds"
+	// LogFieldBootstrapStorePath records the configured bootstrap-token store path.
+	LogFieldBootstrapStorePath LogField = "bootstrap_store_path"
+	// LogFieldRefreshStorePath records the configured refresh-token family store path.
+	LogFieldRefreshStorePath LogField = "refresh_store_path"
+	// LogFieldTLSEnabled records whether TokenSmith is serving HTTPS.
+	LogFieldTLSEnabled LogField = "tls_enabled"
+	// LogFieldServiceIdentityMTLSEnabled records whether inbound service-identity mTLS is enabled.
+	LogFieldServiceIdentityMTLSEnabled LogField = "service_identity_mtls_enabled"
+	// LogFieldLocalUserMintEnabled records whether emergency local user minting is enabled.
+	LogFieldLocalUserMintEnabled LogField = "local_user_mint_enabled"
+	// LogFieldListenAddr records the local address TokenSmith is configured to serve on.
+	LogFieldListenAddr LogField = "listen_addr"
 	// LogFieldUpstreamStatus records a non-secret HTTP status from an upstream dependency.
 	LogFieldUpstreamStatus LogField = "upstream_status_code"
 	// LogFieldRequestedScopes records scopes requested by the caller.
@@ -173,6 +195,9 @@ func loggingContractFields() []LogField {
 		LogFieldClientIP,
 		LogFieldSubject,
 		LogFieldAudience,
+		LogFieldIssuer,
+		LogFieldClusterID,
+		LogFieldOpenCHAMIID,
 		LogFieldFailureCategory,
 		LogFieldFailureStage,
 		LogFieldProviderOp,
@@ -182,6 +207,14 @@ func loggingContractFields() []LogField {
 		LogFieldOIDCIssuer,
 		LogFieldOIDCClientID,
 		LogFieldOIDCClaimPolicy,
+		LogFieldOIDCCAConfigured,
+		LogFieldMaxExchangeSessionLifetimeSeconds,
+		LogFieldBootstrapStorePath,
+		LogFieldRefreshStorePath,
+		LogFieldTLSEnabled,
+		LogFieldServiceIdentityMTLSEnabled,
+		LogFieldLocalUserMintEnabled,
+		LogFieldListenAddr,
 		LogFieldUpstreamStatus,
 		LogFieldRequestedScopes,
 		LogFieldDerivedScopes,

@@ -26,6 +26,9 @@ Every structured TokenSmith log should use stable snake_case fields. Use the sam
 | `client_ip` | Client IP or socket peer used for troubleshooting and audit correlation. |
 | `subject` | Authenticated or target subject. |
 | `audience` | Token audience or target service. |
+| `issuer` | TokenSmith issuer used in generated tokens. |
+| `cluster_id` | OpenCHAMI cluster identifier used in generated tokens. |
+| `openchami_id` | OpenCHAMI instance identifier used in generated tokens. |
 | `failure_category` | Stable bounded reason class for a failed operation. |
 | `failure_stage` | Stable stage name where the failure occurred. |
 | `provider_operation` | Upstream provider operation, such as metadata fetch or token introspection. |
@@ -35,6 +38,14 @@ Every structured TokenSmith log should use stable snake_case fields. Use the sam
 | `oidc_issuer` | Configured upstream OIDC issuer. |
 | `oidc_client_id` | Configured upstream OIDC client ID. |
 | `oidc_claim_policy` | Configured upstream OIDC claim policy. |
+| `oidc_ca_configured` | Whether a custom upstream OIDC CA bundle is configured. |
+| `max_exchange_session_lifetime_seconds` | Configured cap for generated exchange-token sessions. |
+| `bootstrap_store_path` | Configured bootstrap-token store path. |
+| `refresh_store_path` | Configured refresh-token family store path. |
+| `tls_enabled` | Whether TokenSmith is serving HTTPS. |
+| `service_identity_mtls_enabled` | Whether inbound service-identity mTLS is enabled. |
+| `local_user_mint_enabled` | Whether emergency local user token minting is enabled. |
+| `listen_addr` | Local address TokenSmith is configured to serve on. |
 | `upstream_status_code` | HTTP status returned by an upstream dependency. |
 | `requested_scopes` | Scopes requested by the caller. |
 | `derived_scopes` | Scopes derived from trusted TokenSmith policy or upstream claims. |
