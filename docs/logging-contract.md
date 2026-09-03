@@ -32,6 +32,9 @@ Every structured TokenSmith log should use stable snake_case fields. Use the sam
 | `failure_category` | Stable bounded reason class for a failed operation. |
 | `failure_stage` | Stable stage name where the failure occurred. |
 | `provider_operation` | Upstream provider operation, such as metadata fetch or token introspection. |
+| `metadata_issuer` | Issuer returned by upstream OIDC discovery metadata. |
+| `introspection_endpoint_source` | Discovery metadata key used for token introspection, such as `token_introspection_endpoint`. |
+| `jwks_key_count` | Number of keys found in upstream JWKS during provider validation. |
 | `token_hash_prefix` | Bounded hash prefix for correlating opaque token attempts. |
 | `refresh_family_id` | Refresh-token family identifier. |
 | `policy_version` | Authorization policy version or policy hash where available. |

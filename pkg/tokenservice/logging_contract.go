@@ -45,6 +45,12 @@ const (
 	LogFieldFailureStage LogField = "failure_stage"
 	// LogFieldProviderOp names the upstream provider operation being attempted.
 	LogFieldProviderOp LogField = "provider_operation"
+	// LogFieldMetadataIssuer records the issuer returned by OIDC discovery metadata.
+	LogFieldMetadataIssuer LogField = "metadata_issuer"
+	// LogFieldIntrospectionEndpointSource records which discovery key supplied introspection.
+	LogFieldIntrospectionEndpointSource LogField = "introspection_endpoint_source"
+	// LogFieldJWKSKeyCount records the number of keys found in upstream JWKS.
+	LogFieldJWKSKeyCount LogField = "jwks_key_count"
 	// LogFieldTokenHashPrefix correlates opaque token attempts using a bounded hash prefix.
 	LogFieldTokenHashPrefix LogField = "token_hash_prefix"
 	// LogFieldRefreshFamilyID identifies the refresh-token family without logging tokens.
@@ -201,6 +207,9 @@ func loggingContractFields() []LogField {
 		LogFieldFailureCategory,
 		LogFieldFailureStage,
 		LogFieldProviderOp,
+		LogFieldMetadataIssuer,
+		LogFieldIntrospectionEndpointSource,
+		LogFieldJWKSKeyCount,
 		LogFieldTokenHashPrefix,
 		LogFieldRefreshFamilyID,
 		LogFieldPolicyVersion,
