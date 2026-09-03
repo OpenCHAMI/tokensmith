@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -36,7 +37,7 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 	}
 
 	if !introspection.Active {
-		return "", errors.New("token is not active")
+		return "", ErrExchangeInactiveToken
 	}
 
 	issuedAt := time.Unix(introspection.IssuedAt, 0)
@@ -96,6 +97,7 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		for scope := range scopesSet {
 			scopes = append(scopes, scope)
 		}
+		slices.Sort(scopes)
 		claims.Scope = scopes
 	}
 
@@ -174,7 +176,7 @@ func constrainRequestedScopes(allowed []string, requested []string) ([]string, e
 	out := make([]string, 0, len(requested))
 	for _, scope := range requested {
 		if _, ok := allowedSet[scope]; !ok {
-			return nil, invalidExchangeClaim("scope")
+			return nil, scopeNotGranted(scope, allowed)
 		}
 		out = append(out, scope)
 	}

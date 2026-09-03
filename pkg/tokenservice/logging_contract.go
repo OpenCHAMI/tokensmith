@@ -83,12 +83,18 @@ const (
 	LogFieldUpstreamStatus LogField = "upstream_status_code"
 	// LogFieldRequestedScopes records scopes requested by the caller.
 	LogFieldRequestedScopes LogField = "requested_scopes"
+	// LogFieldRequestedScopeCount records the number of requested scopes.
+	LogFieldRequestedScopeCount LogField = "requested_scope_count"
 	// LogFieldDerivedScopes records scopes derived from trusted policy or upstream claims.
 	LogFieldDerivedScopes LogField = "derived_scopes"
 	// LogFieldRejectedScope records the single requested scope rejected by policy.
 	LogFieldRejectedScope LogField = "rejected_scope"
 	// LogFieldTargetService records the requested downstream OpenCHAMI service audience.
 	LogFieldTargetService LogField = "target_service"
+	// LogFieldHasTargetService records whether the request included a target service.
+	LogFieldHasTargetService LogField = "has_target_service"
+	// LogFieldGeneratedTokenLifetimeSeconds records the generated TokenSmith token lifetime.
+	LogFieldGeneratedTokenLifetimeSeconds LogField = "generated_token_lifetime_seconds"
 )
 
 const (
@@ -226,9 +232,12 @@ func loggingContractFields() []LogField {
 		LogFieldListenAddr,
 		LogFieldUpstreamStatus,
 		LogFieldRequestedScopes,
+		LogFieldRequestedScopeCount,
 		LogFieldDerivedScopes,
 		LogFieldRejectedScope,
 		LogFieldTargetService,
+		LogFieldHasTargetService,
+		LogFieldGeneratedTokenLifetimeSeconds,
 	}
 }
 

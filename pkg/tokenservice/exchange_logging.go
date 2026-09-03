@@ -10,43 +10,93 @@ import (
 	"net/http"
 
 	"github.com/openchami/tokensmith/pkg/oidc"
+	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/rs/zerolog/log"
 )
 
-const exchangeFailureEvent = "token_exchange_failed"
+type exchangeLogContext struct {
+	Request         *http.Request
+	ClaimPolicy     OIDCClaimPolicy
+	StatusCode      int
+	RequestedScopes []string
+	TargetService   string
+	Err             error
+	Claims          *token.TSClaims
+}
 
-func logExchangeFailure(r *http.Request, claimPolicy OIDCClaimPolicy, statusCode int, category string, scopeCount int, hasTargetService bool, err error) {
+func logExchangeFailure(ctx exchangeLogContext) {
 	event := log.Warn().
-		Str("component", "tokenservice").
-		Str("handler", "oauth_exchange").
-		Str("audit_event", exchangeFailureEvent).
-		Str("client_ip", exchangeClientIP(r)).
-		Str("claim_policy", string(claimPolicy)).
-		Str("failure_category", category).
-		Int("status_code", statusCode).
-		Int("requested_scope_count", scopeCount).
-		Bool("has_target_service", hasTargetService)
+		Str(string(LogFieldComponent), "tokenservice").
+		Str(string(LogFieldHandler), string(LogHandlerOAuthExchange)).
+		Str(string(LogFieldAuditEvent), string(LogEventTokenExchangeFailed)).
+		Str(string(LogFieldClientIP), exchangeClientIP(ctx.Request)).
+		Str(string(LogFieldOIDCClaimPolicy), string(ctx.ClaimPolicy)).
+		Str(string(LogFieldFailureCategory), exchangeFailureCategory(ctx.Err)).
+		Int("status_code", ctx.StatusCode).
+		Int(string(LogFieldRequestedScopeCount), len(ctx.RequestedScopes)).
+		Bool(string(LogFieldHasTargetService), ctx.TargetService != "")
 
-	if requestID := r.Header.Get("X-Request-Id"); requestID != "" {
-		event = event.Str("request_id", requestID)
+	if requestID := ctx.Request.Header.Get("X-Request-Id"); requestID != "" {
+		event = event.Str(string(LogFieldRequestID), requestID)
 	}
-	if providerErr := exchangeProviderError(err); providerErr != nil {
-		event = event.Str("provider_operation", providerErr.Operation)
+	if len(ctx.RequestedScopes) > 0 {
+		event = event.Strs(string(LogFieldRequestedScopes), ctx.RequestedScopes)
+	}
+	if ctx.TargetService != "" {
+		event = event.Str(string(LogFieldTargetService), ctx.TargetService)
+	}
+	if providerErr := exchangeProviderError(ctx.Err); providerErr != nil {
+		event = event.Str(string(LogFieldProviderOp), providerErr.Operation)
 		if providerErr.StatusCode != 0 {
-			event = event.Int("upstream_status_code", providerErr.StatusCode)
+			event = event.Int(string(LogFieldUpstreamStatus), providerErr.StatusCode)
 		}
 		if providerErr.Cause != nil && errors.Is(providerErr, oidc.ErrProviderMetadata) {
 			event = event.Str("provider_detail", providerErr.Cause.Error())
 		}
 	}
-	if missingClaims := exchangeMissingClaimNames(err); len(missingClaims) > 0 {
+	if missingClaims := exchangeMissingClaimNames(ctx.Err); len(missingClaims) > 0 {
 		event = event.Strs("missing_claims", missingClaims)
 	}
-	if errors.Is(err, ErrExchangeGeneratedClaimValidation) {
-		event = event.Str("failure_stage", "generate_token")
+	if rejectedScope, derivedScopes := exchangeRejectedScope(ctx.Err); rejectedScope != "" {
+		event = event.Str(string(LogFieldRejectedScope), rejectedScope)
+		event = event.Strs(string(LogFieldDerivedScopes), derivedScopes)
+	}
+	if errors.Is(ctx.Err, ErrExchangeGeneratedClaimValidation) {
+		event = event.Str(string(LogFieldFailureStage), "generate_token")
 	}
 
-	event.Msg(exchangeFailureEvent)
+	event.Msg(string(LogEventTokenExchangeFailed))
+}
+
+func logExchangeSuccess(ctx exchangeLogContext) {
+	event := log.Info().
+		Str(string(LogFieldComponent), "tokenservice").
+		Str(string(LogFieldHandler), string(LogHandlerOAuthExchange)).
+		Str(string(LogFieldAuditEvent), string(LogEventTokenExchangeSucceeded)).
+		Str(string(LogFieldClientIP), exchangeClientIP(ctx.Request)).
+		Str(string(LogFieldOIDCClaimPolicy), string(ctx.ClaimPolicy)).
+		Int(string(LogFieldRequestedScopeCount), len(ctx.RequestedScopes)).
+		Bool(string(LogFieldHasTargetService), ctx.TargetService != "")
+
+	if requestID := ctx.Request.Header.Get("X-Request-Id"); requestID != "" {
+		event = event.Str(string(LogFieldRequestID), requestID)
+	}
+	if len(ctx.RequestedScopes) > 0 {
+		event = event.Strs(string(LogFieldRequestedScopes), ctx.RequestedScopes)
+	}
+	if ctx.TargetService != "" {
+		event = event.Str(string(LogFieldTargetService), ctx.TargetService)
+	}
+	if ctx.Claims != nil {
+		event = event.Str(string(LogFieldSubject), ctx.Claims.Subject)
+		event = event.Strs(string(LogFieldAudience), ctx.Claims.Audience)
+		event = event.Strs(string(LogFieldDerivedScopes), ctx.Claims.Scope)
+		if ctx.Claims.ExpiresAt != nil && ctx.Claims.IssuedAt != nil {
+			event = event.Int64(string(LogFieldGeneratedTokenLifetimeSeconds), int64(ctx.Claims.ExpiresAt.Sub(ctx.Claims.IssuedAt.Time).Seconds()))
+		}
+	}
+
+	event.Msg(string(LogEventTokenExchangeSucceeded))
 }
 
 func exchangeFailureCategory(err error) string {
@@ -55,8 +105,12 @@ func exchangeFailureCategory(err error) string {
 		return "unknown"
 	case errors.Is(err, ErrExchangeMissingClaims):
 		return "missing_claim"
+	case errors.Is(err, ErrExchangeInactiveToken):
+		return string(LogFailureInactiveToken)
+	case errors.Is(err, ErrExchangeScopeNotGranted):
+		return string(LogFailureScopeNotGranted)
 	case errors.Is(err, ErrExchangeInvalidClaim):
-		return "invalid_claim"
+		return string(LogFailureInvalidClaim)
 	case errors.Is(err, ErrExchangeGeneratedClaimValidation):
 		return "generated_claim_validation"
 	case errors.Is(err, oidc.ErrUpstreamUnavailable):
@@ -72,6 +126,14 @@ func exchangeFailureCategory(err error) string {
 	default:
 		return "exchange_failed"
 	}
+}
+
+func exchangeRejectedScope(err error) (string, []string) {
+	var claimsErr *ExchangeClaimsError
+	if !errors.As(err, &claimsErr) || !errors.Is(claimsErr.Kind, ErrExchangeScopeNotGranted) || len(claimsErr.Claims) == 0 {
+		return "", nil
+	}
+	return claimsErr.Claims[0], append([]string(nil), claimsErr.Allowed...)
 }
 
 func exchangeMissingClaimNames(err error) []string {
