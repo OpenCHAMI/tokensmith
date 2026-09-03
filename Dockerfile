@@ -10,7 +10,12 @@ RUN set -ex \
     && apk add --no-cache curl tini jq \
     && rm -rf /var/cache/apk/*  \
     && rm -rf /tmp/*
-RUN mkdir -p /tokensmith/data
+# Create every declared volume path and hand it to the unprivileged user the
+# image runs as. Docker seeds a fresh named volume from the image, so without
+# this the volume is owned by root and TokenSmith cannot write its generated
+# signing key -- it exits at startup with a permission error.
+RUN mkdir -p /tokensmith/keys /tokensmith/config /tokensmith/data \
+    && chown -R 65534:65534 /tokensmith
 
 STOPSIGNAL SIGTERM
 

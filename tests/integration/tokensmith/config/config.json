@@ -1,5 +1,5 @@
 {
-  "group_scopes": {
+  "groupScopes": {
     "admin": ["admin", "read", "write"],
     "operator": ["read", "write"],
     "viewer": ["read"]
