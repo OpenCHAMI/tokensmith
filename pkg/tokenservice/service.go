@@ -49,10 +49,15 @@ type Config struct {
 	TLSKeyFile            string
 
 	// OIDC provider configuration
-	OIDCIssuerURL              string
-	OIDCClientID               string
-	OIDCClientSecret           string
-	OIDCClaimPolicy            OIDCClaimPolicy
+	OIDCIssuerURL    string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCClaimPolicy  OIDCClaimPolicy
+
+	// OIDCValidationMode selects offline (JWKS) or online (introspection) as the
+	// primary path for validating upstream tokens. Both remain available as
+	// fallbacks either way. Empty means offline.
+	OIDCValidationMode         oidc.ValidationMode
 	OIDCCAPath                 string
 	MaxExchangeSessionLifetime time.Duration
 }
@@ -116,6 +121,12 @@ type TokenService struct {
 
 // NewTokenService creates a new TokenService instance
 func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService, error) {
+	validationMode, err := oidc.ParseValidationMode(string(config.OIDCValidationMode))
+	if err != nil {
+		return nil, err
+	}
+	config.OIDCValidationMode = validationMode
+
 	claimPolicy, err := ParseOIDCClaimPolicy(string(config.OIDCClaimPolicy))
 	if err != nil {
 		return nil, err
@@ -131,7 +142,7 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	if err != nil {
 		return nil, err
 	}
-	oidcOptions := []oidc.SimpleProviderOption{}
+	oidcOptions := []oidc.SimpleProviderOption{oidc.WithValidationMode(validationMode)}
 	if oidcHTTPClient != nil {
 		oidcOptions = append(oidcOptions, oidc.WithHTTPClient(oidcHTTPClient))
 	}
@@ -307,6 +318,7 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 	if s.oidcHTTPClient != nil {
 		oidcOptions = append(oidcOptions, oidc.WithHTTPClient(s.oidcHTTPClient))
 	}
+	oidcOptions = append(oidcOptions, oidc.WithValidationMode(s.Config.OIDCValidationMode))
 	provider := oidc.NewSimpleProvider(issuerURL, clientID, secret, oidcOptions...)
 	if _, err := provider.GetProviderMetadata(ctx); err != nil {
 		return "", s.GetOIDCProviderStatus(), fmt.Errorf("OIDC provider validation failed: %w", err)

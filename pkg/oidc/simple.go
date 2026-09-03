@@ -6,31 +6,71 @@ package oidc
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
 // SimpleProvider is a simplified OIDC provider that uses discovery endpoint
+// ValidationMode selects how upstream tokens are validated.
+type ValidationMode string
+
+const (
+	// ValidationModeOffline verifies a JWT against the provider's published JWKS
+	// and falls back to introspection when that does not succeed. This is the
+	// default: it removes a network round-trip per exchange and keeps working
+	// while the provider is unreachable.
+	ValidationModeOffline ValidationMode = "offline"
+
+	// ValidationModeOnline calls the provider's introspection endpoint first and
+	// falls back to local JWKS validation only when the endpoint cannot be
+	// reached. Introspection observes revocation immediately, which local
+	// validation cannot do, at the cost of a round-trip per exchange.
+	ValidationModeOnline ValidationMode = "online"
+)
+
+// ParseValidationMode converts a configured string into a ValidationMode.
+// An empty value selects the default (offline).
+func ParseValidationMode(value string) (ValidationMode, error) {
+	switch ValidationMode(strings.ToLower(strings.TrimSpace(value))) {
+	case "", ValidationModeOffline:
+		return ValidationModeOffline, nil
+	case ValidationModeOnline:
+		return ValidationModeOnline, nil
+	default:
+		return "", fmt.Errorf("unsupported OIDC validation mode %q (want %q or %q)",
+			value, ValidationModeOffline, ValidationModeOnline)
+	}
+}
+
 type SimpleProvider struct {
 	issuerURL        string
 	clientID         string
 	clientSecret     string
 	discoveryURL     string
 	httpClient       *http.Client
-	metadata         *ProviderMetadata
-	jwks             map[string]interface{}
-	lastJWKSUpdate   time.Time
 	jwksUpdatePeriod time.Duration
+	validationMode   ValidationMode
+
+	// mu guards the cached discovery metadata and JWKS, which are read and
+	// written concurrently by HTTP handlers.
+	mu             sync.RWMutex
+	metadata       *ProviderMetadata
+	jwks           map[string]interface{}
+	lastJWKSUpdate time.Time
 }
 
 type SimpleProviderOption func(*SimpleProvider)
@@ -39,6 +79,16 @@ func WithHTTPClient(client *http.Client) SimpleProviderOption {
 	return func(provider *SimpleProvider) {
 		if client != nil {
 			provider.httpClient = client
+		}
+	}
+}
+
+// WithValidationMode selects offline (JWKS) or online (introspection) as the
+// primary validation path. Both remain available as fallbacks either way.
+func WithValidationMode(mode ValidationMode) SimpleProviderOption {
+	return func(provider *SimpleProvider) {
+		if mode != "" {
+			provider.validationMode = mode
 		}
 	}
 }
@@ -52,6 +102,7 @@ func NewSimpleProvider(issuerURL, clientID, clientSecret string, options ...Simp
 		discoveryURL:     fmt.Sprintf("%s/.well-known/openid-configuration", issuerURL),
 		httpClient:       &http.Client{},
 		jwksUpdatePeriod: 24 * time.Hour,
+		validationMode:   ValidationModeOffline,
 	}
 	for _, option := range options {
 		option(provider)
@@ -60,19 +111,100 @@ func NewSimpleProvider(issuerURL, clientID, clientSecret string, options ...Simp
 }
 
 // IntrospectToken introspects a token using the OIDC provider
+// IntrospectToken validates a token against the configured provider.
+//
+// Both validation paths are always available. The configured ValidationMode
+// selects which is tried first:
+//
+//   - offline (default): verify the JWT signature against the provider's cached
+//     JWKS, falling back to introspection if that does not succeed.
+//   - online: call the introspection endpoint, falling back to local JWKS
+//     validation only when the endpoint cannot be reached.
+//
+// Opaque (non-JWT) tokens can only be introspected, so they always take the
+// remote path regardless of mode.
 func (p *SimpleProvider) IntrospectToken(ctx context.Context, token string) (*IntrospectionResponse, error) {
-	if looksLikeJWT(token) {
-		if _, err := p.GetJWKS(ctx); err != nil {
-			return p.introspectTokenRemotely(ctx, token)
-		}
-		if response, err := p.validateTokenLocally(token); err == nil {
-			return response, nil
-		} else {
-			return nil, providerError("validate local token", ErrInvalidToken, err)
-		}
+	if !looksLikeJWT(token) {
+		return p.introspectTokenRemotely(ctx, token)
 	}
 
-	return p.introspectTokenRemotely(ctx, token)
+	if p.ValidationMode() == ValidationModeOnline {
+		response, err := p.introspectTokenRemotely(ctx, token)
+		if err == nil {
+			return response, nil
+		}
+		// Only an unreachable endpoint justifies falling back. A provider that
+		// answered and rejected the token is authoritative, and retrying locally
+		// would override its revocation decision -- the whole reason for
+		// choosing online mode.
+		if !errors.Is(err, ErrUpstreamUnavailable) && !errors.Is(err, ErrProviderMetadata) {
+			return nil, err
+		}
+		local, localErr := p.validateTokenOffline(ctx, token)
+		if localErr != nil {
+			return nil, err
+		}
+		return local, nil
+	}
+
+	// Offline mode. A JWKS that cannot be fetched is an infrastructure failure
+	// and falls back to introspection; a token that fails validation against a
+	// JWKS we did fetch is simply invalid and is rejected here.
+	//
+	// Falling back on invalid tokens would let anyone holding a forged token
+	// drive an outbound introspection call per attempt, and would give a token
+	// the local check already rejected a second chance at acceptance.
+	response, err := p.validateTokenOffline(ctx, token)
+	if err == nil {
+		return response, nil
+	}
+	if errors.Is(err, ErrProviderMetadata) {
+		return p.introspectTokenRemotely(ctx, token)
+	}
+	return nil, err
+}
+
+// validateTokenOffline verifies a JWT against the cached JWKS, refreshing the
+// key set once if the token's `kid` is unknown so that upstream key rotation is
+// picked up without waiting for the cache to expire.
+func (p *SimpleProvider) validateTokenOffline(ctx context.Context, token string) (*IntrospectionResponse, error) {
+	// A fetch failure is wrapped as ErrProviderMetadata, which callers use to
+	// distinguish "we could not get the keys" from "the token is invalid".
+	if _, err := p.GetJWKS(ctx); err != nil {
+		return nil, err
+	}
+
+	response, err := p.validateTokenLocally(token)
+	if err == nil {
+		return response, nil
+	}
+	if !errors.Is(err, errUnknownKeyID) {
+		return nil, providerError("validate local token", ErrInvalidToken, err)
+	}
+
+	if refreshErr := p.refreshJWKS(ctx); refreshErr != nil {
+		return nil, providerError("refresh JWKS", ErrProviderMetadata, refreshErr)
+	}
+	response, err = p.validateTokenLocally(token)
+	if err != nil {
+		return nil, providerError("validate local token", ErrInvalidToken, err)
+	}
+	return response, nil
+}
+
+// refreshJWKS forces a key-set refetch, bypassing the cache TTL.
+func (p *SimpleProvider) refreshJWKS(ctx context.Context) error {
+	return p.updateJWKS(ctx)
+}
+
+// ValidationMode reports the configured primary validation path.
+func (p *SimpleProvider) ValidationMode() ValidationMode {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.validationMode == "" {
+		return ValidationModeOffline
+	}
+	return p.validationMode
 }
 
 func looksLikeJWT(token string) bool {
@@ -81,8 +213,11 @@ func looksLikeJWT(token string) bool {
 
 // GetProviderMetadata returns the OIDC provider metadata
 func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMetadata, error) {
-	if p.metadata != nil {
-		return p.metadata, nil
+	p.mu.RLock()
+	cached := p.metadata
+	p.mu.RUnlock()
+	if cached != nil {
+		return cached, nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", p.discoveryURL, nil)
@@ -123,7 +258,10 @@ func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMeta
 		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: jwks_uri"))
 	}
 
+	p.mu.Lock()
 	p.metadata = &metadata
+	p.mu.Unlock()
+
 	return &metadata, nil
 }
 
@@ -140,12 +278,20 @@ func (p *SimpleProvider) SupportsLocalIntrospection() bool {
 
 // GetJWKS returns the JWKS for local token validation
 func (p *SimpleProvider) GetJWKS(ctx context.Context) (interface{}, error) {
-	// Check if we need to update the JWKS
-	if p.jwks == nil || time.Since(p.lastJWKSUpdate) > p.jwksUpdatePeriod {
-		if err := p.updateJWKS(ctx); err != nil {
-			return nil, providerError("update JWKS", ErrProviderMetadata, err)
-		}
+	p.mu.RLock()
+	fresh := p.jwks != nil && time.Since(p.lastJWKSUpdate) <= p.jwksUpdatePeriod
+	cached := p.jwks
+	p.mu.RUnlock()
+
+	if fresh {
+		return cached, nil
 	}
+	if err := p.updateJWKS(ctx); err != nil {
+		return nil, providerError("update JWKS", ErrProviderMetadata, err)
+	}
+
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.jwks, nil
 }
 
@@ -179,11 +325,16 @@ func (p *SimpleProvider) updateJWKS(ctx context.Context) error {
 		return fmt.Errorf("failed to read JWKS response: %w", err)
 	}
 
-	if err := json.Unmarshal(body, &p.jwks); err != nil {
-		return fmt.Errorf("failed to parse JWKS: %w", err)
+	var keySet map[string]interface{}
+	if err := json.Unmarshal(body, &keySet); err != nil {
+		return providerError("parse JWKS", ErrInvalidResponse, err)
 	}
 
+	p.mu.Lock()
+	p.jwks = keySet
 	p.lastJWKSUpdate = time.Now()
+	p.mu.Unlock()
+
 	return nil
 }
 
@@ -239,8 +390,12 @@ func (p *SimpleProvider) validateTokenLocally(token string) (*IntrospectionRespo
 	active := time.Unix(int64(exp), 0).After(time.Now())
 
 	return &IntrospectionResponse{
-		Active:    active,
-		Username:  getStringFromClaims(claims, "sub"),
+		Active: active,
+		Username: firstNonEmptyString(
+			getStringFromClaims(claims, "preferred_username"),
+			getStringFromClaims(claims, "username"),
+			getStringFromClaims(claims, "sub"),
+		),
 		ExpiresAt: int64(exp),
 		IssuedAt:  int64(getFloat64FromClaims(claims, "iat")),
 		Claims:    claimsMap,
@@ -252,7 +407,7 @@ func (p *SimpleProvider) validateTokenLocally(token string) (*IntrospectionRespo
 
 func (p *SimpleProvider) validateCoreClaims(claims jwt.MapClaims) error {
 	issuer, ok := claims["iss"].(string)
-	if !ok || issuer != p.issuerURL {
+	if !ok || !p.issuerMatches(issuer) {
 		return fmt.Errorf("invalid token issuer")
 	}
 	if !claimMatchesClient(claims, p.clientID) {
@@ -324,7 +479,14 @@ func (p *SimpleProvider) introspectTokenRemotely(ctx context.Context, token stri
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, providerStatusError("introspect token", ErrUpstreamRejected, resp.StatusCode)
+		// A 5xx means the provider could not answer, which is an availability
+		// problem and may be worth falling back on. A 4xx means it answered and
+		// refused -- that is authoritative and must not be retried elsewhere.
+		kind := ErrUpstreamRejected
+		if resp.StatusCode >= 500 {
+			kind = ErrUpstreamUnavailable
+		}
+		return nil, providerStatusError("introspect token", kind, resp.StatusCode)
 	}
 
 	introspection, err := decodeIntrospectionResponse(resp.Body)
@@ -376,13 +538,22 @@ func (p *SimpleProvider) validateRemoteIntrospection(token string, introspection
 		return nil
 	}
 	issuerValue, _ := introspection.Claims["iss"].(string)
-	if issuerValue != p.issuerURL {
+	if !p.issuerMatches(issuerValue) {
 		return providerError("validate introspection issuer", ErrInvalidToken, fmt.Errorf("invalid token issuer"))
 	}
 	if !claimMatchesClient(introspection.Claims, p.clientID) {
 		return providerError("validate introspection audience", ErrInvalidToken, fmt.Errorf("invalid token audience"))
 	}
 	return nil
+}
+
+// issuerMatches compares a token issuer to the configured one, tolerating a
+// trailing-slash difference. Operators routinely configure
+// "https://host/realms/x/" while the provider issues "https://host/realms/x";
+// rejecting that is surprising rather than safer, since the signature already
+// binds the token to this provider's keys.
+func (p *SimpleProvider) issuerMatches(issuer string) bool {
+	return strings.TrimRight(issuer, "/") == strings.TrimRight(p.issuerURL, "/")
 }
 
 func boolFromRaw(value interface{}) bool {
@@ -434,7 +605,14 @@ func audienceString(value interface{}) string {
 }
 
 // findKeyByID finds a key by ID in the JWKS
+// errUnknownKeyID signals that the token's `kid` is absent from the cached JWKS,
+// which usually means the provider rotated keys and warrants one refresh.
+var errUnknownKeyID = errors.New("key ID not found in JWKS")
+
 func (p *SimpleProvider) findKeyByID(kid string) (interface{}, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	keys, ok := p.jwks["keys"].([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("invalid JWKS format")
@@ -446,12 +624,79 @@ func (p *SimpleProvider) findKeyByID(kid string) (interface{}, error) {
 			continue
 		}
 
-		if keyID, ok := keyMap["kid"].(string); ok && keyID == kid {
-			return rsaPublicKeyFromJWK(keyMap)
+		if keyID, ok := keyMap["kid"].(string); !ok || keyID != kid {
+			continue
 		}
+
+		// Providers publish encryption keys alongside signing keys; only the
+		// latter may verify a token.
+		if use, ok := keyMap["use"].(string); ok && use != "" && use != "sig" {
+			continue
+		}
+
+		return publicKeyFromJWK(keyMap)
 	}
 
-	return nil, fmt.Errorf("key with ID %s not found", kid)
+	return nil, fmt.Errorf("%w: %s", errUnknownKeyID, kid)
+}
+
+// publicKeyFromJWK converts a JWK into a Go public key, supporting the RSA and
+// EC key types providers use for RS*/PS* and ES* signatures respectively.
+func publicKeyFromJWK(keyMap map[string]interface{}) (interface{}, error) {
+	switch kty, _ := keyMap["kty"].(string); kty {
+	case "RSA":
+		return rsaPublicKeyFromJWK(keyMap)
+	case "EC":
+		return ecPublicKeyFromJWK(keyMap)
+	default:
+		return nil, fmt.Errorf("unsupported key type %q (RSA and EC are supported)", kty)
+	}
+}
+
+// ecPublicKeyFromJWK builds an ECDSA public key from a JWK (RFC 7518 §6.2).
+func ecPublicKeyFromJWK(keyMap map[string]interface{}) (interface{}, error) {
+	crv, _ := keyMap["crv"].(string)
+	var curve elliptic.Curve
+	switch crv {
+	case "P-256":
+		curve = elliptic.P256()
+	case "P-384":
+		curve = elliptic.P384()
+	case "P-521":
+		curve = elliptic.P521()
+	default:
+		return nil, fmt.Errorf("unsupported EC curve %q", crv)
+	}
+
+	xRaw, ok := keyMap["x"].(string)
+	if !ok || xRaw == "" {
+		return nil, errors.New("EC JWK is missing the x coordinate")
+	}
+	yRaw, ok := keyMap["y"].(string)
+	if !ok || yRaw == "" {
+		return nil, errors.New("EC JWK is missing the y coordinate")
+	}
+
+	xBytes, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(xRaw, "="))
+	if err != nil {
+		return nil, fmt.Errorf("invalid EC x coordinate: %w", err)
+	}
+	yBytes, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(yRaw, "="))
+	if err != nil {
+		return nil, fmt.Errorf("invalid EC y coordinate: %w", err)
+	}
+
+	key := &ecdsa.PublicKey{
+		Curve: curve,
+		X:     new(big.Int).SetBytes(xBytes),
+		Y:     new(big.Int).SetBytes(yBytes),
+	}
+	// Reject a point that is not on the curve rather than letting verification
+	// proceed with undefined behaviour.
+	if !curve.IsOnCurve(key.X, key.Y) {
+		return nil, errors.New("EC JWK coordinates are not on the named curve")
+	}
+	return key, nil
 }
 
 func rsaPublicKeyFromJWK(keyMap map[string]interface{}) (*rsa.PublicKey, error) {

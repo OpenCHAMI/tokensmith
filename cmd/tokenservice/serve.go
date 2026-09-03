@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/openchami/tokensmith/pkg/keys"
+	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/openchami/tokensmith/pkg/tokenservice"
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,9 @@ var serveCmd = &cobra.Command{
 		if oidcClaimPolicy == "" {
 			oidcClaimPolicy = os.Getenv("TOKENSMITH_OIDC_CLAIM_POLICY")
 		}
+		if oidcValidationMode == "" {
+			oidcValidationMode = os.Getenv("TOKENSMITH_OIDC_VALIDATION_MODE")
+		}
 		if oidcCAPath == "" {
 			oidcCAPath = os.Getenv("TOKENSMITH_OIDC_CA")
 		}
@@ -48,6 +52,11 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		validationMode, err := oidc.ParseValidationMode(oidcValidationMode)
+		if err != nil {
+			return err
+		}
+
 		claimPolicy, err := tokenservice.ParseOIDCClaimPolicy(oidcClaimPolicy)
 		if err != nil {
 			return err
@@ -86,6 +95,7 @@ var serveCmd = &cobra.Command{
 			OIDCClientID:               oidcClientID,
 			OIDCClientSecret:           oidcClientSecret,
 			OIDCClaimPolicy:            claimPolicy,
+			OIDCValidationMode:         validationMode,
 			OIDCCAPath:                 oidcCAPath,
 			MaxExchangeSessionLifetime: maxExchangeLifetime,
 			RFC8693BootstrapStorePath:  rfc8693BootstrapStorePath,
@@ -147,6 +157,11 @@ func init() {
 	serveCmd.Flags().StringVar(&oidcIssuerURL, "oidc-issuer", "http://hydra:4444", "OIDC provider issuer URL")
 	serveCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OIDC client ID (or set OIDC_CLIENT_ID env var)")
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
+	serveCmd.Flags().StringVar(&oidcValidationMode, "oidc-validation-mode", "",
+		"How upstream tokens are validated: 'offline' (default) verifies the JWT against the provider's JWKS and "+
+			"falls back to introspection; 'online' introspects first and falls back to JWKS only if the endpoint is "+
+			"unreachable. Online observes revocation immediately at the cost of a round-trip per exchange "+
+			"(or set TOKENSMITH_OIDC_VALIDATION_MODE)")
 	serveCmd.Flags().StringVar(&oidcClaimPolicy, "oidc-claim-policy", "", "OIDC claim policy: enriched or csm-keycloak (or set TOKENSMITH_OIDC_CLAIM_POLICY)")
 	serveCmd.Flags().StringVar(&oidcCAPath, "oidc-ca", "", "Path to PEM CA bundle trusted for upstream OIDC TLS (or set TOKENSMITH_OIDC_CA)")
 	serveCmd.Flags().StringVar(&maxExchangeSessionLifetime, "max-exchange-session-lifetime", "", "Maximum TokenSmith session lifetime for exchanged OIDC tokens, e.g. 24h or 168h (or set TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME)")

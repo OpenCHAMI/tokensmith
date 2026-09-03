@@ -20,6 +20,7 @@ var (
 	oidcIssuerURL              string
 	oidcClientID               string
 	oidcClientSecret           string
+	oidcValidationMode         string
 	oidcClaimPolicy            string
 	oidcCAPath                 string
 	configPath                 string
