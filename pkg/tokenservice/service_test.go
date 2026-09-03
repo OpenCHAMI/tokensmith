@@ -1152,6 +1152,11 @@ func TestServiceIdentitySessionHandler_Success(t *testing.T) {
 }
 
 func TestServiceIdentitySessionHandler_RequiresClientCertificate(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	keyManager := keys.NewKeyManager()
@@ -1174,6 +1179,68 @@ func TestServiceIdentitySessionHandler_RequiresClientCertificate(t *testing.T) {
 	service.ServiceIdentitySessionHandler(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Result().StatusCode)
+	entries := decodeLogEntries(t, logs.Bytes())
+	require.Len(t, entries, 1)
+	assert.Equal(t, string(LogEventServiceIdentitySessionFailed), entries[0][string(LogFieldAuditEvent)])
+	assert.Equal(t, string(LogFailureClientCertificateMissing), entries[0][string(LogFieldFailureCategory)])
+	assert.Equal(t, "peer_certificate", entries[0][string(LogFieldFailureStage)])
+}
+
+func TestServiceIdentitySessionHandler_LogsMissingConfiguration(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	service := newOIDCTLSService(t, Config{})
+	req := httptest.NewRequest(http.MethodPost, "/service-identity/session", strings.NewReader("{}"))
+	w := httptest.NewRecorder()
+
+	service.ServiceIdentitySessionHandler(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Result().StatusCode)
+	entries := decodeLogEntries(t, logs.Bytes())
+	require.Len(t, entries, 1)
+	assert.Equal(t, string(LogEventServiceIdentitySessionFailed), entries[0][string(LogFieldAuditEvent)])
+	assert.Equal(t, string(LogFailureClientConfigMissing), entries[0][string(LogFieldFailureCategory)])
+	assert.Equal(t, "service_identity_ca", entries[0][string(LogFieldFailureStage)])
+}
+
+func TestServiceIdentitySessionHandler_LogsMissingSubjectPolicy(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	keyManager := keys.NewKeyManager()
+	require.NoError(t, keyManager.SetKeyPair(privateKey, &privateKey.PublicKey))
+
+	caPEM, serviceCert := generateClientIdentityCertificate(t, "boot-service")
+	caPath := filepath.Join(t.TempDir(), "service-identity-ca.pem")
+	require.NoError(t, os.WriteFile(caPath, caPEM, 0600))
+	service, err := NewTokenService(keyManager, Config{
+		Issuer:                "http://tokensmith.test",
+		ClusterID:             "cluster-a",
+		OpenCHAMIID:           "openchami-a",
+		ServiceIdentityCAPath: caPath,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/service-identity/session", strings.NewReader("{}"))
+	req.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{serviceCert}}
+	w := httptest.NewRecorder()
+
+	service.ServiceIdentitySessionHandler(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+	entries := decodeLogEntries(t, logs.Bytes())
+	require.Len(t, entries, 1)
+	assert.Equal(t, string(LogEventServiceIdentitySessionFailed), entries[0][string(LogFieldAuditEvent)])
+	assert.Equal(t, string(LogFailureServiceIdentityPolicyNotFound), entries[0][string(LogFieldFailureCategory)])
+	assert.Equal(t, "policy_lookup", entries[0][string(LogFieldFailureStage)])
+	assert.Equal(t, "boot-service", entries[0][string(LogFieldSubject)])
 }
 
 func generateClientIdentityCertificate(t *testing.T, subjectCN string) ([]byte, *x509.Certificate) {

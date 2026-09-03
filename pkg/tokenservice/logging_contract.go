@@ -188,6 +188,14 @@ const (
 	LogFailureRefreshFamilyExpired LogFailureCategory = "refresh_family_expired"
 	// LogFailureRefreshReplayDetected means an old refresh token was reused.
 	LogFailureRefreshReplayDetected LogFailureCategory = "refresh_replay_detected"
+	// LogFailureClientCertificateMissing means mTLS request has no client certificate.
+	LogFailureClientCertificateMissing LogFailureCategory = "client_certificate_missing"
+	// LogFailureCertificateVerification means mTLS client certificate verification failed.
+	LogFailureCertificateVerification LogFailureCategory = "certificate_verification_failed"
+	// LogFailureSubjectExtraction means TokenSmith could not map a certificate to a subject.
+	LogFailureSubjectExtraction LogFailureCategory = "subject_extraction_failed"
+	// LogFailureServiceIdentityPolicyNotFound means no policy exists for the mTLS subject.
+	LogFailureServiceIdentityPolicyNotFound LogFailureCategory = "service_identity_policy_not_found"
 )
 
 const (
@@ -305,6 +313,10 @@ func loggingContractFailureCategories() []LogFailureCategory {
 		LogFailureRefreshTokenNotFound,
 		LogFailureRefreshFamilyExpired,
 		LogFailureRefreshReplayDetected,
+		LogFailureClientCertificateMissing,
+		LogFailureCertificateVerification,
+		LogFailureSubjectExtraction,
+		LogFailureServiceIdentityPolicyNotFound,
 	}
 }
 

@@ -27,29 +27,64 @@ func (s *TokenService) ServiceIdentitySessionHandler(w http.ResponseWriter, r *h
 	}
 
 	if s.serviceIdentityCAPool == nil {
+		logServiceIdentityFailure(serviceIdentityLogContext{
+			Request:         r,
+			StatusCode:      http.StatusServiceUnavailable,
+			FailureCategory: LogFailureClientConfigMissing,
+			FailureStage:    "service_identity_ca",
+		})
 		s.writeOAuthError(w, http.StatusServiceUnavailable, "server_error", "Service identity CA is not configured")
 		return
 	}
 
 	peerCerts, err := peerCertificatesFromRequest(r)
 	if err != nil {
+		logServiceIdentityFailure(serviceIdentityLogContext{
+			Request:         r,
+			StatusCode:      http.StatusUnauthorized,
+			FailureCategory: LogFailureClientCertificateMissing,
+			FailureStage:    "peer_certificate",
+			Err:             err,
+		})
 		s.writeOAuthError(w, http.StatusUnauthorized, "invalid_client", err.Error())
 		return
 	}
 
 	if err := verifyClientCertificateChain(peerCerts, s.serviceIdentityCAPool); err != nil {
+		logServiceIdentityFailure(serviceIdentityLogContext{
+			Request:         r,
+			StatusCode:      http.StatusUnauthorized,
+			FailureCategory: LogFailureCertificateVerification,
+			FailureStage:    "certificate_verification",
+			Err:             err,
+		})
 		s.writeOAuthError(w, http.StatusUnauthorized, "invalid_client", "Client certificate verification failed")
 		return
 	}
 
 	subject, err := serviceIdentitySubjectFromCertificate(peerCerts[0])
 	if err != nil {
+		logServiceIdentityFailure(serviceIdentityLogContext{
+			Request:         r,
+			StatusCode:      http.StatusUnauthorized,
+			FailureCategory: LogFailureSubjectExtraction,
+			FailureStage:    "subject_extraction",
+			Err:             err,
+		})
 		s.writeOAuthError(w, http.StatusUnauthorized, "invalid_client", err.Error())
 		return
 	}
 
 	policy, err := s.bootstrapTokenStore.GetLatestPolicyBySubject(subject)
 	if err != nil {
+		logServiceIdentityFailure(serviceIdentityLogContext{
+			Request:         r,
+			StatusCode:      http.StatusForbidden,
+			FailureCategory: LogFailureServiceIdentityPolicyNotFound,
+			FailureStage:    "policy_lookup",
+			Subject:         subject,
+			Err:             err,
+		})
 		s.writeOAuthError(w, http.StatusForbidden, "invalid_client", "No policy configured for service identity subject")
 		return
 	}

@@ -126,6 +126,10 @@ Bootstrap and refresh categories:
 - `refresh_token_not_found`
 - `refresh_family_expired`
 - `refresh_replay_detected`
+- `client_certificate_missing`
+- `certificate_verification_failed`
+- `subject_extraction_failed`
+- `service_identity_policy_not_found`
 
 ## Forbidden fields
 
