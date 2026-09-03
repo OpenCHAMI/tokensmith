@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -96,7 +97,21 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		for scope := range scopesSet {
 			scopes = append(scopes, scope)
 		}
+		sort.Strings(scopes)
 		claims.Scope = scopes
+	}
+
+	// Authentication is not authorization. A caller the provider happily
+	// authenticates may still map to no scope in this cluster, and a signed but
+	// scopeless token defers that decision to every resource server -- one of
+	// them treating a missing scope claim as unrestricted turns it into an
+	// access-control failure.
+	//
+	// Off by default: service accounts legitimately carry no groups, and
+	// refusing them would break client-credentials flows. Deployments where
+	// every caller is expected to map to a group can opt in.
+	if s.Config.RequireAuthorizedGroup && len(claims.Scope) == 0 {
+		return "", ErrExchangeNoAuthorizedGroups
 	}
 
 	if scope, ok := ctx.Value(ScopeContextKey).([]string); ok && len(scope) > 0 {

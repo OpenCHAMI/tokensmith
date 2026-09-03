@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
@@ -37,6 +38,12 @@ var serveCmd = &cobra.Command{
 		}
 		if oidcValidationMode == "" {
 			oidcValidationMode = os.Getenv("TOKENSMITH_OIDC_VALIDATION_MODE")
+		}
+		if !cmd.Flags().Changed("require-authorized-group") {
+			switch strings.ToLower(strings.TrimSpace(os.Getenv("TOKENSMITH_REQUIRE_AUTHORIZED_GROUP"))) {
+			case "1", "true", "yes", "on":
+				requireAuthorizedGroup = true
+			}
 		}
 		if oidcCAPath == "" {
 			oidcCAPath = os.Getenv("TOKENSMITH_OIDC_CA")
@@ -96,6 +103,7 @@ var serveCmd = &cobra.Command{
 			OIDCClientSecret:           oidcClientSecret,
 			OIDCClaimPolicy:            claimPolicy,
 			OIDCValidationMode:         validationMode,
+			RequireAuthorizedGroup:     requireAuthorizedGroup,
 			OIDCCAPath:                 oidcCAPath,
 			MaxExchangeSessionLifetime: maxExchangeLifetime,
 			RFC8693BootstrapStorePath:  rfc8693BootstrapStorePath,
@@ -157,6 +165,10 @@ func init() {
 	serveCmd.Flags().StringVar(&oidcIssuerURL, "oidc-issuer", "http://hydra:4444", "OIDC provider issuer URL")
 	serveCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OIDC client ID (or set OIDC_CLIENT_ID env var)")
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
+	serveCmd.Flags().BoolVar(&requireAuthorizedGroup, "require-authorized-group", false,
+		"Reject the exchange when the caller's groups map to no scope, instead of issuing a scopeless token. "+
+			"Off by default because service accounts legitimately carry no groups; enable it where every caller is "+
+			"expected to map to a configured group (or set TOKENSMITH_REQUIRE_AUTHORIZED_GROUP)")
 	serveCmd.Flags().StringVar(&oidcValidationMode, "oidc-validation-mode", "",
 		"How upstream tokens are validated: 'offline' (default) verifies the JWT against the provider's JWKS and "+
 			"falls back to introspection; 'online' introspects first and falls back to JWKS only if the endpoint is "+

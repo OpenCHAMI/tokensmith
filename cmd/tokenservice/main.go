@@ -21,6 +21,7 @@ var (
 	oidcClientID               string
 	oidcClientSecret           string
 	oidcValidationMode         string
+	requireAuthorizedGroup     bool
 	oidcClaimPolicy            string
 	oidcCAPath                 string
 	configPath                 string

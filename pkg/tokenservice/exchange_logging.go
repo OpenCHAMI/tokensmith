@@ -59,6 +59,8 @@ func exchangeFailureCategory(err error) string {
 		return "invalid_claim"
 	case errors.Is(err, ErrExchangeGeneratedClaimValidation):
 		return "generated_claim_validation"
+	case errors.Is(err, ErrExchangeNoAuthorizedGroups):
+		return "no_authorized_groups"
 	case errors.Is(err, oidc.ErrUpstreamUnavailable):
 		return "upstream_unavailable"
 	case errors.Is(err, oidc.ErrUpstreamRejected):

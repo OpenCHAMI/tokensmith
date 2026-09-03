@@ -57,7 +57,12 @@ type Config struct {
 	// OIDCValidationMode selects offline (JWKS) or online (introspection) as the
 	// primary path for validating upstream tokens. Both remain available as
 	// fallbacks either way. Empty means offline.
-	OIDCValidationMode         oidc.ValidationMode
+	OIDCValidationMode oidc.ValidationMode
+
+	// RequireAuthorizedGroup rejects an exchange when the caller's groups map to
+	// no scope, instead of issuing a scopeless token. Off by default because
+	// service accounts legitimately have no groups.
+	RequireAuthorizedGroup     bool
 	OIDCCAPath                 string
 	MaxExchangeSessionLifetime time.Duration
 }

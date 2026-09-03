@@ -217,8 +217,16 @@ func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Reque
 
 	tokenValue, err := s.ExchangeToken(ctx, token)
 	if err != nil {
-		logExchangeFailure(r, s.Config.OIDCClaimPolicy, http.StatusUnauthorized, exchangeFailureCategory(err), len(payload.Scope), payload.TargetService != "", err)
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		// Distinguish "we do not know who you are" from "we know exactly who you
+		// are and you may not do this". Answering 401 to an authorization
+		// failure invites the client to discard a valid session and
+		// re-authenticate, which cannot help and loops.
+		status := http.StatusUnauthorized
+		if errors.Is(err, ErrExchangeNoAuthorizedGroups) {
+			status = http.StatusForbidden
+		}
+		logExchangeFailure(r, s.Config.OIDCClaimPolicy, status, exchangeFailureCategory(err), len(payload.Scope), payload.TargetService != "", err)
+		http.Error(w, err.Error(), status)
 		return
 	}
 
