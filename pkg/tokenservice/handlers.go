@@ -120,8 +120,14 @@ func (s *TokenService) withCurrentOIDCProvider(next http.Handler) http.Handler {
 
 		introspection, err := provider.IntrospectToken(r.Context(), tokenValue)
 		if err != nil {
+			// Report what actually failed. Every validation failure previously
+			// surfaced as "Token introspection failed", including ones where
+			// introspection never ran -- a local signature failure, an expired
+			// token and a provider outage were indistinguishable to the caller,
+			// which makes misconfiguration expensive to diagnose. The status
+			// code is unchanged.
 			logExchangeFailure(r, s.Config.OIDCClaimPolicy, http.StatusUnauthorized, exchangeFailureCategory(err), 0, false, err)
-			http.Error(w, "Token introspection failed", http.StatusUnauthorized)
+			http.Error(w, tokenValidationMessage(err), http.StatusUnauthorized)
 			return
 		}
 		if !introspection.Active {
@@ -133,6 +139,25 @@ func (s *TokenService) withCurrentOIDCProvider(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), oidc.IntrospectionCtxKey{}, introspection)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// tokenValidationMessage describes a validation failure without disclosing
+// anything about the token itself.
+func tokenValidationMessage(err error) string {
+	switch {
+	case errors.Is(err, oidc.ErrUpstreamUnavailable):
+		return "Identity provider is unavailable"
+	case errors.Is(err, oidc.ErrProviderMetadata):
+		return "Cannot load identity provider metadata or signing keys"
+	case errors.Is(err, oidc.ErrUpstreamRejected):
+		return "Identity provider rejected the token"
+	case errors.Is(err, oidc.ErrInvalidResponse):
+		return "Identity provider returned an unreadable response"
+	case errors.Is(err, oidc.ErrInvalidToken):
+		return "Token is not valid for this identity provider"
+	default:
+		return "Token validation failed"
+	}
 }
 
 // OIDCConfigStatusHandler returns the runtime single-provider OIDC status.

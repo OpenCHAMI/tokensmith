@@ -67,10 +67,13 @@ type SimpleProvider struct {
 
 	// mu guards the cached discovery metadata and JWKS, which are read and
 	// written concurrently by HTTP handlers.
-	mu             sync.RWMutex
-	metadata       *ProviderMetadata
-	jwks           map[string]interface{}
-	lastJWKSUpdate time.Time
+	metadataTTL time.Duration
+
+	mu               sync.RWMutex
+	metadata         *ProviderMetadata
+	lastMetadataLoad time.Time
+	jwks             map[string]interface{}
+	lastJWKSUpdate   time.Time
 }
 
 type SimpleProviderOption func(*SimpleProvider)
@@ -102,6 +105,7 @@ func NewSimpleProvider(issuerURL, clientID, clientSecret string, options ...Simp
 		discoveryURL:     fmt.Sprintf("%s/.well-known/openid-configuration", issuerURL),
 		httpClient:       &http.Client{},
 		jwksUpdatePeriod: 24 * time.Hour,
+		metadataTTL:      24 * time.Hour,
 		validationMode:   ValidationModeOffline,
 	}
 	for _, option := range options {
@@ -213,10 +217,14 @@ func looksLikeJWT(token string) bool {
 
 // GetProviderMetadata returns the OIDC provider metadata
 func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMetadata, error) {
+	// Discovery is cached, but not forever: a provider that moves its
+	// introspection or JWKS endpoint would otherwise require a restart to be
+	// picked up.
 	p.mu.RLock()
 	cached := p.metadata
+	fresh := cached != nil && time.Since(p.lastMetadataLoad) <= p.metadataTTL
 	p.mu.RUnlock()
-	if cached != nil {
+	if fresh {
 		return cached, nil
 	}
 
@@ -260,6 +268,7 @@ func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMeta
 
 	p.mu.Lock()
 	p.metadata = &metadata
+	p.lastMetadataLoad = time.Now()
 	p.mu.Unlock()
 
 	return &metadata, nil
