@@ -88,11 +88,11 @@ func AuditLog(eventType AuditEventType, context map[string]interface{}) {
 		}
 
 	case AuditBootstrapTokenExchanged:
-		if accessTokenID, ok := context["access_token_id"].(string); ok {
-			event = event.Str("access_token_id", accessTokenID)
+		if issuedTokenHashPrefix, ok := context[string(LogFieldIssuedTokenHashPrefix)].(string); ok {
+			event = event.Str(string(LogFieldIssuedTokenHashPrefix), issuedTokenHashPrefix)
 		}
 		if refreshFamilyID, ok := context["refresh_family_id"].(string); ok {
-			event = event.Str("refresh_family_id", refreshFamilyID)
+			event = event.Str(string(LogFieldRefreshFamilyID), refreshFamilyID)
 		}
 
 	case AuditBootstrapTokenReplayAttempted:
@@ -182,13 +182,13 @@ func AuditLogBootstrapCreated(subject, audience string, scopes []string, ttl, re
 // AuditLogBootstrapExchanged logs successful bootstrap token exchange
 func AuditLogBootstrapExchanged(subject, audience string, scopes []string, clientIP, accessTokenID, refreshFamilyID, tokenHashPrefix string) {
 	AuditLog(AuditBootstrapTokenExchanged, map[string]interface{}{
-		"subject":           subject,
-		"audience":          audience,
-		"scopes":            scopes,
-		"client_ip":         clientIP,
-		"access_token_id":   accessTokenID,
-		"refresh_family_id": refreshFamilyID,
-		"token_hash_prefix": tokenHashPrefix,
+		"subject":                             subject,
+		"audience":                            audience,
+		"scopes":                              scopes,
+		"client_ip":                           clientIP,
+		string(LogFieldIssuedTokenHashPrefix): accessTokenID,
+		"refresh_family_id":                   refreshFamilyID,
+		"token_hash_prefix":                   tokenHashPrefix,
 	})
 }
 

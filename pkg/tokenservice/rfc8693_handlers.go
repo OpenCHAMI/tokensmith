@@ -205,7 +205,7 @@ func (s *TokenService) handleBootstrapTokenExchange(w http.ResponseWriter, r *ht
 	}
 
 	// Record token IDs in bootstrap policy for audit
-	policy.IssuedAccessTokenID = accessToken
+	policy.IssuedAccessTokenID = HashBootstrapToken(accessToken)[:8]
 	policy.IssuedRefreshTokenID = familyID
 	if err := s.bootstrapTokenStore.UpdatePolicy(policy); err != nil {
 		log.Warn().
@@ -230,7 +230,7 @@ func (s *TokenService) handleBootstrapTokenExchange(w http.ResponseWriter, r *ht
 		Msg("Bootstrap token successfully exchanged for service token")
 
 	// Audit log successful bootstrap exchange (RFC 8693 Section 3.2)
-	AuditLogBootstrapExchanged(policy.Subject, policy.Audience, policy.Scopes, clientIP, accessToken, familyID, tokenHash[:8])
+	AuditLogBootstrapExchanged(policy.Subject, policy.Audience, policy.Scopes, clientIP, policy.IssuedAccessTokenID, familyID, tokenHash[:8])
 
 	// Write successful response per RFC 8693 Section 2.2
 	s.writeOAuthTokenResponse(w, http.StatusOK, OAuthTokenResponse{
@@ -263,6 +263,7 @@ func (s *TokenService) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Re
 			Str("component", "tokenservice").
 			Str("handler", "oauth_token").
 			Str("client_ip", clientIP).
+			Str(string(LogFieldTokenHashPrefix), tokenHash[:8]).
 			Err(err).
 			Msg("Refresh token family not found by hash")
 
@@ -317,6 +318,8 @@ func (s *TokenService) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Re
 			Str("client_ip", clientIP).
 			Str("family_id", familyID).
 			Str("subject", family.Subject).
+			Str(string(LogFieldPresentedTokenHashPrefix), tokenHash[:8]).
+			Str(string(LogFieldCurrentTokenHashPrefix), family.CurrentTokenHash[:8]).
 			Msg("Refresh token hash mismatch - replay attempt detected")
 
 		// Revoke entire family (NIST SP 800-63-4 Section 6.2.3)

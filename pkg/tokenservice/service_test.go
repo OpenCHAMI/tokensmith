@@ -982,6 +982,11 @@ func TestTokenService_JWKSHandlerPublishesActiveSigningAlgorithm(t *testing.T) {
 // the RFC 8693 /oauth/token endpoint: opaque bootstrap token -> access+refresh,
 // then refresh rotation (NIST SP 800-63-4 Section 6.2.2).
 func TestOAuthTokenHandler_BootstrapExchangeThenRefresh(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
@@ -1043,6 +1048,10 @@ func TestOAuthTokenHandler_BootstrapExchangeThenRefresh(t *testing.T) {
 	assert.Equal(t, "Bearer", bootstrapOAuthResp.TokenType)
 	assert.Equal(t, 3600, bootstrapOAuthResp.ExpiresIn)
 	assert.Greater(t, bootstrapOAuthResp.RefreshExpiresIn, 0)
+	assert.Contains(t, logs.String(), string(LogFieldIssuedTokenHashPrefix))
+	assert.NotContains(t, logs.String(), bootstrapOAuthResp.AccessToken)
+	assert.NotContains(t, logs.String(), bootstrapOAuthResp.RefreshToken)
+	assert.NotContains(t, logs.String(), string(ForbiddenLogFieldAccessToken))
 
 	// Verify access token audience is the policy's audience
 	claims, _, err := service.TokenManager.ParseToken(bootstrapOAuthResp.AccessToken)
@@ -1073,6 +1082,8 @@ func TestOAuthTokenHandler_BootstrapExchangeThenRefresh(t *testing.T) {
 	require.NotEmpty(t, refreshOAuthResp.RefreshToken)
 	assert.NotEqual(t, bootstrapOAuthResp.RefreshToken, refreshOAuthResp.RefreshToken, "refresh token must be rotated")
 	assert.Greater(t, refreshOAuthResp.RefreshExpiresIn, 0)
+	assert.NotContains(t, logs.String(), refreshOAuthResp.AccessToken)
+	assert.NotContains(t, logs.String(), refreshOAuthResp.RefreshToken)
 
 	// --- Phase 5: Replaying the old refresh token must be rejected (family revocation) ---
 	replayRefreshReq := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(refreshForm))
@@ -1080,6 +1091,8 @@ func TestOAuthTokenHandler_BootstrapExchangeThenRefresh(t *testing.T) {
 	replayRefreshW := httptest.NewRecorder()
 	service.OAuthTokenHandler(replayRefreshW, replayRefreshReq)
 	assert.Equal(t, http.StatusBadRequest, replayRefreshW.Result().StatusCode)
+	assert.Contains(t, logs.String(), HashBootstrapToken(bootstrapOAuthResp.RefreshToken)[:8])
+	assert.NotContains(t, logs.String(), bootstrapOAuthResp.RefreshToken)
 }
 
 func TestServiceIdentitySessionHandler_Success(t *testing.T) {
