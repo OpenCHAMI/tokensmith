@@ -19,14 +19,18 @@ var (
 )
 
 type ExchangeClaimsError struct {
-	Kind    error
-	Claims  []string
-	Allowed []string
+	Kind          error
+	Claims        []string
+	Allowed       []string
+	RejectedScope string
 }
 
 func (err *ExchangeClaimsError) Error() string {
 	if err == nil {
 		return "exchange claims error"
+	}
+	if errors.Is(err.Kind, ErrExchangeScopeNotGranted) {
+		return fmt.Sprintf("%v: scope", ErrExchangeInvalidClaim)
 	}
 	return fmt.Sprintf("%v: %s", err.Kind, strings.Join(err.Claims, ","))
 }
@@ -47,5 +51,5 @@ func invalidExchangeClaim(claim string) error {
 }
 
 func scopeNotGranted(scope string, allowed []string) error {
-	return &ExchangeClaimsError{Kind: ErrExchangeScopeNotGranted, Claims: []string{scope}, Allowed: append([]string(nil), allowed...)}
+	return &ExchangeClaimsError{Kind: ErrExchangeScopeNotGranted, Claims: []string{"scope"}, Allowed: append([]string(nil), allowed...), RejectedScope: scope}
 }

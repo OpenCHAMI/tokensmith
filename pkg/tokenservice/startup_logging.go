@@ -68,6 +68,10 @@ func (s *TokenService) logOIDCProviderValidation(ctx context.Context) {
 		s.logOIDCProviderValidationFailure(err, classifyProviderValidationFailure(err, LogFailureJWKSUnavailable), providerOperation(err, "get JWKS"))
 		return
 	}
+	if !validJWKS(jwks) {
+		s.logOIDCProviderValidationFailure(nil, LogFailureJWKSInvalid, "validate JWKS")
+		return
+	}
 
 	log.Info().
 		Str(string(LogFieldComponent), "tokenservice").
@@ -116,10 +120,25 @@ func classifyProviderValidationFailure(err error, fallback LogFailureCategory) L
 	if strings.Contains(strings.ToLower(err.Error()), "connection refused") {
 		return LogFailureConnectionRefused
 	}
-	if errors.Is(err, oidc.ErrProviderMetadata) {
+	if fallback == LogFailureJWKSUnavailable && providerErrorCauseContains(err, "parse jwks") {
+		return LogFailureJWKSInvalid
+	}
+	if errors.Is(err, oidc.ErrProviderMetadata) && fallback != LogFailureJWKSUnavailable {
 		return LogFailureProviderMetadata
 	}
 	return fallback
+}
+
+func providerErrorCauseContains(err error, needle string) bool {
+	needle = strings.ToLower(needle)
+	if strings.Contains(strings.ToLower(err.Error()), needle) {
+		return true
+	}
+	var providerErr *oidc.ProviderError
+	if errors.As(err, &providerErr) && providerErr.Cause != nil {
+		return strings.Contains(strings.ToLower(providerErr.Cause.Error()), needle)
+	}
+	return false
 }
 
 func providerOperation(err error, fallback string) string {
@@ -147,4 +166,31 @@ func jwksKeyCount(jwks interface{}) int {
 		return 0
 	}
 	return len(keys)
+}
+
+func validJWKS(jwks interface{}) bool {
+	jwksMap, ok := jwks.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	keys, ok := jwksMap["keys"].([]interface{})
+	if !ok || len(keys) == 0 {
+		return false
+	}
+	for _, key := range keys {
+		keyMap, ok := key.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		for _, field := range []string{"kid", "kty", "n", "e"} {
+			value, ok := keyMap[field].(string)
+			if !ok || strings.TrimSpace(value) == "" {
+				return false
+			}
+		}
+		if keyMap["kty"] != "RSA" {
+			return false
+		}
+	}
+	return true
 }

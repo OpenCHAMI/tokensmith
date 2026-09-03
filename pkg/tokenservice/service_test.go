@@ -435,7 +435,10 @@ func TestLogOIDCProviderValidationSuccessEmitsStartedAndSucceeded(t *testing.T) 
 		}, nil
 	}
 	provider.GetJWKSFunc = func(ctx context.Context) (interface{}, error) {
-		return map[string]interface{}{"keys": []interface{}{map[string]interface{}{"kid": "a"}, map[string]interface{}{"kid": "b"}}}, nil
+		return map[string]interface{}{"keys": []interface{}{
+			map[string]interface{}{"kid": "a", "kty": "RSA", "n": "modulus-a", "e": "AQAB"},
+			map[string]interface{}{"kid": "b", "kty": "RSA", "n": "modulus-b", "e": "AQAB"},
+		}}, nil
 	}
 	service := &TokenService{
 		Config: Config{
@@ -493,6 +496,152 @@ func TestLogOIDCProviderValidationFailureEmitsCategoryAndOperation(t *testing.T)
 	assert.NotContains(t, logs.String(), "secret-never-log")
 }
 
+func TestLogOIDCProviderValidationJWKSFailureUsesJWKSUnavailable(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	provider := oidc.NewMockProvider()
+	provider.GetProviderMetadataFunc = func(ctx context.Context) (*oidc.ProviderMetadata, error) {
+		return &oidc.ProviderMetadata{
+			Issuer:                "https://keycloak.example/realms/shasta",
+			IntrospectionEndpoint: "https://keycloak.example/realms/shasta/introspect",
+			JWKSURI:               "https://keycloak.example/realms/shasta/certs",
+		}, nil
+	}
+	provider.GetJWKSFunc = func(ctx context.Context) (interface{}, error) {
+		return nil, &oidc.ProviderError{Operation: "update JWKS", Kind: oidc.ErrProviderMetadata, Cause: errors.New("failed to fetch JWKS")}
+	}
+	service := &TokenService{
+		Config: Config{
+			OIDCIssuerURL:    "https://keycloak.example/realms/shasta",
+			OIDCClientID:     "openchami-tokensmith",
+			OIDCClientSecret: "secret-never-log",
+			OIDCClaimPolicy:  OIDCClaimPolicyCSMKeycloak,
+		},
+		OIDCProvider: provider,
+	}
+
+	service.logOIDCProviderValidation(context.Background())
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	require.Len(t, entries, 2)
+	assert.Equal(t, string(LogEventOIDCProviderValidationFailed), entries[1][string(LogFieldEvent)])
+	assert.Equal(t, string(LogFailureJWKSUnavailable), entries[1][string(LogFieldFailureCategory)])
+	assert.Equal(t, "update JWKS", entries[1][string(LogFieldProviderOp)])
+	assert.NotContains(t, logs.String(), "secret-never-log")
+}
+
+func TestLogOIDCProviderValidationEmptyJWKSUsesJWKSInvalid(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	provider := oidc.NewMockProvider()
+	provider.GetProviderMetadataFunc = func(ctx context.Context) (*oidc.ProviderMetadata, error) {
+		return &oidc.ProviderMetadata{
+			Issuer:                "https://keycloak.example/realms/shasta",
+			IntrospectionEndpoint: "https://keycloak.example/realms/shasta/introspect",
+			JWKSURI:               "https://keycloak.example/realms/shasta/certs",
+		}, nil
+	}
+	provider.GetJWKSFunc = func(ctx context.Context) (interface{}, error) {
+		return map[string]interface{}{"keys": []interface{}{}}, nil
+	}
+	service := &TokenService{
+		Config: Config{
+			OIDCIssuerURL:    "https://keycloak.example/realms/shasta",
+			OIDCClientID:     "openchami-tokensmith",
+			OIDCClientSecret: "secret-never-log",
+			OIDCClaimPolicy:  OIDCClaimPolicyCSMKeycloak,
+		},
+		OIDCProvider: provider,
+	}
+
+	service.logOIDCProviderValidation(context.Background())
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	require.Len(t, entries, 2)
+	assert.Equal(t, string(LogEventOIDCProviderValidationFailed), entries[1][string(LogFieldEvent)])
+	assert.Equal(t, string(LogFailureJWKSInvalid), entries[1][string(LogFieldFailureCategory)])
+	assert.Equal(t, "validate JWKS", entries[1][string(LogFieldProviderOp)])
+	assert.NotContains(t, logs.String(), "secret-never-log")
+}
+
+func TestLogOIDCProviderValidationMalformedJWKSErrorUsesJWKSInvalid(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	provider := oidc.NewMockProvider()
+	provider.GetProviderMetadataFunc = func(ctx context.Context) (*oidc.ProviderMetadata, error) {
+		return &oidc.ProviderMetadata{
+			Issuer:                "https://keycloak.example/realms/shasta",
+			IntrospectionEndpoint: "https://keycloak.example/realms/shasta/introspect",
+			JWKSURI:               "https://keycloak.example/realms/shasta/certs",
+		}, nil
+	}
+	provider.GetJWKSFunc = func(ctx context.Context) (interface{}, error) {
+		return nil, &oidc.ProviderError{Operation: "update JWKS", Kind: oidc.ErrProviderMetadata, Cause: errors.New("failed to parse JWKS: invalid character 'n' looking for beginning of value")}
+	}
+	service := &TokenService{
+		Config: Config{
+			OIDCIssuerURL:    "https://keycloak.example/realms/shasta",
+			OIDCClientID:     "openchami-tokensmith",
+			OIDCClientSecret: "secret-never-log",
+			OIDCClaimPolicy:  OIDCClaimPolicyCSMKeycloak,
+		},
+		OIDCProvider: provider,
+	}
+
+	service.logOIDCProviderValidation(context.Background())
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	require.Len(t, entries, 2)
+	assert.Equal(t, string(LogEventOIDCProviderValidationFailed), entries[1][string(LogFieldEvent)])
+	assert.Equal(t, string(LogFailureJWKSInvalid), entries[1][string(LogFieldFailureCategory)])
+	assert.NotContains(t, logs.String(), "secret-never-log")
+}
+
+func TestLogOIDCProviderValidationUnusableJWKSKeyUsesJWKSInvalid(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	provider := oidc.NewMockProvider()
+	provider.GetProviderMetadataFunc = func(ctx context.Context) (*oidc.ProviderMetadata, error) {
+		return &oidc.ProviderMetadata{
+			Issuer:                "https://keycloak.example/realms/shasta",
+			IntrospectionEndpoint: "https://keycloak.example/realms/shasta/introspect",
+			JWKSURI:               "https://keycloak.example/realms/shasta/certs",
+		}, nil
+	}
+	provider.GetJWKSFunc = func(ctx context.Context) (interface{}, error) {
+		return map[string]interface{}{"keys": []interface{}{map[string]interface{}{"kty": "RSA"}}}, nil
+	}
+	service := &TokenService{
+		Config: Config{
+			OIDCIssuerURL:    "https://keycloak.example/realms/shasta",
+			OIDCClientID:     "openchami-tokensmith",
+			OIDCClientSecret: "secret-never-log",
+			OIDCClaimPolicy:  OIDCClaimPolicyCSMKeycloak,
+		},
+		OIDCProvider: provider,
+	}
+
+	service.logOIDCProviderValidation(context.Background())
+
+	entries := decodeLogEntries(t, logs.Bytes())
+	require.Len(t, entries, 2)
+	assert.Equal(t, string(LogEventOIDCProviderValidationFailed), entries[1][string(LogFieldEvent)])
+	assert.Equal(t, string(LogFailureJWKSInvalid), entries[1][string(LogFieldFailureCategory)])
+	assert.NotContains(t, logs.String(), "secret-never-log")
+}
+
 func TestLogOIDCProviderValidationSkipsUnconfiguredProvider(t *testing.T) {
 	var logs bytes.Buffer
 	previousLogger := log.Logger
@@ -507,19 +656,20 @@ func TestLogOIDCProviderValidationSkipsUnconfiguredProvider(t *testing.T) {
 
 func TestClassifyProviderValidationFailure(t *testing.T) {
 	tests := []struct {
-		name string
-		err  error
-		want LogFailureCategory
+		name     string
+		err      error
+		fallback LogFailureCategory
+		want     LogFailureCategory
 	}{
-		{name: "dns", err: &net.DNSError{Err: "no such host", Name: "keycloak.example"}, want: LogFailureDNSLookup},
-		{name: "tls", err: x509.UnknownAuthorityError{}, want: LogFailureTLSValidation},
-		{name: "provider metadata", err: &oidc.ProviderError{Kind: oidc.ErrProviderMetadata}, want: LogFailureProviderMetadata},
-		{name: "connection refused", err: errors.New("dial tcp 127.0.0.1:9443: connect: connection refused"), want: LogFailureConnectionRefused},
+		{name: "dns", err: &net.DNSError{Err: "no such host", Name: "keycloak.example"}, fallback: LogFailureJWKSUnavailable, want: LogFailureDNSLookup},
+		{name: "tls", err: x509.UnknownAuthorityError{}, fallback: LogFailureJWKSUnavailable, want: LogFailureTLSValidation},
+		{name: "provider metadata", err: &oidc.ProviderError{Kind: oidc.ErrProviderMetadata}, fallback: LogFailureProviderMetadata, want: LogFailureProviderMetadata},
+		{name: "connection refused", err: errors.New("dial tcp 127.0.0.1:9443: connect: connection refused"), fallback: LogFailureJWKSUnavailable, want: LogFailureConnectionRefused},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, classifyProviderValidationFailure(test.err, LogFailureJWKSUnavailable))
+			assert.Equal(t, test.want, classifyProviderValidationFailure(test.err, test.fallback))
 		})
 	}
 }
