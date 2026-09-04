@@ -24,10 +24,20 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
    ```
    If this fails, your OIDC provider is unreachable.
 
-2. Check TokenSmith logs for OIDC discovery errors:
+2. Check TokenSmith logs for OIDC provider validation errors:
+   ```json
+   {
+     "level": "warn",
+     "component": "tokenservice",
+     "event": "oidc_provider_validation_failed",
+     "handler": "startup",
+     "failure_category": "provider_metadata",
+     "provider_operation": "get provider metadata",
+     "oidc_issuer": "https://keycloak.example/realms/shasta",
+     "oidc_client_id": "openchami-tokensmith"
+   }
    ```
-   level=error msg="oidc discovery failed" issuer="..." error="..."
-   ```
+   Common startup categories include `dns_lookup_failed`, `tls_validation_failed`, `provider_metadata`, `jwks_unavailable`, and `jwks_invalid`.
 
 3. Verify client credentials:
    ```bash
@@ -58,6 +68,7 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
 3. Check token validity:
     - Ensure the OIDC token is not expired
     - Verify the token includes the Keycloak fields described in [Keycloak token exchange](./keycloak-token-exchange.md)
+    - For scope failures, check `failure_category=scope_not_granted`, `requested_scopes`, `derived_scopes`, and `rejected_scope`.
 
 ---
 

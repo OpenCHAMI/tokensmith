@@ -180,7 +180,6 @@ Keycloak issuer mismatch:
   "audit_event": "token_exchange_failed",
   "handler": "oauth_exchange",
   "failure_category": "invalid_token",
-  "failure_stage": "validate_upstream_token",
   "provider_operation": "validate local token",
   "oidc_claim_policy": "csm-keycloak"
 }
@@ -225,8 +224,9 @@ Refresh replay detection:
   "audit_event": "refresh_token_replay_detected",
   "handler": "oauth_token",
   "failure_category": "refresh_replay_detected",
-  "refresh_family_id": "family-123",
-  "token_hash_prefix": "7dbfe3b6",
+  "family_id": "family-123",
+  "presented_token_hash_prefix": "7dbfe3b6",
+  "current_token_hash_prefix": "11507a0e",
   "subject": "boot-service",
   "audience": "smd"
 }

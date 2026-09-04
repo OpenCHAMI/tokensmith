@@ -268,6 +268,8 @@ In TokenSmith, a successful first-time bootstrap exchange produces a log like:
 INF Bootstrap token successfully exchanged for service token subject=boot-service audience=smd token_hash_prefix=17c3cca6 refresh_family_id=...
 ```
 
+Bootstrap exchange logs use `refresh_family_id` to show the refresh family created by the exchange.
+
 Later refreshes from that same service produce logs like:
 
 ```text
@@ -279,7 +281,7 @@ Common TokenSmith failure logs:
 ```text
 WRN Bootstrap token not found client_ip=... token_hash_prefix=17c3cca6
 WRN Bootstrap token already consumed (replay attempt) client_ip=... token_hash_prefix=17c3cca6
-ERR Refresh token hash mismatch - replay attempt detected family_id=...
+ERR Refresh token hash mismatch - replay attempt detected family_id=... presented_token_hash_prefix=... current_token_hash_prefix=...
 ERR Refresh token family is revoked (replay detected via hash lookup) family_id=...
 ```
 
