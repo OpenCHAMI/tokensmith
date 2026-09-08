@@ -31,6 +31,14 @@ func TestServeCommandHasOIDCCAFlag(t *testing.T) {
 	}
 }
 
+func TestServeCommandHasOIDCIntrospectionEndpointFlag(t *testing.T) {
+	flag := serveCmd.Flags().Lookup("oidc-introspection-endpoint")
+
+	if assert.NotNil(t, flag) {
+		assert.Contains(t, flag.Usage, "TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT")
+	}
+}
+
 func TestServeCommandHasMaxExchangeSessionLifetimeFlag(t *testing.T) {
 	flag := serveCmd.Flags().Lookup("max-exchange-session-lifetime")
 
@@ -79,11 +87,11 @@ func TestEnvFallbackKeepsDefaultWhenEnvEmpty(t *testing.T) {
 func resetServeGlobals(t *testing.T) {
 	t.Helper()
 
-	prevIssuer, prevOIDC, prevPort := issuer, oidcIssuerURL, port
-	issuer, oidcIssuerURL = "", ""
+	prevIssuer, prevOIDC, prevIntrospection, prevPort := issuer, oidcIssuerURL, oidcIntrospectionEndpoint, port
+	issuer, oidcIssuerURL, oidcIntrospectionEndpoint = "", "", ""
 
 	changed := map[string]bool{}
-	for _, name := range []string{"issuer", "oidc-issuer", "port"} {
+	for _, name := range []string{"issuer", "oidc-issuer", "oidc-introspection-endpoint", "port"} {
 		if f := serveCmd.Flags().Lookup(name); f != nil {
 			changed[name] = f.Changed
 			f.Changed = false
@@ -91,7 +99,7 @@ func resetServeGlobals(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
-		issuer, oidcIssuerURL, port = prevIssuer, prevOIDC, prevPort
+		issuer, oidcIssuerURL, oidcIntrospectionEndpoint, port = prevIssuer, prevOIDC, prevIntrospection, prevPort
 		for name, was := range changed {
 			if f := serveCmd.Flags().Lookup(name); f != nil {
 				f.Changed = was

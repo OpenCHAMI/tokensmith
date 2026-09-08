@@ -147,9 +147,9 @@ func TestSimpleProvider_GetProviderMetadataNormalizesIntrospectionEndpointAliase
 			wantPath: "http://example.test/introspect",
 		},
 		{
-			name:     "legacy endpoint takes precedence when both exist",
+			name:     "oauth metadata endpoint takes precedence when both exist",
 			body:     `{"issuer":"issuer","introspection_endpoint":"http://example.test/legacy","token_introspection_endpoint":"http://example.test/oauth","jwks_uri":"http://example.test/jwks"}`,
-			wantPath: "http://example.test/legacy",
+			wantPath: "http://example.test/oauth",
 		},
 	}
 
@@ -169,6 +169,68 @@ func TestSimpleProvider_GetProviderMetadataNormalizesIntrospectionEndpointAliase
 			assert.Equal(t, test.wantPath, metadata.IntrospectionEndpoint)
 		})
 	}
+}
+
+func TestSimpleProvider_GetProviderMetadataUsesIntrospectionEndpointOverride(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "override wins over both discovery aliases",
+			body: `{"issuer":"issuer","introspection_endpoint":"http://example.test/legacy","token_introspection_endpoint":"http://example.test/oauth","jwks_uri":"http://example.test/jwks"}`,
+		},
+		{
+			name: "override supplies missing discovery endpoint",
+			body: `{"issuer":"issuer","jwks_uri":"http://example.test/jwks"}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/.well-known/openid-configuration", r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(test.body))
+			}))
+			t.Cleanup(server.Close)
+
+			provider := NewSimpleProvider(server.URL, "client", "secret", WithIntrospectionEndpoint("  http://override.test/introspect  "))
+			metadata, err := provider.GetProviderMetadata(context.Background())
+
+			require.NoError(t, err)
+			assert.Equal(t, "http://override.test/introspect", metadata.IntrospectionEndpoint)
+		})
+	}
+}
+
+func TestSimpleProvider_IntrospectTokenRemotelyUsesIntrospectionEndpointOverride(t *testing.T) {
+	const tokenValue = "opaque-token"
+	var sawOverride bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"issuer":"issuer","token_introspection_endpoint":"http://` + r.Host + `/wrong/introspect","jwks_uri":"http://` + r.Host + `/jwks"}`))
+		case "/override/introspect":
+			sawOverride = true
+			require.NoError(t, r.ParseForm())
+			require.Equal(t, tokenValue, r.FormValue("token"))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"active":true,"username":"csm-admin","iss":"http://` + r.Host + `","aud":"client","exp":4102444800,"iat":1700000000,"claims":{"sub":"csm-admin"},"token_type":"Bearer"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewSimpleProvider(server.URL, "client", "secret", WithIntrospectionEndpoint(server.URL+"/override/introspect"))
+	introspection, err := provider.IntrospectToken(context.Background(), tokenValue)
+
+	require.NoError(t, err)
+	require.True(t, sawOverride)
+	require.NotNil(t, introspection)
+	assert.True(t, introspection.Active)
 }
 
 func TestSimpleProvider_GetProviderMetadataClassifiesMetadataFailures(t *testing.T) {

@@ -63,7 +63,12 @@ tokensmith serve \
   --oidc-ca /etc/openchami/tls/oidc-ca.pem
 ```
 
-If `--oidc-client-id`, `--oidc-client-secret`, `--oidc-claim-policy`, or `--oidc-ca` are not provided, TokenSmith falls back to `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `TOKENSMITH_OIDC_CLAIM_POLICY`, and `TOKENSMITH_OIDC_CA`. Empty claim policy defaults to `enriched`; empty OIDC CA uses the system trust store.
+If `--oidc-client-id`, `--oidc-client-secret`, `--oidc-introspection-endpoint`, `--oidc-claim-policy`, or `--oidc-ca` are not provided, TokenSmith falls back to `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT`, `TOKENSMITH_OIDC_CLAIM_POLICY`, and `TOKENSMITH_OIDC_CA`. Empty introspection endpoint uses provider discovery, empty claim policy defaults to `enriched`, and empty OIDC CA uses the system trust store.
+
+TokenSmith prefers an explicit introspection endpoint over discovery metadata.
+If unset, it uses `token_introspection_endpoint`, then `introspection_endpoint`.
+Set `--oidc-introspection-endpoint` when your provider's discovery document
+does not advertise either metadata key.
 
 See full command options in `docs/cli-reference.md`.
 

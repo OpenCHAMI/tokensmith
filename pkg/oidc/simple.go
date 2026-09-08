@@ -22,15 +22,16 @@ import (
 
 // SimpleProvider is a simplified OIDC provider that uses discovery endpoint
 type SimpleProvider struct {
-	issuerURL        string
-	clientID         string
-	clientSecret     string
-	discoveryURL     string
-	httpClient       *http.Client
-	metadata         *ProviderMetadata
-	jwks             map[string]interface{}
-	lastJWKSUpdate   time.Time
-	jwksUpdatePeriod time.Duration
+	issuerURL                     string
+	clientID                      string
+	clientSecret                  string
+	discoveryURL                  string
+	introspectionEndpointOverride string
+	httpClient                    *http.Client
+	metadata                      *ProviderMetadata
+	jwks                          map[string]interface{}
+	lastJWKSUpdate                time.Time
+	jwksUpdatePeriod              time.Duration
 }
 
 type SimpleProviderOption func(*SimpleProvider)
@@ -40,6 +41,14 @@ func WithHTTPClient(client *http.Client) SimpleProviderOption {
 		if client != nil {
 			provider.httpClient = client
 		}
+	}
+}
+
+// WithIntrospectionEndpoint overrides the provider discovery metadata endpoint
+// used for remote OAuth token introspection.
+func WithIntrospectionEndpoint(endpoint string) SimpleProviderOption {
+	return func(provider *SimpleProvider) {
+		provider.introspectionEndpointOverride = strings.TrimSpace(endpoint)
 	}
 }
 
@@ -111,13 +120,13 @@ func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMeta
 	if err := json.Unmarshal(body, &metadata); err != nil {
 		return nil, providerError("parse provider metadata", ErrProviderMetadata, err)
 	}
-	normalizeProviderMetadata(&metadata)
+	p.normalizeProviderMetadata(&metadata)
 
 	if metadata.Issuer == "" {
 		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: issuer"))
 	}
 	if metadata.IntrospectionEndpoint == "" {
-		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: introspection_endpoint or token_introspection_endpoint"))
+		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: oidc introspection endpoint override, token_introspection_endpoint, or introspection_endpoint"))
 	}
 	if metadata.JWKSURI == "" {
 		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: jwks_uri"))
@@ -127,8 +136,12 @@ func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMeta
 	return &metadata, nil
 }
 
-func normalizeProviderMetadata(metadata *ProviderMetadata) {
-	if metadata.IntrospectionEndpoint == "" {
+func (p *SimpleProvider) normalizeProviderMetadata(metadata *ProviderMetadata) {
+	if p.introspectionEndpointOverride != "" {
+		metadata.IntrospectionEndpoint = p.introspectionEndpointOverride
+		return
+	}
+	if metadata.TokenIntrospectionEndpoint != "" {
 		metadata.IntrospectionEndpoint = metadata.TokenIntrospectionEndpoint
 	}
 }

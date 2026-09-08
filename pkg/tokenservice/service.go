@@ -52,6 +52,7 @@ type Config struct {
 	OIDCIssuerURL              string
 	OIDCClientID               string
 	OIDCClientSecret           string
+	OIDCIntrospectionEndpoint  string
 	OIDCClaimPolicy            OIDCClaimPolicy
 	OIDCCAPath                 string
 	MaxExchangeSessionLifetime time.Duration
@@ -134,6 +135,9 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	oidcOptions := []oidc.SimpleProviderOption{}
 	if oidcHTTPClient != nil {
 		oidcOptions = append(oidcOptions, oidc.WithHTTPClient(oidcHTTPClient))
+	}
+	if config.OIDCIntrospectionEndpoint != "" {
+		oidcOptions = append(oidcOptions, oidc.WithIntrospectionEndpoint(config.OIDCIntrospectionEndpoint))
 	}
 
 	// Initialize the token manager
@@ -306,6 +310,9 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 	oidcOptions := []oidc.SimpleProviderOption{}
 	if s.oidcHTTPClient != nil {
 		oidcOptions = append(oidcOptions, oidc.WithHTTPClient(s.oidcHTTPClient))
+	}
+	if s.Config.OIDCIntrospectionEndpoint != "" {
+		oidcOptions = append(oidcOptions, oidc.WithIntrospectionEndpoint(s.Config.OIDCIntrospectionEndpoint))
 	}
 	provider := oidc.NewSimpleProvider(issuerURL, clientID, secret, oidcOptions...)
 	if _, err := provider.GetProviderMetadata(ctx); err != nil {

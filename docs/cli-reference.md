@@ -67,6 +67,7 @@ Starts the TokenSmith service.
 | `--oidc-issuer` | OIDC issuer URL (required; or `TOKENSMITH_OIDC_PROVIDER`) | _none_ |
 | `--oidc-client-id` | OIDC client ID, or `OIDC_CLIENT_ID` | `""` |
 | `--oidc-client-secret` | OIDC client secret, or `OIDC_CLIENT_SECRET` | `""` |
+| `--oidc-introspection-endpoint` | OIDC token introspection endpoint override, or `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT` | `""` |
 | `--oidc-claim-policy` | OIDC claim policy (`enriched` or `csm-keycloak`), or `TOKENSMITH_OIDC_CLAIM_POLICY` | `""` |
 | `--oidc-ca` | PEM CA bundle trusted for upstream OIDC TLS, or `TOKENSMITH_OIDC_CA` | `""` |
 | `--max-exchange-session-lifetime` | Maximum TokenSmith session lifetime for exchanged OIDC tokens, or `TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME` | `24h` |
@@ -86,6 +87,7 @@ Starts the TokenSmith service.
 - If `--key-file` is set, TokenSmith loads that private key.
 - If `--key-file` is not set, TokenSmith generates an RSA keypair and writes it to `--key-dir` as `private.pem` and `public.pem`.
 - If `--oidc-client-id` or `--oidc-client-secret` are omitted, TokenSmith reads `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`.
+- If `--oidc-introspection-endpoint` is omitted, TokenSmith reads `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT`; empty values use provider discovery.
 - If `--oidc-claim-policy` is omitted, TokenSmith reads `TOKENSMITH_OIDC_CLAIM_POLICY`; empty defaults to `enriched`.
 - If `--oidc-ca` is omitted, TokenSmith reads `TOKENSMITH_OIDC_CA`; empty uses the system trust store for upstream OIDC TLS.
 - If `--max-exchange-session-lifetime` is omitted, TokenSmith reads `TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME`, then `maxExchangeSessionLifetime` from the JSON config, then defaults to `24h`.
@@ -102,12 +104,22 @@ tokensmith serve \
   --issuer http://localhost:8080 \
   --oidc-issuer https://issuer.example \
   --oidc-client-id your-client-id \
+  --oidc-introspection-endpoint https://issuer.example/oauth2/introspect \
   --oidc-claim-policy enriched \
   --oidc-ca /etc/openchami/tls/keycloak-ca.pem \
   --max-exchange-session-lifetime 24h \
   --rfc8693-bootstrap-store ./data/bootstrap-tokens \
   --rfc8693-refresh-store ./data/refresh-tokens
 ```
+
+TokenSmith resolves the upstream token introspection endpoint in this order:
+
+1. `--oidc-introspection-endpoint` or `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT`
+2. discovery metadata `token_introspection_endpoint`
+3. discovery metadata `introspection_endpoint`
+
+Set the explicit endpoint when the issuer's discovery document omits both
+metadata keys, such as some Vault Identity OIDC provider configurations.
 
 ### User-facing endpoints
 
