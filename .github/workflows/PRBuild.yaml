@@ -72,5 +72,7 @@ jobs:
             - /etc/openchami/configs/tokensmith.json.license
             - /usr/share/containers/systemd/tokensmith-data.volume
             - /usr/share/containers/systemd/tokensmith.container
+            - /usr/share/containers/systemd/tokensmith.container.d
+            - /usr/share/containers/systemd/tokensmith.container.d/10-defaults.conf
             - /usr/share/licenses/tokensmith-quadlet
             - /usr/share/licenses/tokensmith-quadlet/MIT.txt

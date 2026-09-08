@@ -33,6 +33,9 @@ grep -q '@IMAGE_TAG@' tokensmith.container
 sed "s|@IMAGE_TAG@|v%{version}|" tokensmith.container \
     > %{buildroot}/usr/share/containers/systemd/tokensmith.container
 chmod 644 %{buildroot}/usr/share/containers/systemd/tokensmith.container
+install -d %{buildroot}/usr/share/containers/systemd/tokensmith.container.d
+install -m 644 tokensmith.container.d/10-defaults.conf \
+    %{buildroot}/usr/share/containers/systemd/tokensmith.container.d/
 
 install -m 644 tokensmith-data.volume \
     %{buildroot}/usr/share/containers/systemd/tokensmith-data.volume
@@ -50,6 +53,8 @@ install -m 644 tokensmith.json \
 %config(noreplace) /etc/openchami/configs/tokensmith.json
 /etc/openchami/configs/tokensmith.json.license
 /usr/share/containers/systemd/tokensmith.container
+/usr/share/containers/systemd/tokensmith.container.d
+/usr/share/containers/systemd/tokensmith.container.d/10-defaults.conf
 /usr/share/containers/systemd/tokensmith-data.volume
 
 %post

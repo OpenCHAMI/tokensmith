@@ -9,25 +9,11 @@ PartOf=openchami.target
 ContainerName=%N
 HostName=%N
 Image=ghcr.io/openchami/%N:@IMAGE_TAG@
+Exec=serve --enable-local-user-mint
 
 # Volumes
 Volume=/etc/openchami/configs/%N.json:/etc/%N/config.json:Z
 Volume=tokensmith-data.volume:/%N/data:Z,U
-
-# Networks for the Container to use
-Network=openchami-internal.network
-Network=openchami-jwt-internal.network
-HttpProxy=false
-
-# Environment
-EnvironmentFile=-/etc/openchami/configs/openchami.env
-
-# Extra hosts
-# TODO: transient site-specific configurations should be specified via systemd
-# drop in files
-PodmanArgs=--add-host='%H:172.16.0.254'
-
-Exec=--enable-local-user-mint
 
 [Service]
 Restart=always

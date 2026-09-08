@@ -60,11 +60,11 @@ Starts the TokenSmith service.
 
 | Flag | Description | Default |
 | --- | --- | --- |
-| `--issuer` | Token issuer identifier | `http://tokensmith:8080` |
+| `--issuer` | Token issuer identifier (required; or `TOKENSMITH_ISSUER`) | _none_ |
 | `--port` | HTTP server port | `8080` |
 | `--cluster-id` | Cluster identifier | `cl-F00F00F00` |
 | `--openchami-id` | OpenCHAMI instance identifier | `oc-F00F00F00` |
-| `--oidc-issuer` | OIDC issuer URL | `http://hydra:4444` |
+| `--oidc-issuer` | OIDC issuer URL (required; or `TOKENSMITH_OIDC_PROVIDER`) | _none_ |
 | `--oidc-client-id` | OIDC client ID, or `OIDC_CLIENT_ID` | `""` |
 | `--oidc-client-secret` | OIDC client secret, or `OIDC_CLIENT_SECRET` | `""` |
 | `--oidc-claim-policy` | OIDC claim policy (`enriched` or `csm-keycloak`), or `TOKENSMITH_OIDC_CLAIM_POLICY` | `""` |
@@ -99,6 +99,7 @@ Starts the TokenSmith service.
 tokensmith serve \
   --config ./config.json \
   --key-dir ./keys \
+  --issuer http://localhost:8080 \
   --oidc-issuer https://issuer.example \
   --oidc-client-id your-client-id \
   --oidc-claim-policy enriched \
@@ -156,6 +157,8 @@ This is the recommended command for current RFC 8693 bootstrap exchange flows.
 tokensmith serve \
   --config ./config.json \
   --key-dir ./keys \
+  --issuer http://localhost:8080 \
+  --oidc-issuer https://issuer.example \
   --rfc8693-bootstrap-store ./data/bootstrap-tokens \
   --rfc8693-refresh-store ./data/refresh-tokens
 
@@ -191,6 +194,7 @@ This is the clearest production pattern when TokenSmith runs in a container and 
 podman run -d --name tokensmith \
   -p 8080:8080 \
   -e TOKENSMITH_ISSUER="http://tokensmith:8080" \
+  -e TOKENSMITH_OIDC_PROVIDER="https://issuer.example" \
   -e TOKENSMITH_PORT="8080" \
   -e TOKENSMITH_CLUSTER_ID="cluster-1" \
   -e TOKENSMITH_OPENCHAMI_ID="openchami-1" \

@@ -43,6 +43,8 @@ export OIDC_ISSUER_URL="https://keycloak.example.com/realms/master"
 export OIDC_CLIENT_ID="tokensmith"
 export OIDC_CLIENT_SECRET="<secret>"
 export TOKENSMITH_OIDC_CLAIM_POLICY="csm-keycloak"
+export TOKENSMITH_ISSUER="http://tokensmith:8080"
+export TOKENSMITH_OIDC_PROVIDER="https://keycloak.example.com"
 
 # Start TokenSmith
 tokensmith serve
@@ -104,7 +106,8 @@ This flow is designed for emergency access when upstream OIDC is unavailable. It
 
 ```bash
 # Start TokenSmith with local user minting enabled
-tokensmith serve --enable-local-user-mint
+tokensmith serve --enable-local-user-mint \
+  --issuer "http://tokensmith:8080" --oidc-issuer "http://hydra:4444"
 
 # In a separate terminal, mint an admin token
 tokensmith user-token create \
@@ -117,7 +120,8 @@ tokensmith user-token create \
 
 ```bash
 # Day 1: Start with local user minting
-tokensmith serve --enable-local-user-mint
+tokensmith serve --enable-local-user-mint \
+  --issuer "http://tokensmith:8080" --oidc-issuer "http://hydra:4444"
 
 # Create initial admin account
 tokensmith user-token create \
@@ -133,7 +137,8 @@ tokensmith oidc configure \
 
 # Now stop TokenSmith and restart without --enable-local-user-mint
 # (Optional) Disable local user minting in production:
-tokensmith serve  # no flag = local user minting disabled
+tokensmith serve \
+  --issuer "http://tokensmith:8080" --oidc-issuer "http://hydra:4444"  # no flag = local user minting disabled
 ```
 
 ## Comparison
@@ -166,7 +171,7 @@ tokensmith serve  # no flag = local user minting disabled
 
 ### Day 1: Bootstrap a new environment
 
-1. Start TokenSmith with local user minting: `tokensmith serve --enable-local-user-mint`
+1. Start TokenSmith with local user minting: `tokensmith serve --enable-local-user-mint` (with `--issuer` and `--oidc-issuer`)
 2. Mint initial admin token: `tokensmith user-token create ...`
 3. Configure OIDC provider: `tokensmith oidc configure ...`
 4. Restart TokenSmith without `--enable-local-user-mint` (or rely on env startup config)

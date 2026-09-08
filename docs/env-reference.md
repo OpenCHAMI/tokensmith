@@ -12,6 +12,13 @@ This page lists environment variables currently used by TokenSmith code paths.
 
 | Variable | Used by | Description |
 | --- | --- | --- |
+| `TOKENSMITH_ISSUER` | `cmd/tokenservice/serve.go` | Fallback value for `--issuer`; required, no built-in default |
+| `TOKENSMITH_OIDC_PROVIDER` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-issuer` (note the name mismatch); required, no built-in default |
+| `TOKENSMITH_PORT` | `cmd/tokenservice/serve.go` | Fallback value for `--port`; default `8080` |
+| `TOKENSMITH_CLUSTER_ID` | `cmd/tokenservice/serve.go` | Fallback value for `--cluster-id`; default `cl-F00F00F00` |
+| `TOKENSMITH_OPENCHAMI_ID` | `cmd/tokenservice/serve.go` | Fallback value for `--openchami-id`; default `oc-F00F00F00` |
+| `TOKENSMITH_CONFIG` | `cmd/tokenservice/serve.go` | Fallback value for `--config`; empty means built-in `groupScopes` |
+| `TOKENSMITH_KEY_DIR` | `cmd/tokenservice/serve.go` | Fallback value for `--key-dir`; empty writes key files to the working directory |
 | `OIDC_CLIENT_ID` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-client-id` |
 | `OIDC_CLIENT_SECRET` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-client-secret` |
 | `TOKENSMITH_OIDC_CLAIM_POLICY` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-claim-policy`; valid values: `enriched`, `csm-keycloak` |

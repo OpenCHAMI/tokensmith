@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/tokenservice"
@@ -18,10 +20,40 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the token service",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if configPath == "" {
+			configPath = os.Getenv("TOKENSMITH_CONFIG")
+		}
+
 		// Load configuration
 		fileConfig, err := tokenservice.LoadFileConfig(configPath)
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
+		}
+
+		// Get service identity settings from environment variables if not
+		// provided via flags. These flags carry non-empty defaults, so the
+		// flag must be checked for explicit use rather than for emptiness.
+		envFallback(cmd, "issuer", "TOKENSMITH_ISSUER", &issuer)
+		envFallback(cmd, "cluster-id", "TOKENSMITH_CLUSTER_ID", &clusterID)
+		envFallback(cmd, "openchami-id", "TOKENSMITH_OPENCHAMI_ID", &openCHAMIID)
+		envFallback(cmd, "oidc-issuer", "TOKENSMITH_OIDC_PROVIDER", &oidcIssuerURL)
+		if !cmd.Flags().Changed("port") {
+			if value := strings.TrimSpace(os.Getenv("TOKENSMITH_PORT")); value != "" {
+				parsed, err := strconv.Atoi(value)
+				if err != nil {
+					return fmt.Errorf("invalid TOKENSMITH_PORT %q: %w", value, err)
+				}
+				port = parsed
+			}
+		}
+		if keyDir == "" {
+			keyDir = os.Getenv("TOKENSMITH_KEY_DIR")
+		}
+		if strings.TrimSpace(issuer) == "" {
+			return fmt.Errorf("issuer is required: set --issuer or TOKENSMITH_ISSUER")
+		}
+		if strings.TrimSpace(oidcIssuerURL) == "" {
+			return fmt.Errorf("OIDC issuer is required: set --oidc-issuer or TOKENSMITH_OIDC_PROVIDER")
 		}
 
 		// Get OIDC credentials from environment variables if not provided via flags
@@ -138,13 +170,25 @@ var serveCmd = &cobra.Command{
 	},
 }
 
+// envFallback applies the value of env to target when flag was not explicitly
+// provided on the command line. Flags with non-empty defaults cannot use the
+// emptiness check other environment fallbacks in this file rely on.
+func envFallback(cmd *cobra.Command, flag, env string, target *string) {
+	if cmd.Flags().Changed(flag) {
+		return
+	}
+	if value := strings.TrimSpace(os.Getenv(env)); value != "" {
+		*target = value
+	}
+}
+
 func init() {
 	// Serve command flags
-	serveCmd.Flags().StringVar(&issuer, "issuer", "http://tokensmith:8080", "Token issuer identifier")
+	serveCmd.Flags().StringVar(&issuer, "issuer", "", "Token issuer identifier (required; or set TOKENSMITH_ISSUER)")
 	serveCmd.Flags().IntVar(&port, "port", 8080, "HTTP server port")
 	serveCmd.Flags().StringVar(&clusterID, "cluster-id", "cl-F00F00F00", "Unique identifier for this cluster")
 	serveCmd.Flags().StringVar(&openCHAMIID, "openchami-id", "oc-F00F00F00", "Unique identifier for this instance of OpenCHAMI")
-	serveCmd.Flags().StringVar(&oidcIssuerURL, "oidc-issuer", "http://hydra:4444", "OIDC provider issuer URL")
+	serveCmd.Flags().StringVar(&oidcIssuerURL, "oidc-issuer", "", "OIDC provider issuer URL (required; or set TOKENSMITH_OIDC_PROVIDER)")
 	serveCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OIDC client ID (or set OIDC_CLIENT_ID env var)")
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
 	serveCmd.Flags().StringVar(&oidcClaimPolicy, "oidc-claim-policy", "", "OIDC claim policy: enriched or csm-keycloak (or set TOKENSMITH_OIDC_CLAIM_POLICY)")
