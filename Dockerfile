@@ -14,15 +14,15 @@ RUN mkdir -p /tokensmith/data
 
 STOPSIGNAL SIGTERM
 
-# Set environment variables with defaults
-ENV TOKENSMITH_ISSUER="https://tokensmith.openchami.dev"
+# Set environment variables with defaults. TOKENSMITH_ISSUER and
+# TOKENSMITH_OIDC_PROVIDER are deliberately absent: both are required and
+# must be supplied by the deployment.
 ENV TOKENSMITH_CLUSTER_ID="default-cluster"
 ENV TOKENSMITH_OPENCHAMI_ID="default-openchami"
-ENV TOKENSMITH_CONFIG="/tokensmith/config.json"
-ENV TOKENSMITH_KEY_DIR="/tokensmith/keys"
-ENV TOKENSMITH_RFC8693_BOOTSTRAP_STORE="/tokensmith/data/bootstrap-tokens"
-ENV TOKENSMITH_RFC8693_REFRESH_STORE="/tokensmith/data/refresh-tokens"
-ENV TOKENSMITH_OIDC_PROVIDER="http://hydra:4444"
+ENV TOKENSMITH_CONFIG="/etc/tokensmith/config.json"
+ENV TOKENSMITH_KEY_DIR="/tokensmith/data/keys"
+ENV TOKENSMITH_RFC8693_BOOTSTRAP_STORE="/tokensmith/data/bootstrap"
+ENV TOKENSMITH_RFC8693_REFRESH_STORE="/tokensmith/data/refresh"
 ENV TOKENSMITH_PORT="8080"
 
 VOLUME /tokensmith/keys
@@ -32,11 +32,8 @@ VOLUME /tokensmith/data
 
 # Get the tokensmith service from the goreleaser build.
 COPY tokensmith /usr/local/bin/
-# Copy entrypoint and update perms
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
 # nobody 65534:65534
 USER 65534:65534
 
-ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/tokensmith"]
+CMD ["serve"]

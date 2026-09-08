@@ -53,3 +53,6 @@ tests/integration/authelia/config/oidc-key.pem
 CLAUDE.md
 CURSOR/
 .omo/
+
+
+!packaging/**/configs/*

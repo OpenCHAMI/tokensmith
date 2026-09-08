@@ -97,7 +97,9 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
 
 1. Restart TokenSmith with the flag:
    ```bash
-   tokensmith serve --enable-local-user-mint
+   tokensmith serve --enable-local-user-mint \
+     --issuer http://localhost:8080 \
+     --oidc-issuer https://issuer.example
    ```
 
 2. If running remote TokenSmith, tunnel through localhost:
@@ -307,6 +309,8 @@ echo $LOG_LEVEL
 1. Enable debug logging:
    ```bash
    export LOG_LEVEL="debug"
+   export TOKENSMITH_ISSUER="http://localhost:8080"
+   export TOKENSMITH_OIDC_PROVIDER="https://issuer.example"
    tokensmith serve
    ```
 

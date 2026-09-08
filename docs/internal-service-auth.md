@@ -197,6 +197,8 @@ Start TokenSmith with durable stores:
 tokensmith serve \
   --config ./config.json \
   --key-dir ./keys \
+  --issuer http://localhost:8080 \
+  --oidc-issuer https://issuer.example \
   --rfc8693-bootstrap-store ./data/bootstrap-tokens \
   --rfc8693-refresh-store ./data/refresh-tokens
 ```

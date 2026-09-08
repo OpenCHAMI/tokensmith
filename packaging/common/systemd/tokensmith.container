@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 OpenCHAMI Contributors
+# SPDX-License-Identifier: MIT
+
+[Unit]
+Description=The %N container
+PartOf=openchami.target
+
+[Container]
+ContainerName=%N
+HostName=%N
+Image=ghcr.io/openchami/%N:@IMAGE_TAG@
+Exec=serve --enable-local-user-mint
+
+# Volumes
+Volume=/etc/openchami/configs/%N.json:/etc/%N/config.json:Z
+Volume=tokensmith-data.volume:/%N/data:Z,U
+
+[Service]
+Restart=always

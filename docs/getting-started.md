@@ -56,6 +56,7 @@ Start TokenSmith:
 tokensmith serve \
   --config ./config.json \
   --key-dir ./keys \
+  --issuer http://localhost:8080 \
   --oidc-issuer https://issuer.example \
   --oidc-client-id your-client-id \
   --oidc-claim-policy enriched \
@@ -111,6 +112,8 @@ For JWKS validation behavior, caching, and failure semantics, see:
 tokensmith serve \
   --config ./config.json \
   --key-dir ./keys \
+  --issuer http://localhost:8080 \
+  --oidc-issuer https://issuer.example \
   --enable-local-user-mint
 ```
 
@@ -178,6 +181,7 @@ If your service only needs internal service-to-service AuthN/AuthZ, you can skip
 podman run -d --name tokensmith \
    -p 8080:8080 \
    -e TOKENSMITH_ISSUER="http://tokensmith:8080" \
+   -e TOKENSMITH_OIDC_PROVIDER="https://issuer.example" \
    -e TOKENSMITH_PORT="8080" \
    -e TOKENSMITH_CLUSTER_ID="cluster-1" \
    -e TOKENSMITH_OPENCHAMI_ID="openchami-1" \
