@@ -5,8 +5,13 @@
 package tokenservice
 
 import (
+	"context"
+	"crypto/x509"
+	"errors"
+	"net"
 	"strings"
 
+	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/rs/zerolog/log"
 )
 
@@ -30,4 +35,116 @@ func (s *TokenService) logStartupSummary(addr string, tlsEnabled bool) {
 		Bool(string(LogFieldLocalUserMintEnabled), s.Config.EnableLocalUserMint).
 		Str(string(LogFieldListenAddr), addr).
 		Msg(string(LogEventTokenSmithStarted))
+}
+
+func (s *TokenService) logOIDCProviderValidation(ctx context.Context) {
+	if !s.hasConfiguredOIDCProvider() {
+		return
+	}
+
+	provider := s.currentOIDCProvider()
+	if provider == nil {
+		s.logOIDCProviderValidationFailure(nil, LogFailureClientConfigMissing, "get provider metadata")
+		return
+	}
+
+	log.Info().
+		Str(string(LogFieldComponent), "tokenservice").
+		Str(string(LogFieldEvent), string(LogEventOIDCProviderValidationStarted)).
+		Str(string(LogFieldHandler), string(LogHandlerStartup)).
+		Str(string(LogFieldOIDCIssuer), s.Config.OIDCIssuerURL).
+		Str(string(LogFieldOIDCClientID), s.Config.OIDCClientID).
+		Str(string(LogFieldOIDCClaimPolicy), string(s.Config.OIDCClaimPolicy)).
+		Bool(string(LogFieldOIDCCAConfigured), strings.TrimSpace(s.Config.OIDCCAPath) != "").
+		Msg(string(LogEventOIDCProviderValidationStarted))
+
+	metadata, err := provider.GetProviderMetadata(ctx)
+	if err != nil {
+		s.logOIDCProviderValidationFailure(err, classifyProviderValidationFailure(err, LogFailureProviderMetadata), providerOperation(err, "get provider metadata"))
+		return
+	}
+	jwks, err := provider.GetJWKS(ctx)
+	if err != nil {
+		s.logOIDCProviderValidationFailure(err, classifyProviderValidationFailure(err, LogFailureJWKSUnavailable), providerOperation(err, "get JWKS"))
+		return
+	}
+
+	log.Info().
+		Str(string(LogFieldComponent), "tokenservice").
+		Str(string(LogFieldEvent), string(LogEventOIDCProviderValidationOK)).
+		Str(string(LogFieldHandler), string(LogHandlerStartup)).
+		Str(string(LogFieldOIDCIssuer), s.Config.OIDCIssuerURL).
+		Str(string(LogFieldOIDCClientID), s.Config.OIDCClientID).
+		Str(string(LogFieldOIDCClaimPolicy), string(s.Config.OIDCClaimPolicy)).
+		Str(string(LogFieldMetadataIssuer), metadata.Issuer).
+		Str(string(LogFieldIntrospectionEndpointSource), introspectionEndpointSource(metadata)).
+		Int(string(LogFieldJWKSKeyCount), jwksKeyCount(jwks)).
+		Msg(string(LogEventOIDCProviderValidationOK))
+}
+
+func (s *TokenService) logOIDCProviderValidationFailure(err error, category LogFailureCategory, operation string) {
+	log.Warn().
+		Str(string(LogFieldComponent), "tokenservice").
+		Str(string(LogFieldEvent), string(LogEventOIDCProviderValidationFailed)).
+		Str(string(LogFieldHandler), string(LogHandlerStartup)).
+		Str(string(LogFieldOIDCIssuer), s.Config.OIDCIssuerURL).
+		Str(string(LogFieldOIDCClientID), s.Config.OIDCClientID).
+		Str(string(LogFieldOIDCClaimPolicy), string(s.Config.OIDCClaimPolicy)).
+		Bool(string(LogFieldOIDCCAConfigured), strings.TrimSpace(s.Config.OIDCCAPath) != "").
+		Str(string(LogFieldFailureCategory), string(category)).
+		Str(string(LogFieldProviderOp), operation).
+		Err(err).
+		Msg(string(LogEventOIDCProviderValidationFailed))
+}
+
+func classifyProviderValidationFailure(err error, fallback LogFailureCategory) LogFailureCategory {
+	if err == nil {
+		return fallback
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return LogFailureDNSLookup
+	}
+	var unknownAuthority x509.UnknownAuthorityError
+	if errors.As(err, &unknownAuthority) {
+		return LogFailureTLSValidation
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return LogFailureConnectionTimeout
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "connection refused") {
+		return LogFailureConnectionRefused
+	}
+	if errors.Is(err, oidc.ErrProviderMetadata) {
+		return LogFailureProviderMetadata
+	}
+	return fallback
+}
+
+func providerOperation(err error, fallback string) string {
+	var providerErr *oidc.ProviderError
+	if errors.As(err, &providerErr) && providerErr.Operation != "" {
+		return providerErr.Operation
+	}
+	return fallback
+}
+
+func introspectionEndpointSource(metadata *oidc.ProviderMetadata) string {
+	if metadata != nil && strings.TrimSpace(metadata.TokenIntrospectionEndpoint) != "" {
+		return "token_introspection_endpoint"
+	}
+	return "introspection_endpoint"
+}
+
+func jwksKeyCount(jwks interface{}) int {
+	jwksMap, ok := jwks.(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	keys, ok := jwksMap["keys"].([]interface{})
+	if !ok {
+		return 0
+	}
+	return len(keys)
 }
