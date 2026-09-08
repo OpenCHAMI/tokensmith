@@ -133,7 +133,7 @@ curl -s -X POST http://localhost:8080/oauth/exchange \
   -d '{"scope":["read"],"target_service":"smd"}'
 ```
 
-Failure logs use `audit_event=token_exchange_failed` with bounded categories such as `upstream_unavailable`, `upstream_rejected`, `invalid_response`, `missing_claim`, `invalid_claim`, and `inactive_token`.
+Failure logs use `audit_event=token_exchange_failed` with bounded categories such as `provider_metadata`, `jwks_unavailable`, `jwks_invalid`, `upstream_unavailable`, `upstream_rejected`, `invalid_response`, `invalid_token`, `inactive_token`, `missing_claim`, `invalid_claim`, `scope_not_granted`, and `generated_claim_validation`.
 
 ### `POST /oauth/token`
 

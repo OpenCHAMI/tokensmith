@@ -130,10 +130,10 @@ func exchangeFailureCategory(err error) string {
 
 func exchangeRejectedScope(err error) (string, []string) {
 	var claimsErr *ExchangeClaimsError
-	if !errors.As(err, &claimsErr) || !errors.Is(claimsErr.Kind, ErrExchangeScopeNotGranted) || len(claimsErr.Claims) == 0 {
+	if !errors.As(err, &claimsErr) || !errors.Is(claimsErr.Kind, ErrExchangeScopeNotGranted) || claimsErr.RejectedScope == "" {
 		return "", nil
 	}
-	return claimsErr.Claims[0], append([]string(nil), claimsErr.Allowed...)
+	return claimsErr.RejectedScope, append([]string(nil), claimsErr.Allowed...)
 }
 
 func exchangeMissingClaimNames(err error) []string {

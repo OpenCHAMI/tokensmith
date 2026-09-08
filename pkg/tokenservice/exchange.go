@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -97,7 +96,6 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		for scope := range scopesSet {
 			scopes = append(scopes, scope)
 		}
-		slices.Sort(scopes)
 		claims.Scope = scopes
 	}
 

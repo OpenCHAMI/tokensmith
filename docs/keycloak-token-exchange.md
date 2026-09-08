@@ -131,13 +131,18 @@ Common `failure_category` values:
 
 | Category | Meaning |
 | --- | --- |
+| `provider_metadata` | OIDC discovery metadata was unreachable, malformed, or missing required fields. |
+| `jwks_unavailable` | TokenSmith could not fetch upstream JWKS during validation. |
+| `jwks_invalid` | Upstream JWKS was fetched but was empty or structurally unusable. |
 | `upstream_unavailable` | TokenSmith could not reach the OIDC provider or introspection endpoint. |
 | `upstream_rejected` | The provider returned a non-200 introspection response. |
 | `invalid_response` | Provider metadata, JWKS, or introspection JSON was malformed. |
+| `invalid_token` | The upstream token failed issuer, audience/client binding, algorithm, or key validation. |
+| `inactive_token` | The provider reported the token as inactive. |
 | `missing_claim` | The token lacked required claim names for the selected claim policy. |
 | `invalid_claim` | A present or mapped claim could not satisfy TokenSmith's JWT contract. |
+| `scope_not_granted` | The exchange request asked for a scope that was not derived from the token's mapped groups. |
 | `generated_claim_validation` | TokenSmith built a downstream JWT but its generated claims failed validation. Check generated-token lifetime, audience, and required compatibility fields. |
-| `inactive_token` | The provider reported the token as inactive. |
 
 TokenSmith logs missing claim names, not claim values. It does not log bearer tokens, bootstrap tokens, refresh tokens, client secrets, Authorization headers, or raw upstream responses.
 
