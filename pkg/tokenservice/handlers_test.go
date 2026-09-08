@@ -126,6 +126,123 @@ func TestTokenExchangeHandler_AcceptsCaseInsensitiveBearer(t *testing.T) {
 	assert.Equal(t, "Bearer", tokenResp["token_type"])
 }
 
+func TestTokenExchangeHandler_LogsSuccessfulExchangeWithoutToken(t *testing.T) {
+	const tokenValue = "secret-success-token-never-log"
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	svc := newTestTokenService(t, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-test",
+		OpenCHAMIID: "openchami-test",
+		GroupScopes: map[string][]string{
+			"viewer": {"read"},
+		},
+	})
+	provider := oidc.NewMockProvider()
+	provider.IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+		assert.Equal(t, tokenValue, token)
+		now := time.Now()
+		return &oidc.IntrospectionResponse{
+			Active:    true,
+			Username:  "case-user",
+			ExpiresAt: now.Add(time.Hour).Unix(),
+			IssuedAt:  now.Unix(),
+			Claims: map[string]interface{}{
+				"aud":          []interface{}{"svc-target"},
+				"groups":       []interface{}{"viewer"},
+				"auth_level":   "IAL2",
+				"auth_factors": float64(2),
+				"auth_methods": []interface{}{"password", "mfa"},
+				"session_id":   "sid-case-user",
+				"session_exp":  float64(now.Add(time.Hour).Unix()),
+				"auth_events":  []interface{}{"login"},
+			},
+			TokenType: "Bearer",
+		}, nil
+	}
+	svc.OIDCProvider = provider
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth/exchange", strings.NewReader(`{"scope":["read"],"target_service":"svc-target"}`))
+	req.Header.Set("Authorization", "Bearer "+tokenValue)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	svc.TokenExchangeHandler(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code)
+	entries := decodeLogEntries(t, logs.Bytes())
+	require.Len(t, entries, 1)
+	entry := entries[0]
+	assert.Equal(t, string(LogEventTokenExchangeSucceeded), entry[string(LogFieldAuditEvent)])
+	assert.Equal(t, string(LogHandlerOAuthExchange), entry[string(LogFieldHandler)])
+	assert.Equal(t, "case-user", entry[string(LogFieldSubject)])
+	assert.Equal(t, []interface{}{"svc-target"}, entry[string(LogFieldAudience)])
+	assert.Equal(t, []interface{}{"read"}, entry[string(LogFieldRequestedScopes)])
+	assert.Equal(t, []interface{}{"read"}, entry[string(LogFieldDerivedScopes)])
+	assert.Equal(t, "svc-target", entry[string(LogFieldTargetService)])
+	assert.NotContains(t, logs.String(), tokenValue)
+}
+
+func TestTokenExchangeHandler_LogsScopeRejectionWithSafeContext(t *testing.T) {
+	const tokenValue = "secret-scope-token-never-log"
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	svc := newTestTokenService(t, Config{
+		Issuer:      "http://tokensmith.test",
+		ClusterID:   "cluster-test",
+		OpenCHAMIID: "openchami-test",
+		GroupScopes: map[string][]string{
+			"viewer": {"read"},
+		},
+	})
+	provider := oidc.NewMockProvider()
+	provider.IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
+		assert.Equal(t, tokenValue, token)
+		now := time.Now()
+		return &oidc.IntrospectionResponse{
+			Active:    true,
+			Username:  "case-user",
+			ExpiresAt: now.Add(time.Hour).Unix(),
+			IssuedAt:  now.Unix(),
+			Claims: map[string]interface{}{
+				"aud":          []interface{}{"svc-target"},
+				"groups":       []interface{}{"viewer"},
+				"auth_level":   "IAL2",
+				"auth_factors": float64(2),
+				"auth_methods": []interface{}{"password", "mfa"},
+				"session_id":   "sid-case-user",
+				"session_exp":  float64(now.Add(time.Hour).Unix()),
+				"auth_events":  []interface{}{"login"},
+			},
+			TokenType: "Bearer",
+		}, nil
+	}
+	svc.OIDCProvider = provider
+
+	req := httptest.NewRequest(http.MethodPost, "/oauth/exchange", strings.NewReader(`{"scope":["admin"],"target_service":"svc-target"}`))
+	req.Header.Set("Authorization", "Bearer "+tokenValue)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	svc.TokenExchangeHandler(resp, req)
+
+	require.Equal(t, http.StatusUnauthorized, resp.Code)
+	entries := decodeLogEntries(t, logs.Bytes())
+	require.Len(t, entries, 1)
+	entry := entries[0]
+	assert.Equal(t, string(LogEventTokenExchangeFailed), entry[string(LogFieldAuditEvent)])
+	assert.Equal(t, string(LogFailureScopeNotGranted), entry[string(LogFieldFailureCategory)])
+	assert.Equal(t, []interface{}{"admin"}, entry[string(LogFieldRequestedScopes)])
+	assert.Equal(t, []interface{}{"read"}, entry[string(LogFieldDerivedScopes)])
+	assert.Equal(t, "admin", entry[string(LogFieldRejectedScope)])
+	assert.Equal(t, "svc-target", entry[string(LogFieldTargetService)])
+	assert.NotContains(t, logs.String(), tokenValue)
+}
+
 func TestTokenExchangeHandler_LogsMissingClaimCategoryWithoutToken(t *testing.T) {
 	const tokenValue = "secret-bearer-token-never-log"
 	var logs bytes.Buffer

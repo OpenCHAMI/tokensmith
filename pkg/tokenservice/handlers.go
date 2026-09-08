@@ -120,12 +120,22 @@ func (s *TokenService) withCurrentOIDCProvider(next http.Handler) http.Handler {
 
 		introspection, err := provider.IntrospectToken(r.Context(), tokenValue)
 		if err != nil {
-			logExchangeFailure(r, s.Config.OIDCClaimPolicy, http.StatusUnauthorized, exchangeFailureCategory(err), 0, false, err)
+			logExchangeFailure(exchangeLogContext{
+				Request:     r,
+				ClaimPolicy: s.Config.OIDCClaimPolicy,
+				StatusCode:  http.StatusUnauthorized,
+				Err:         err,
+			})
 			http.Error(w, "Token introspection failed", http.StatusUnauthorized)
 			return
 		}
 		if !introspection.Active {
-			logExchangeFailure(r, s.Config.OIDCClaimPolicy, http.StatusUnauthorized, "inactive_token", 0, false, nil)
+			logExchangeFailure(exchangeLogContext{
+				Request:     r,
+				ClaimPolicy: s.Config.OIDCClaimPolicy,
+				StatusCode:  http.StatusUnauthorized,
+				Err:         ErrExchangeInactiveToken,
+			})
 			http.Error(w, "Token is not active", http.StatusUnauthorized)
 			return
 		}
@@ -217,9 +227,26 @@ func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Reque
 
 	tokenValue, err := s.ExchangeToken(ctx, token)
 	if err != nil {
-		logExchangeFailure(r, s.Config.OIDCClaimPolicy, http.StatusUnauthorized, exchangeFailureCategory(err), len(payload.Scope), payload.TargetService != "", err)
+		logExchangeFailure(exchangeLogContext{
+			Request:         r,
+			ClaimPolicy:     s.Config.OIDCClaimPolicy,
+			StatusCode:      http.StatusUnauthorized,
+			RequestedScopes: payload.Scope,
+			TargetService:   payload.TargetService,
+			Err:             err,
+		})
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
+	}
+	claims, _, err := s.TokenManager.ParseToken(tokenValue)
+	if err == nil {
+		logExchangeSuccess(exchangeLogContext{
+			Request:         r,
+			ClaimPolicy:     s.Config.OIDCClaimPolicy,
+			RequestedScopes: payload.Scope,
+			TargetService:   payload.TargetService,
+			Claims:          claims,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -204,7 +204,7 @@ func TestExchangeToken_RequestedScopesCannotExceedDerivedScopes(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Empty(t, tokenValue)
-	assert.True(t, errors.Is(err, ErrExchangeInvalidClaim), "error %v should be invalid-claim", err)
+	assert.True(t, errors.Is(err, ErrExchangeScopeNotGranted), "error %v should be scope-not-granted", err)
 }
 
 func TestExchangeToken_CSMKeycloakPolicyPreservesExplicitEnrichedClaims(t *testing.T) {

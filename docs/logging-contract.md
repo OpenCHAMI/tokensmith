@@ -51,9 +51,12 @@ Every structured TokenSmith log should use stable snake_case fields. Use the sam
 | `listen_addr` | Local address TokenSmith is configured to serve on. |
 | `upstream_status_code` | HTTP status returned by an upstream dependency. |
 | `requested_scopes` | Scopes requested by the caller. |
+| `requested_scope_count` | Number of scopes requested by the caller. |
 | `derived_scopes` | Scopes derived from trusted TokenSmith policy or upstream claims. |
 | `rejected_scope` | Single requested scope rejected by policy. |
 | `target_service` | Requested downstream OpenCHAMI service audience. |
+| `has_target_service` | Whether the exchange request included a target service. |
+| `generated_token_lifetime_seconds` | Lifetime of the generated TokenSmith token. |
 
 ## Handler names
 
