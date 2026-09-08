@@ -5,6 +5,7 @@
 package tokenservice
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -27,6 +28,8 @@ import (
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/openchami/tokensmith/pkg/token"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -369,6 +372,50 @@ func TestStart_ServiceIdentityCAErrorNamesInboundMTLS(t *testing.T) {
 	assert.Contains(t, err.Error(), "--service-identity-ca")
 	assert.Contains(t, err.Error(), "TOKENSMITH_SERVICE_IDENTITY_CA")
 	assert.Contains(t, err.Error(), "--oidc-ca only for outbound upstream OIDC TLS")
+}
+
+func TestLogStartupSummaryEmitsContractFieldsWithoutSecrets(t *testing.T) {
+	var logs bytes.Buffer
+	previousLogger := log.Logger
+	log.Logger = zerolog.New(&logs)
+	t.Cleanup(func() { log.Logger = previousLogger })
+
+	service := &TokenService{Config: Config{
+		Issuer:                     "http://tokensmith.test",
+		ClusterID:                  "cluster-a",
+		OpenCHAMIID:                "openchami-a",
+		EnableLocalUserMint:        true,
+		OIDCIssuerURL:              "https://keycloak.example/realms/shasta",
+		OIDCClientID:               "openchami-tokensmith",
+		OIDCClientSecret:           "super-secret-client-secret",
+		OIDCClaimPolicy:            OIDCClaimPolicyCSMKeycloak,
+		OIDCCAPath:                 filepath.Join(t.TempDir(), "oidc-ca.pem"),
+		MaxExchangeSessionLifetime: 24 * time.Hour,
+		RFC8693BootstrapStorePath:  filepath.Join(t.TempDir(), "bootstrap"),
+		RFC8693RefreshStorePath:    filepath.Join(t.TempDir(), "refresh"),
+	}}
+
+	service.logStartupSummary(":8080", true)
+
+	var entry map[string]interface{}
+	require.NoError(t, json.Unmarshal(logs.Bytes(), &entry))
+	assert.Equal(t, "tokenservice", entry[string(LogFieldComponent)])
+	assert.Equal(t, string(LogEventTokenSmithStarted), entry[string(LogFieldEvent)])
+	assert.Equal(t, string(LogHandlerStartup), entry[string(LogFieldHandler)])
+	assert.Equal(t, "http://tokensmith.test", entry[string(LogFieldIssuer)])
+	assert.Equal(t, "cluster-a", entry[string(LogFieldClusterID)])
+	assert.Equal(t, "openchami-a", entry[string(LogFieldOpenCHAMIID)])
+	assert.Equal(t, "https://keycloak.example/realms/shasta", entry[string(LogFieldOIDCIssuer)])
+	assert.Equal(t, "openchami-tokensmith", entry[string(LogFieldOIDCClientID)])
+	assert.Equal(t, string(OIDCClaimPolicyCSMKeycloak), entry[string(LogFieldOIDCClaimPolicy)])
+	assert.Equal(t, true, entry[string(LogFieldOIDCCAConfigured)])
+	assert.Equal(t, float64(86400), entry[string(LogFieldMaxExchangeSessionLifetimeSeconds)])
+	assert.Equal(t, true, entry[string(LogFieldTLSEnabled)])
+	assert.Equal(t, false, entry[string(LogFieldServiceIdentityMTLSEnabled)])
+	assert.Equal(t, true, entry[string(LogFieldLocalUserMintEnabled)])
+	assert.Equal(t, ":8080", entry[string(LogFieldListenAddr)])
+	assert.NotContains(t, logs.String(), "super-secret-client-secret")
+	assert.NotContains(t, logs.String(), string(ForbiddenLogFieldOIDCClientSecret))
 }
 
 func newOIDCTLSService(t *testing.T, config Config) *TokenService {

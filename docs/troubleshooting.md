@@ -8,6 +8,8 @@ SPDX-License-Identifier: MIT
 
 This guide addresses common issues and how to diagnose and resolve them.
 
+For stable TokenSmith log fields, event names, failure categories, and redaction rules, see [TokenSmith logging contract](./logging-contract.md).
+
 ## Token exchange fails
 
 ### Symptom: "401 Unauthorized" when exchanging an OIDC token for a TokenSmith JWT

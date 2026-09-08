@@ -304,12 +304,14 @@ func (s *TokenService) Start(port int) error {
 			server.TLSConfig.ClientCAs = s.serviceIdentityCAPool
 		}
 
+		s.logStartupSummary(addr, true)
 		fmt.Printf("Starting TLS server on %s\n", addr)
 		return server.ListenAndServeTLS(tlsCert, tlsKey)
 	default:
 		if s.serviceIdentityCAPool != nil {
 			return fmt.Errorf("service identity CA is configured via --service-identity-ca or TOKENSMITH_SERVICE_IDENTITY_CA, but TLS server cert/key are not; inbound service identity mTLS requires --tls-cert-file and --tls-key-file; use --oidc-ca only for outbound upstream OIDC TLS")
 		}
+		s.logStartupSummary(addr, false)
 		fmt.Printf("Starting server on %s\n", addr)
 		return server.ListenAndServe()
 	}

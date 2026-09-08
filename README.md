@@ -60,6 +60,7 @@ TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
 - Operations and rollout modes: [`docs/authz_operations.md`](docs/authz_operations.md)
 - Fabrica integration: [`docs/fabrica.md`](docs/fabrica.md)
 - Claims reference: [`docs/claim-reference.md`](docs/claim-reference.md)
+- Logging contract: [`docs/logging-contract.md`](docs/logging-contract.md)
 - CLI reference: [`docs/cli-reference.md`](docs/cli-reference.md)
 - Security notes: [`docs/security-notes.md`](docs/security-notes.md)
 
