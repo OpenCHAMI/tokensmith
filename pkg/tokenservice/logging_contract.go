@@ -53,8 +53,18 @@ const (
 	LogFieldJWKSKeyCount LogField = "jwks_key_count"
 	// LogFieldTokenHashPrefix correlates opaque token attempts using a bounded hash prefix.
 	LogFieldTokenHashPrefix LogField = "token_hash_prefix"
+	// LogFieldIssuedTokenHashPrefix correlates issued access tokens without logging them.
+	LogFieldIssuedTokenHashPrefix LogField = "issued_token_hash_prefix"
+	// LogFieldPresentedTokenHashPrefix correlates the caller-presented token hash.
+	LogFieldPresentedTokenHashPrefix LogField = "presented_token_hash_prefix"
+	// LogFieldCurrentTokenHashPrefix correlates the current valid token hash in a family.
+	LogFieldCurrentTokenHashPrefix LogField = "current_token_hash_prefix"
 	// LogFieldRefreshFamilyID identifies the refresh-token family without logging tokens.
 	LogFieldRefreshFamilyID LogField = "refresh_family_id"
+	// LogFieldUsageCount records refresh-token family usage count.
+	LogFieldUsageCount LogField = "usage_count"
+	// LogFieldLastUsedAt records the last successful refresh time for a family.
+	LogFieldLastUsedAt LogField = "last_used_at"
 	// LogFieldPolicyVersion records the authz policy version or hash used for a decision.
 	LogFieldPolicyVersion LogField = "policy_version"
 	// LogFieldOIDCIssuer records the configured upstream OIDC issuer URL.
@@ -217,7 +227,12 @@ func loggingContractFields() []LogField {
 		LogFieldIntrospectionEndpointSource,
 		LogFieldJWKSKeyCount,
 		LogFieldTokenHashPrefix,
+		LogFieldIssuedTokenHashPrefix,
+		LogFieldPresentedTokenHashPrefix,
+		LogFieldCurrentTokenHashPrefix,
 		LogFieldRefreshFamilyID,
+		LogFieldUsageCount,
+		LogFieldLastUsedAt,
 		LogFieldPolicyVersion,
 		LogFieldOIDCIssuer,
 		LogFieldOIDCClientID,

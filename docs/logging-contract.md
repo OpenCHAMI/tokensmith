@@ -36,7 +36,12 @@ Every structured TokenSmith log should use stable snake_case fields. Use the sam
 | `introspection_endpoint_source` | Discovery metadata key used for token introspection, such as `token_introspection_endpoint`. |
 | `jwks_key_count` | Number of keys found in upstream JWKS during provider validation. |
 | `token_hash_prefix` | Bounded hash prefix for correlating opaque token attempts. |
+| `issued_token_hash_prefix` | Bounded hash prefix for correlating issued access tokens without logging them. |
+| `presented_token_hash_prefix` | Bounded hash prefix for the token presented by the caller. |
+| `current_token_hash_prefix` | Bounded hash prefix for the currently valid token in a refresh family. |
 | `refresh_family_id` | Refresh-token family identifier. |
+| `usage_count` | Refresh-token family usage count. |
+| `last_used_at` | Last successful refresh time for a refresh family. |
 | `policy_version` | Authorization policy version or policy hash where available. |
 | `oidc_issuer` | Configured upstream OIDC issuer. |
 | `oidc_client_id` | Configured upstream OIDC client ID. |
