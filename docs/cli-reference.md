@@ -115,8 +115,8 @@ tokensmith serve \
 TokenSmith resolves the upstream token introspection endpoint in this order:
 
 1. `--oidc-introspection-endpoint` or `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT`
-2. discovery metadata `token_introspection_endpoint`
-3. discovery metadata `introspection_endpoint`
+2. discovery metadata `introspection_endpoint`
+3. compatibility metadata `token_introspection_endpoint`
 
 Set the explicit endpoint when the issuer's discovery document omits both
 metadata keys, such as some Vault Identity OIDC provider configurations.

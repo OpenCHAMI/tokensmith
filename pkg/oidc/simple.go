@@ -141,7 +141,7 @@ func (p *SimpleProvider) normalizeProviderMetadata(metadata *ProviderMetadata) {
 		metadata.IntrospectionEndpoint = p.introspectionEndpointOverride
 		return
 	}
-	if metadata.TokenIntrospectionEndpoint != "" {
+	if metadata.IntrospectionEndpoint == "" {
 		metadata.IntrospectionEndpoint = metadata.TokenIntrospectionEndpoint
 	}
 }

@@ -147,9 +147,9 @@ func TestSimpleProvider_GetProviderMetadataNormalizesIntrospectionEndpointAliase
 			wantPath: "http://example.test/introspect",
 		},
 		{
-			name:     "oauth metadata endpoint takes precedence when both exist",
+			name:     "standard introspection endpoint takes precedence when both exist",
 			body:     `{"issuer":"issuer","introspection_endpoint":"http://example.test/legacy","token_introspection_endpoint":"http://example.test/oauth","jwks_uri":"http://example.test/jwks"}`,
-			wantPath: "http://example.test/oauth",
+			wantPath: "http://example.test/legacy",
 		},
 	}
 

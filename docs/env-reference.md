@@ -35,7 +35,7 @@ OIDC runtime configuration notes:
 
 - `OIDC_CLIENT_SECRET` is environment-only and is not persisted by OIDC runtime configure workflows.
 - `tokensmith oidc configure` updates issuer/client-id and, when supplied, claim policy. It expects the running service to already have `OIDC_CLIENT_SECRET` set.
-- `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT` is optional. When empty, TokenSmith uses `token_introspection_endpoint` from discovery metadata, then `introspection_endpoint`.
+- `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT` is optional. When empty, TokenSmith uses `introspection_endpoint` from discovery metadata, then the compatibility alias `token_introspection_endpoint`.
 - `TOKENSMITH_OIDC_CLAIM_POLICY` defaults to `enriched`; use `csm-keycloak` only for CSM Keycloak bearer-token exchange.
 - `TOKENSMITH_OIDC_CA` affects outbound HTTPS validation for OIDC discovery, JWKS, and introspection only. It is separate from `TOKENSMITH_SERVICE_IDENTITY_CA`, which trusts inbound service-identity client certificates.
 - `TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME` defaults to `24h`. Longer values are explicit risk acceptance for longer generated TokenSmith tokens; exchanged tokens are still capped by upstream `exp` and `session_exp`.

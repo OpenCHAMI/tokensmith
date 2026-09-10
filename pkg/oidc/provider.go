@@ -34,7 +34,8 @@ type ProviderMetadata struct {
 	// IntrospectionEndpoint is the URL of the provider's token introspection endpoint
 	IntrospectionEndpoint string `json:"introspection_endpoint"`
 
-	// TokenIntrospectionEndpoint is the OAuth 2.0 authorization server metadata name for token introspection.
+	// TokenIntrospectionEndpoint is a non-standard compatibility alias used by
+	// some OIDC providers for token introspection.
 	TokenIntrospectionEndpoint string `json:"token_introspection_endpoint"`
 
 	// JWKSURI is the URL of the provider's JSON Web Key Set (JWKS) endpoint
