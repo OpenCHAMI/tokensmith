@@ -63,6 +63,7 @@ var serveCmd = &cobra.Command{
 		if oidcClientSecret == "" {
 			oidcClientSecret = os.Getenv("OIDC_CLIENT_SECRET")
 		}
+		envFallback(cmd, "oidc-introspection-endpoint", "TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT", &oidcIntrospectionEndpoint)
 		if oidcClaimPolicy == "" {
 			oidcClaimPolicy = os.Getenv("TOKENSMITH_OIDC_CLAIM_POLICY")
 		}
@@ -117,6 +118,7 @@ var serveCmd = &cobra.Command{
 			OIDCIssuerURL:              oidcIssuerURL,
 			OIDCClientID:               oidcClientID,
 			OIDCClientSecret:           oidcClientSecret,
+			OIDCIntrospectionEndpoint:  oidcIntrospectionEndpoint,
 			OIDCClaimPolicy:            claimPolicy,
 			OIDCCAPath:                 oidcCAPath,
 			MaxExchangeSessionLifetime: maxExchangeLifetime,
@@ -191,6 +193,7 @@ func init() {
 	serveCmd.Flags().StringVar(&oidcIssuerURL, "oidc-issuer", "", "OIDC provider issuer URL (required; or set TOKENSMITH_OIDC_PROVIDER)")
 	serveCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OIDC client ID (or set OIDC_CLIENT_ID env var)")
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
+	serveCmd.Flags().StringVar(&oidcIntrospectionEndpoint, "oidc-introspection-endpoint", "", "OIDC token introspection endpoint override (or set TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT)")
 	serveCmd.Flags().StringVar(&oidcClaimPolicy, "oidc-claim-policy", "", "OIDC claim policy: enriched or csm-keycloak (or set TOKENSMITH_OIDC_CLAIM_POLICY)")
 	serveCmd.Flags().StringVar(&oidcCAPath, "oidc-ca", "", "Path to PEM CA bundle trusted for upstream OIDC TLS (or set TOKENSMITH_OIDC_CA)")
 	serveCmd.Flags().StringVar(&maxExchangeSessionLifetime, "max-exchange-session-lifetime", "", "Maximum TokenSmith session lifetime for exchanged OIDC tokens, e.g. 24h or 168h (or set TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME)")

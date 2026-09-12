@@ -44,6 +44,12 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
       -d '{"target_service":"smd"}'
     ```
 
+   If the error says the introspection endpoint is missing, inspect the
+   discovery document for `token_introspection_endpoint` or
+   `introspection_endpoint`. If neither is present, configure
+   `--oidc-introspection-endpoint` or
+   `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT` explicitly.
+
 **Resolution**:
 
 1. Ensure OIDC provider is reachable from TokenSmith:
