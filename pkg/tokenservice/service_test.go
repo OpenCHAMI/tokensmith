@@ -277,6 +277,33 @@ func TestNewTokenService_UsesOIDCCABundleForUpstreamTLS(t *testing.T) {
 	assert.Equal(t, server.URL+"/token/introspect", metadata.IntrospectionEndpoint)
 }
 
+func TestNewTokenService_UsesOIDCIntrospectionEndpointOverride(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"issuer":"` + r.Host + `","jwks_uri":"http://` + r.Host + `/jwks"}`))
+		case "/jwks":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"keys":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	service := newOIDCTLSService(t, Config{
+		OIDCIssuerURL:             server.URL,
+		OIDCClientID:              "tokensmith",
+		OIDCClientSecret:          "secret",
+		OIDCIntrospectionEndpoint: server.URL + "/override/introspect",
+	})
+
+	metadata, err := service.OIDCProvider.GetProviderMetadata(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, server.URL+"/override/introspect", metadata.IntrospectionEndpoint)
+}
+
 func TestNewTokenService_RejectsInvalidOIDCCABundle(t *testing.T) {
 	invalidCAPath := filepath.Join(t.TempDir(), "invalid-ca.pem")
 	require.NoError(t, os.WriteFile(invalidCAPath, []byte("not a certificate"), 0600))
@@ -315,6 +342,38 @@ func TestApplyOIDCProviderConfig_UsesOIDCCABundleForUpstreamTLS(t *testing.T) {
 	assert.Equal(t, "created", status)
 	assert.True(t, oidcStatus.Configured)
 	assert.Equal(t, server.URL, oidcStatus.IssuerURL)
+}
+
+func TestApplyOIDCProviderConfig_PreservesOIDCIntrospectionEndpointOverride(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"issuer":"` + r.Host + `","jwks_uri":"http://` + r.Host + `/jwks"}`))
+		case "/jwks":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"keys":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	service := newOIDCTLSService(t, Config{
+		OIDCClientSecret:          "secret",
+		OIDCIntrospectionEndpoint: server.URL + "/override/introspect",
+	})
+
+	status, oidcStatus, err := service.ApplyOIDCProviderConfig(context.Background(), OIDCProviderConfigUpdate{
+		IssuerURL: server.URL,
+		ClientID:  "tokensmith",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "created", status)
+	assert.True(t, oidcStatus.Configured)
+	metadata, err := service.OIDCProvider.GetProviderMetadata(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, server.URL+"/override/introspect", metadata.IntrospectionEndpoint)
 }
 
 func TestApplyOIDCProviderConfig_FailsWithoutOIDCCABundleForUpstreamTLS(t *testing.T) {

@@ -21,6 +21,7 @@ This page lists environment variables currently used by TokenSmith code paths.
 | `TOKENSMITH_KEY_DIR` | `cmd/tokenservice/serve.go` | Fallback value for `--key-dir`; empty writes key files to the working directory |
 | `OIDC_CLIENT_ID` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-client-id` |
 | `OIDC_CLIENT_SECRET` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-client-secret` |
+| `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-introspection-endpoint`; overrides provider discovery for token introspection |
 | `TOKENSMITH_OIDC_CLAIM_POLICY` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-claim-policy`; valid values: `enriched`, `csm-keycloak` |
 | `TOKENSMITH_OIDC_CA` | `cmd/tokenservice/serve.go` | Fallback value for `--oidc-ca` (PEM CA bundle for upstream OIDC TLS validation) |
 | `TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME` | `cmd/tokenservice/serve.go` | Fallback value for `--max-exchange-session-lifetime`; Go duration such as `24h` or `168h` |
@@ -34,6 +35,7 @@ OIDC runtime configuration notes:
 
 - `OIDC_CLIENT_SECRET` is environment-only and is not persisted by OIDC runtime configure workflows.
 - `tokensmith oidc configure` updates issuer/client-id and, when supplied, claim policy. It expects the running service to already have `OIDC_CLIENT_SECRET` set.
+- `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT` is optional. When empty, TokenSmith uses `introspection_endpoint` from discovery metadata, then the compatibility alias `token_introspection_endpoint`.
 - `TOKENSMITH_OIDC_CLAIM_POLICY` defaults to `enriched`; use `csm-keycloak` only for CSM Keycloak bearer-token exchange.
 - `TOKENSMITH_OIDC_CA` affects outbound HTTPS validation for OIDC discovery, JWKS, and introspection only. It is separate from `TOKENSMITH_SERVICE_IDENTITY_CA`, which trusts inbound service-identity client certificates.
 - `TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME` defaults to `24h`. Longer values are explicit risk acceptance for longer generated TokenSmith tokens; exchanged tokens are still capped by upstream `exp` and `session_exp`.
