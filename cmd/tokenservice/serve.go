@@ -67,6 +67,15 @@ var serveCmd = &cobra.Command{
 		if oidcClaimPolicy == "" {
 			oidcClaimPolicy = os.Getenv("TOKENSMITH_OIDC_CLAIM_POLICY")
 		}
+		oidcSettings, err := resolveOIDCProviderSettings(
+			oidcProviderMode,
+			vaultUserInfoFallbackTTL,
+			os.Getenv("TOKENSMITH_OIDC_PROVIDER_MODE"),
+			os.Getenv("TOKENSMITH_OIDC_VAULT_USERINFO_FALLBACK_TTL"),
+		)
+		if err != nil {
+			return err
+		}
 		if oidcCAPath == "" {
 			oidcCAPath = os.Getenv("TOKENSMITH_OIDC_CA")
 		}
@@ -120,8 +129,10 @@ var serveCmd = &cobra.Command{
 			OIDCClientSecret:           oidcClientSecret,
 			OIDCIntrospectionEndpoint:  oidcIntrospectionEndpoint,
 			OIDCClaimPolicy:            claimPolicy,
+			OIDCProviderMode:           oidcSettings.mode,
 			OIDCCAPath:                 oidcCAPath,
 			MaxExchangeSessionLifetime: maxExchangeLifetime,
+			VaultUserInfoFallbackTTL:   oidcSettings.vaultUserInfoFallbackTTL,
 			RFC8693BootstrapStorePath:  rfc8693BootstrapStorePath,
 			RFC8693RefreshStorePath:    rfc8693RefreshStorePath,
 			ServiceIdentityCAPath:      serviceIdentityCAPath,
@@ -195,6 +206,8 @@ func init() {
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
 	serveCmd.Flags().StringVar(&oidcIntrospectionEndpoint, "oidc-introspection-endpoint", "", "OIDC token introspection endpoint override (or set TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT)")
 	serveCmd.Flags().StringVar(&oidcClaimPolicy, "oidc-claim-policy", "", "OIDC claim policy: enriched or csm-keycloak (or set TOKENSMITH_OIDC_CLAIM_POLICY)")
+	serveCmd.Flags().StringVar(&oidcProviderMode, "oidc-provider-mode", "", "OIDC provider mode: generic or vault (or set TOKENSMITH_OIDC_PROVIDER_MODE)")
+	serveCmd.Flags().StringVar(&vaultUserInfoFallbackTTL, "oidc-vault-userinfo-fallback-ttl", "", "Fallback lifetime for Vault UserInfo responses without exp (or set TOKENSMITH_OIDC_VAULT_USERINFO_FALLBACK_TTL; default: 5m)")
 	serveCmd.Flags().StringVar(&oidcCAPath, "oidc-ca", "", "Path to PEM CA bundle trusted for upstream OIDC TLS (or set TOKENSMITH_OIDC_CA)")
 	serveCmd.Flags().StringVar(&maxExchangeSessionLifetime, "max-exchange-session-lifetime", "", "Maximum TokenSmith session lifetime for exchanged OIDC tokens, e.g. 24h or 168h (or set TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME)")
 	serveCmd.Flags().StringVar(&keyFile, "key-file", "", "Path to private key file")

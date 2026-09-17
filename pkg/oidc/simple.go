@@ -27,6 +27,8 @@ type SimpleProvider struct {
 	clientSecret                  string
 	discoveryURL                  string
 	introspectionEndpointOverride string
+	mode                          ProviderMode
+	vaultUserInfoFallbackTTL      time.Duration
 	httpClient                    *http.Client
 	metadata                      *ProviderMetadata
 	jwks                          map[string]interface{}
@@ -55,12 +57,14 @@ func WithIntrospectionEndpoint(endpoint string) SimpleProviderOption {
 // NewSimpleProvider creates a new simplified OIDC provider
 func NewSimpleProvider(issuerURL, clientID, clientSecret string, options ...SimpleProviderOption) *SimpleProvider {
 	provider := &SimpleProvider{
-		issuerURL:        issuerURL,
-		clientID:         clientID,
-		clientSecret:     clientSecret,
-		discoveryURL:     fmt.Sprintf("%s/.well-known/openid-configuration", issuerURL),
-		httpClient:       &http.Client{},
-		jwksUpdatePeriod: 24 * time.Hour,
+		issuerURL:                issuerURL,
+		clientID:                 clientID,
+		clientSecret:             clientSecret,
+		discoveryURL:             fmt.Sprintf("%s/.well-known/openid-configuration", issuerURL),
+		mode:                     ProviderModeGeneric,
+		vaultUserInfoFallbackTTL: DefaultVaultUserInfoFallbackTTL,
+		httpClient:               &http.Client{},
+		jwksUpdatePeriod:         24 * time.Hour,
 	}
 	for _, option := range options {
 		option(provider)
@@ -70,6 +74,20 @@ func NewSimpleProvider(issuerURL, clientID, clientSecret string, options ...Simp
 
 // IntrospectToken introspects a token using the OIDC provider
 func (p *SimpleProvider) IntrospectToken(ctx context.Context, token string) (*IntrospectionResponse, error) {
+	if p.mode == ProviderModeVault {
+		if looksLikeJWT(token) {
+			if _, err := p.GetJWKS(ctx); err != nil {
+				return nil, providerError("load Vault JWKS", ErrProviderMetadata, err)
+			}
+			if response, err := p.validateTokenLocally(token); err == nil {
+				return response, nil
+			} else {
+				return nil, providerError("validate Vault JWT", ErrInvalidToken, err)
+			}
+		}
+		return p.getVaultUserInfo(ctx, token)
+	}
+
 	if looksLikeJWT(token) {
 		if _, err := p.GetJWKS(ctx); err != nil {
 			return p.introspectTokenRemotely(ctx, token)
@@ -125,11 +143,15 @@ func (p *SimpleProvider) GetProviderMetadata(ctx context.Context) (*ProviderMeta
 	if metadata.Issuer == "" {
 		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: issuer"))
 	}
-	if metadata.IntrospectionEndpoint == "" {
-		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: oidc introspection endpoint override, token_introspection_endpoint, or introspection_endpoint"))
-	}
 	if metadata.JWKSURI == "" {
 		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: jwks_uri"))
+	}
+	if p.mode == ProviderModeVault {
+		if metadata.UserInfoEndpoint == "" {
+			return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: userinfo_endpoint"))
+		}
+	} else if metadata.IntrospectionEndpoint == "" {
+		return nil, providerError("validate provider metadata", ErrProviderMetadata, fmt.Errorf("missing required field: oidc introspection endpoint override, token_introspection_endpoint, or introspection_endpoint"))
 	}
 
 	p.metadata = &metadata

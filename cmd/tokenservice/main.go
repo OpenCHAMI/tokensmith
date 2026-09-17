@@ -22,6 +22,8 @@ var (
 	oidcClientSecret           string
 	oidcIntrospectionEndpoint  string
 	oidcClaimPolicy            string
+	oidcProviderMode           string
+	vaultUserInfoFallbackTTL   string
 	oidcCAPath                 string
 	configPath                 string
 	keyFile                    string

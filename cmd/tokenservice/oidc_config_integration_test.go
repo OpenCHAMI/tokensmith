@@ -48,9 +48,9 @@ func TestOIDCConfigureCLI_ReplaceProtection(t *testing.T) {
 
 		switch r.Method {
 		case http.MethodGet:
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status": "ok",
-				"oidc": map[string]interface{}{
+				"oidc": map[string]any{
 					"configured":              existing,
 					"issuer_url":              "https://issuer.example",
 					"client_id":               "client-id",
@@ -78,9 +78,9 @@ func TestOIDCConfigureCLI_ReplaceProtection(t *testing.T) {
 			}
 			existing = true
 
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"status": status,
-				"oidc": map[string]interface{}{
+				"oidc": map[string]any{
 					"configured":              true,
 					"issuer_url":              "https://issuer.example",
 					"client_id":               "client-id",
@@ -130,9 +130,9 @@ func TestOIDCStatusCLI_ReportsLocalUserMintEnabled(t *testing.T) {
 			return
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": "ok",
-			"oidc": map[string]interface{}{
+			"oidc": map[string]any{
 				"configured":              true,
 				"issuer_url":              "https://issuer.example",
 				"client_id":               "client-id",
@@ -153,4 +153,27 @@ func TestOIDCStatusCLI_ReportsLocalUserMintEnabled(t *testing.T) {
 	assert.Contains(t, output, "Client ID: client-id")
 	assert.Contains(t, output, "Claim Policy: csm-keycloak")
 	assert.Contains(t, output, "Local User Mint Enabled: true")
+}
+
+func TestOIDCConfigureCLI_SendsVaultSettings(t *testing.T) {
+	var payload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"status": "created",
+			"oidc": map[string]any{
+				"configured": true, "issuer_url": "https://vault.example", "client_id": "vault-client", "provider_mode": "vault",
+			},
+		}))
+	}))
+	defer server.Close()
+
+	rootCmd.SetArgs([]string{
+		"oidc", "configure", "--url", server.URL,
+		"--issuer-url", "https://vault.example", "--client-id", "vault-client",
+		"--provider-mode", "vault", "--vault-userinfo-fallback-ttl", "2m",
+	})
+	require.NoError(t, rootCmd.Execute())
+	assert.Equal(t, "vault", payload["provider_mode"])
+	assert.Equal(t, float64(120), payload["vault_userinfo_fallback_ttl_seconds"])
 }

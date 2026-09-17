@@ -54,35 +54,43 @@ type Config struct {
 	OIDCClientSecret           string
 	OIDCIntrospectionEndpoint  string
 	OIDCClaimPolicy            OIDCClaimPolicy
+	OIDCProviderMode           oidc.ProviderMode
 	OIDCCAPath                 string
 	MaxExchangeSessionLifetime time.Duration
+	VaultUserInfoFallbackTTL   time.Duration
 }
 
 // OIDCProviderConfigUpdate captures mutable single-provider OIDC settings.
 type OIDCProviderConfigUpdate struct {
-	IssuerURL       string
-	ClientID        string
-	ClaimPolicy     string
-	ReplaceExisting bool
-	DryRun          bool
+	IssuerURL                       string
+	ClientID                        string
+	ClaimPolicy                     string
+	ProviderMode                    oidc.ProviderMode
+	VaultUserInfoFallbackTTLSeconds int64
+	ReplaceExisting                 bool
+	DryRun                          bool
 }
 
 // OIDCConfigRequest is the HTTP payload used to apply runtime OIDC updates.
 type OIDCConfigRequest struct {
-	IssuerURL       string `json:"issuer_url"`
-	ClientID        string `json:"client_id"`
-	ClaimPolicy     string `json:"claim_policy,omitempty"`
-	ReplaceExisting bool   `json:"replace_existing"`
-	DryRun          bool   `json:"dry_run"`
+	IssuerURL                       string            `json:"issuer_url"`
+	ClientID                        string            `json:"client_id"`
+	ClaimPolicy                     string            `json:"claim_policy,omitempty"`
+	ProviderMode                    oidc.ProviderMode `json:"provider_mode,omitempty"`
+	VaultUserInfoFallbackTTLSeconds int64             `json:"vault_userinfo_fallback_ttl_seconds,omitempty"`
+	ReplaceExisting                 bool              `json:"replace_existing"`
+	DryRun                          bool              `json:"dry_run"`
 }
 
 // OIDCProviderStatus describes current runtime OIDC provider state.
 type OIDCProviderStatus struct {
-	Configured           bool   `json:"configured"`
-	IssuerURL            string `json:"issuer_url"`
-	ClientID             string `json:"client_id"`
-	ClaimPolicy          string `json:"claim_policy"`
-	LocalUserMintEnabled bool   `json:"local_user_mint_enabled"`
+	Configured                      bool              `json:"configured"`
+	IssuerURL                       string            `json:"issuer_url"`
+	ClientID                        string            `json:"client_id"`
+	ClaimPolicy                     string            `json:"claim_policy"`
+	ProviderMode                    oidc.ProviderMode `json:"provider_mode"`
+	VaultUserInfoFallbackTTLSeconds int64             `json:"vault_userinfo_fallback_ttl_seconds,omitempty"`
+	LocalUserMintEnabled            bool              `json:"local_user_mint_enabled"`
 }
 
 // OIDCConfigResponse is the HTTP response payload for runtime OIDC status/apply endpoints.
@@ -122,6 +130,21 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 		return nil, err
 	}
 	config.OIDCClaimPolicy = claimPolicy
+	providerMode, err := oidc.ParseProviderMode(string(config.OIDCProviderMode))
+	if err != nil {
+		return nil, err
+	}
+	config.OIDCProviderMode = providerMode
+	if config.VaultUserInfoFallbackTTL == 0 {
+		config.VaultUserInfoFallbackTTL = oidc.DefaultVaultUserInfoFallbackTTL
+	}
+	if err := oidc.ValidateVaultUserInfoFallbackTTL(config.VaultUserInfoFallbackTTL); err != nil {
+		return nil, err
+	}
+	if providerMode == oidc.ProviderModeVault &&
+		(strings.TrimSpace(config.OIDCIssuerURL) == "" || strings.TrimSpace(config.OIDCClientID) == "") {
+		return nil, fmt.Errorf("vault provider mode requires OIDC issuer URL and client ID")
+	}
 	if config.MaxExchangeSessionLifetime == 0 {
 		config.MaxExchangeSessionLifetime = DefaultMaxExchangeSessionLifetime
 	}
@@ -139,6 +162,10 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	if config.OIDCIntrospectionEndpoint != "" {
 		oidcOptions = append(oidcOptions, oidc.WithIntrospectionEndpoint(config.OIDCIntrospectionEndpoint))
 	}
+	oidcOptions = append(oidcOptions,
+		oidc.WithProviderMode(providerMode),
+		oidc.WithVaultUserInfoFallbackTTL(config.VaultUserInfoFallbackTTL),
+	)
 
 	// Initialize the token manager
 	tokenManager := token.NewTokenManager(
@@ -270,11 +297,13 @@ func (s *TokenService) GetOIDCProviderStatus() OIDCProviderStatus {
 	defer s.mu.RUnlock()
 
 	return OIDCProviderStatus{
-		Configured:           strings.TrimSpace(s.Config.OIDCIssuerURL) != "" && strings.TrimSpace(s.Config.OIDCClientID) != "",
-		IssuerURL:            s.Config.OIDCIssuerURL,
-		ClientID:             s.Config.OIDCClientID,
-		ClaimPolicy:          string(s.Config.OIDCClaimPolicy),
-		LocalUserMintEnabled: s.Config.EnableLocalUserMint,
+		Configured:                      strings.TrimSpace(s.Config.OIDCIssuerURL) != "" && strings.TrimSpace(s.Config.OIDCClientID) != "",
+		IssuerURL:                       s.Config.OIDCIssuerURL,
+		ClientID:                        s.Config.OIDCClientID,
+		ClaimPolicy:                     string(s.Config.OIDCClaimPolicy),
+		ProviderMode:                    s.Config.OIDCProviderMode,
+		VaultUserInfoFallbackTTLSeconds: int64(s.Config.VaultUserInfoFallbackTTL / time.Second),
+		LocalUserMintEnabled:            s.Config.EnableLocalUserMint,
 	}
 }
 
@@ -296,9 +325,30 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 		}
 		claimPolicy = parsed
 	}
+	providerMode, err := oidc.ParseProviderMode(string(s.Config.OIDCProviderMode))
+	if err != nil {
+		return "", s.GetOIDCProviderStatus(), err
+	}
+	if update.ProviderMode != "" {
+		parsed, err := oidc.ParseProviderMode(string(update.ProviderMode))
+		if err != nil {
+			return "", s.GetOIDCProviderStatus(), err
+		}
+		providerMode = parsed
+	}
+	vaultTTL := s.Config.VaultUserInfoFallbackTTL
+	if vaultTTL == 0 {
+		vaultTTL = oidc.DefaultVaultUserInfoFallbackTTL
+	}
+	if update.VaultUserInfoFallbackTTLSeconds > 0 {
+		vaultTTL = time.Duration(update.VaultUserInfoFallbackTTLSeconds) * time.Second
+		if err := oidc.ValidateVaultUserInfoFallbackTTL(vaultTTL); err != nil {
+			return "", s.GetOIDCProviderStatus(), err
+		}
+	}
 
 	secret := strings.TrimSpace(s.Config.OIDCClientSecret)
-	if secret == "" {
+	if providerMode == oidc.ProviderModeGeneric && secret == "" {
 		return "", s.GetOIDCProviderStatus(), fmt.Errorf("OIDC client secret is not configured in service environment")
 	}
 
@@ -314,6 +364,10 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 	if s.Config.OIDCIntrospectionEndpoint != "" {
 		oidcOptions = append(oidcOptions, oidc.WithIntrospectionEndpoint(s.Config.OIDCIntrospectionEndpoint))
 	}
+	oidcOptions = append(oidcOptions,
+		oidc.WithProviderMode(providerMode),
+		oidc.WithVaultUserInfoFallbackTTL(vaultTTL),
+	)
 	provider := oidc.NewSimpleProvider(issuerURL, clientID, secret, oidcOptions...)
 	if _, err := provider.GetProviderMetadata(ctx); err != nil {
 		return "", s.GetOIDCProviderStatus(), fmt.Errorf("OIDC provider validation failed: %w", err)
@@ -332,6 +386,8 @@ func (s *TokenService) ApplyOIDCProviderConfig(ctx context.Context, update OIDCP
 	s.Config.OIDCIssuerURL = issuerURL
 	s.Config.OIDCClientID = clientID
 	s.Config.OIDCClaimPolicy = claimPolicy
+	s.Config.OIDCProviderMode = providerMode
+	s.Config.VaultUserInfoFallbackTTL = vaultTTL
 	s.mu.Unlock()
 
 	if hasExisting {

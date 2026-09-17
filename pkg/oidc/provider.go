@@ -22,7 +22,7 @@ type Provider interface {
 	SupportsLocalIntrospection() bool
 
 	// GetJWKS returns the JWKS for local token validation
-	GetJWKS(ctx context.Context) (interface{}, error)
+	GetJWKS(ctx context.Context) (any, error)
 }
 
 // ProviderMetadata represents the OIDC provider's configuration and capabilities
@@ -42,19 +42,22 @@ type ProviderMetadata struct {
 	// This endpoint provides the public keys used to verify tokens
 	JWKSURI string `json:"jwks_uri"`
 
+	// UserInfoEndpoint is the URL of the provider's OpenID Connect UserInfo endpoint.
+	UserInfoEndpoint string `json:"userinfo_endpoint"`
+
 	// ScopesSupported is a list of OAuth 2.0 scopes supported by the provider
 	ScopesSupported []string `json:"scopes_supported"`
 }
 
 // IntrospectionResponse represents the response from token introspection
 type IntrospectionResponse struct {
-	Active    bool                   `json:"active"`
-	Username  string                 `json:"username"`
-	ExpiresAt int64                  `json:"exp"`
-	IssuedAt  int64                  `json:"iat"`
-	Claims    map[string]interface{} `json:"claims"`
-	TokenType string                 `json:"token_type"`
-	Scope     string                 `json:"scope"`
-	ClientID  string                 `json:"client_id"`
-	TokenUse  string                 `json:"token_use"`
+	Active    bool           `json:"active"`
+	Username  string         `json:"username"`
+	ExpiresAt int64          `json:"exp"`
+	IssuedAt  int64          `json:"iat"`
+	Claims    map[string]any `json:"claims"`
+	TokenType string         `json:"token_type"`
+	Scope     string         `json:"scope"`
+	ClientID  string         `json:"client_id"`
+	TokenUse  string         `json:"token_use"`
 }

@@ -65,8 +65,10 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		claims.EmailVerified = emailVerified
 	}
 
-	if err := normalizeExchangeClaims(introspection.Claims, claims, s.Config.OIDCClaimPolicy); err != nil {
-		return "", err
+	if s.Config.OIDCProviderMode != oidc.ProviderModeVault {
+		if err := normalizeExchangeClaims(introspection.Claims, claims, s.Config.OIDCClaimPolicy); err != nil {
+			return "", err
+		}
 	}
 	capExchangeSession(claims, s.Config.MaxExchangeSessionLifetime)
 

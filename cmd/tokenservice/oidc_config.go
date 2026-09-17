@@ -11,18 +11,22 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/openchami/tokensmith/pkg/tokenservice"
 	"github.com/spf13/cobra"
 )
 
 var (
-	oidcAdminURL          string
-	oidcConfigureIssuer   string
-	oidcConfigureClientID string
-	oidcConfigurePolicy   string
-	oidcReplaceExisting   bool
-	oidcDryRun            bool
+	oidcAdminURL                          string
+	oidcConfigureIssuer                   string
+	oidcConfigureClientID                 string
+	oidcConfigurePolicy                   string
+	oidcConfigureProviderMode             string
+	oidcConfigureVaultUserInfoFallbackTTL time.Duration
+	oidcReplaceExisting                   bool
+	oidcDryRun                            bool
 )
 
 var oidcCmd = &cobra.Command{
@@ -54,6 +58,7 @@ var oidcStatusCmd = &cobra.Command{
 		fmt.Printf("Issuer URL: %s\n", out.OIDC.IssuerURL)
 		fmt.Printf("Client ID: %s\n", out.OIDC.ClientID)
 		fmt.Printf("Claim Policy: %s\n", out.OIDC.ClaimPolicy)
+		fmt.Printf("Provider Mode: %s\n", out.OIDC.ProviderMode)
 		fmt.Printf("Local User Mint Enabled: %t\n", out.OIDC.LocalUserMintEnabled)
 		return nil
 	},
@@ -70,12 +75,18 @@ var oidcConfigureCmd = &cobra.Command{
 			return fmt.Errorf("--client-id is required")
 		}
 
+		providerMode, err := oidc.ParseProviderMode(oidcConfigureProviderMode)
+		if err != nil {
+			return err
+		}
 		payload := tokenservice.OIDCConfigRequest{
-			IssuerURL:       oidcConfigureIssuer,
-			ClientID:        oidcConfigureClientID,
-			ClaimPolicy:     oidcConfigurePolicy,
-			ReplaceExisting: oidcReplaceExisting,
-			DryRun:          oidcDryRun,
+			IssuerURL:                       oidcConfigureIssuer,
+			ClientID:                        oidcConfigureClientID,
+			ClaimPolicy:                     oidcConfigurePolicy,
+			ProviderMode:                    providerMode,
+			VaultUserInfoFallbackTTLSeconds: int64(oidcConfigureVaultUserInfoFallbackTTL / time.Second),
+			ReplaceExisting:                 oidcReplaceExisting,
+			DryRun:                          oidcDryRun,
 		}
 
 		data, err := json.Marshal(payload)
@@ -104,6 +115,7 @@ var oidcConfigureCmd = &cobra.Command{
 		fmt.Printf("Issuer URL: %s\n", out.OIDC.IssuerURL)
 		fmt.Printf("Client ID: %s\n", out.OIDC.ClientID)
 		fmt.Printf("Claim Policy: %s\n", out.OIDC.ClaimPolicy)
+		fmt.Printf("Provider Mode: %s\n", out.OIDC.ProviderMode)
 		return nil
 	},
 }
@@ -114,6 +126,8 @@ func init() {
 	oidcConfigureCmd.Flags().StringVar(&oidcConfigureIssuer, "issuer-url", "", "OIDC issuer URL")
 	oidcConfigureCmd.Flags().StringVar(&oidcConfigureClientID, "client-id", "", "OIDC client ID")
 	oidcConfigureCmd.Flags().StringVar(&oidcConfigurePolicy, "claim-policy", "", "OIDC claim policy: enriched or csm-keycloak")
+	oidcConfigureCmd.Flags().StringVar(&oidcConfigureProviderMode, "provider-mode", "generic", "OIDC provider mode: generic or vault")
+	oidcConfigureCmd.Flags().DurationVar(&oidcConfigureVaultUserInfoFallbackTTL, "vault-userinfo-fallback-ttl", defaultVaultUserInfoFallbackTTL, "Fallback lifetime for Vault UserInfo responses without exp")
 	oidcConfigureCmd.Flags().BoolVar(&oidcReplaceExisting, "replace-existing", false, "Replace an existing configured OIDC provider")
 	oidcConfigureCmd.Flags().BoolVar(&oidcDryRun, "dry-run", false, "Validate and report create/replace outcome without applying changes")
 
