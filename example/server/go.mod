@@ -19,7 +19,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/openchami/chi-middleware/log v0.0.0-20240812224658-b16b83c70700 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 )
 
 replace github.com/openchami/tokensmith => ../../

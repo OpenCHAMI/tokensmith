@@ -94,6 +94,7 @@ TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
   - Provider validation and dry-run mode
   - Support for Keycloak, Hydra, Authelia, Azure AD, and other OIDC-compliant providers
   - Extensible provider interface
+  - HashiCorp Vault mode for discovery JWKS validation and bearer-token UserInfo lookup
 
 - **Break-Glass Access**
   - Local user token minting for emergency scenarios (when upstream OIDC is unavailable)
@@ -128,6 +129,23 @@ For complete startup options and environment variable precedence:
 - Environment reference: [`docs/env-reference.md`](docs/env-reference.md)
 - HTTP endpoints: [`docs/http-endpoints.md`](docs/http-endpoints.md)
 - Keycloak exchange tutorial: [`docs/keycloak-token-exchange.md`](docs/keycloak-token-exchange.md)
+
+### HashiCorp Vault OIDC provider
+
+Vault mode accepts Vault-issued JWTs and opaque access tokens without requiring a client secret or an RFC 7662 introspection endpoint:
+
+```bash
+tokensmith serve \
+  --key-dir ./keys \
+  --oidc-provider-mode vault \
+  --oidc-issuer https://vault.example/v1/identity/oidc/provider/openchami \
+  --oidc-client-id openchami \
+  --oidc-vault-userinfo-fallback-ttl 5m
+```
+
+The configured issuer must exactly match discovery metadata. JWTs are verified locally using discovery `jwks_uri`, with issuer, audience, expiration, issued-at, not-before, key ID, signature, and asymmetric algorithm checks. JWT validation fails closed; an invalid JWT is never retried through UserInfo. Tokens that are not JWT-shaped are sent as bearer tokens to discovery `userinfo_endpoint`.
+
+Vault UserInfo must return a non-empty `sub` (Vault Entity ID). TokenSmith preserves returned claims and derives authorization scopes only through the existing `groups` mapping. Vault groups do not create MFA, assurance, authentication-method, or session evidence. If UserInfo omits `exp`, TokenSmith applies the short configured fallback lifetime (default `5m`, maximum `15m`).
 
 ### OpenCHAMI Bootstrap-First Quick Start (RFC 8693)
 
