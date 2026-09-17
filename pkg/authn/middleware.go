@@ -46,6 +46,13 @@ type nowFunc func() time.Time
 // Implementations MUST NOT log the raw token.
 type PrincipalMapper func(ctx context.Context, token *jwt.Token, claims jwt.MapClaims) (authz.Principal, error)
 
+// RevocationChecker checks if a JWT ID (JTI) has been revoked.
+// Per RFC 7009, implementations should check the revocation status
+// of tokens after signature verification but before granting access.
+type RevocationChecker interface {
+	IsRevoked(jti string) bool
+}
+
 type Options struct {
 	Mode Mode
 
@@ -75,6 +82,8 @@ type Options struct {
 	HTTPClient *http.Client
 
 	Mapper PrincipalMapper
+
+	RevocationChecker RevocationChecker
 
 	staticKeysByKID map[string]crypto.PublicKey
 
@@ -232,6 +241,12 @@ func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 			if err := claims.ValidateAt(true, now); err != nil {
 				logAuthNFailure(r, "claims_validation_failed", err)
 				http.Error(w, "invalid token", http.StatusUnauthorized)
+				return
+			}
+
+			if opt.RevocationChecker != nil && opt.RevocationChecker.IsRevoked(claims.ID) {
+				logAuthNFailure(r, "token_revoked", nil)
+				http.Error(w, "token has been revoked", http.StatusUnauthorized)
 				return
 			}
 
