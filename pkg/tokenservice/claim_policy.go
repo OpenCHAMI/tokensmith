@@ -33,6 +33,8 @@ func ParseOIDCClaimPolicy(value string) (OIDCClaimPolicy, error) {
 
 func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims, policy OIDCClaimPolicy) error {
 	var missing []string
+	amr := stringArrayClaim(source, "amr")
+	hasStandardAuthenticationClaims := len(amr) > 0
 
 	authLevel, ok := stringClaim(source, "auth_level")
 	if !ok && policy == OIDCClaimPolicyCSMKeycloak {
@@ -42,25 +44,29 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 			ok = true
 		}
 	}
-	if !ok {
+	if !ok && !hasStandardAuthenticationClaims {
 		missing = append(missing, "auth_level")
 	}
 
 	authMethods := stringArrayClaim(source, "auth_methods")
 	if len(authMethods) == 0 && policy == OIDCClaimPolicyCSMKeycloak {
-		authMethods = normalizeCSMAuthMethods(stringArrayClaim(source, "amr"))
+		authMethods = normalizeCSMAuthMethods(amr)
 		if len(authMethods) == 0 {
 			authMethods = []string{"keycloak", "client_credentials"}
 		}
+	} else if len(authMethods) == 0 {
+		authMethods = amr
 	}
 	if len(authMethods) == 0 {
 		missing = append(missing, "auth_methods")
 	}
 
-	authFactors, ok := numberClaim(source, "auth_factors")
-	if !ok {
+	authFactors, hasExplicitAuthFactors := numberClaim(source, "auth_factors")
+	if !hasExplicitAuthFactors {
 		if policy == OIDCClaimPolicyCSMKeycloak && len(authMethods) > 0 {
 			authFactors = max(countCSMAuthFactorCategories(authMethods), 2)
+		} else if len(amr) > 0 {
+			authFactors = deriveAuthFactorsFromAMR(amr)
 		} else {
 			missing = append(missing, "auth_factors")
 		}
@@ -79,7 +85,7 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 			sessionID, ok = stringClaim(source, "azp")
 		}
 	}
-	if !ok {
+	if !ok && !hasStandardAuthenticationClaims {
 		missing = append(missing, "session_id")
 	}
 
@@ -87,7 +93,7 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	if !ok && policy == OIDCClaimPolicyCSMKeycloak {
 		sessionExp, ok = numberClaim(source, "exp")
 	}
-	if !ok {
+	if !ok && !hasStandardAuthenticationClaims {
 		missing = append(missing, "session_exp")
 	}
 
@@ -95,14 +101,14 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	if len(authEvents) == 0 && policy == OIDCClaimPolicyCSMKeycloak {
 		authEvents = []string{"token_exchange"}
 	}
-	if len(authEvents) == 0 {
+	if len(authEvents) == 0 && !hasStandardAuthenticationClaims {
 		missing = append(missing, "auth_events")
 	}
 
 	if len(missing) > 0 {
 		return missingExchangeClaims(missing...)
 	}
-	if authFactors < 2 {
+	if hasExplicitAuthFactors && authFactors < 2 {
 		return invalidExchangeClaim("auth_factors")
 	}
 

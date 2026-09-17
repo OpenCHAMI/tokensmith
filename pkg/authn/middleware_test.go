@@ -302,7 +302,7 @@ func TestAuthN_JWKSRejectsMismatchedJWKAlg(t *testing.T) {
 	}
 }
 
-func TestAuthN_RejectsMissingTokenSmithClaims(t *testing.T) {
+func TestAuthN_AcceptsStandardOIDCClaimsOnly(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 
 	claims := jwt.MapClaims{
@@ -331,12 +331,17 @@ func TestAuthN_RejectsMissingTokenSmithClaims(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+s)
 	rr := httptest.NewRecorder()
 
+	nextCalled := false
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatalf("next should not be called")
+		nextCalled = true
+		w.WriteHeader(http.StatusOK)
 	}))
 	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rr.Code)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if !nextCalled {
+		t.Fatal("next handler should be called for valid standard OIDC claims")
 	}
 }
 
