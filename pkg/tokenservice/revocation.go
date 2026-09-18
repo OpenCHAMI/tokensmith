@@ -5,6 +5,7 @@
 package tokenservice
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,8 +32,14 @@ func NewRevocationStore() *RevocationStore {
 // The JTI remains revoked until the specified expiry time.
 // Multiple calls with the same JTI update the expiry time.
 func (r *RevocationStore) Revoke(jti string, expiresAt time.Time) {
+	jti = strings.TrimSpace(jti)
+	if jti == "" {
+		return
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.pruneExpiredLocked(time.Now())
 	r.revoked[jti] = expiresAt
 }
 
@@ -40,6 +47,11 @@ func (r *RevocationStore) Revoke(jti string, expiresAt time.Time) {
 // Returns true if the JTI is revoked and has not expired yet.
 // Automatically prunes expired entries during the check.
 func (r *RevocationStore) IsRevoked(jti string) bool {
+	jti = strings.TrimSpace(jti)
+	if jti == "" {
+		return false
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -63,9 +75,11 @@ func (r *RevocationStore) Prune() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	now := time.Now()
-	removed := 0
+	return r.pruneExpiredLocked(time.Now())
+}
 
+func (r *RevocationStore) pruneExpiredLocked(now time.Time) int {
+	removed := 0
 	for jti, expiresAt := range r.revoked {
 		if now.After(expiresAt) {
 			delete(r.revoked, jti)

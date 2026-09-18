@@ -207,23 +207,43 @@ func (c *TSClaims) ValidateAt(enforce bool, now time.Time) error {
 		logs = append(logs, "Missing audience claim")
 	}
 
-	// Optional NIST SP 800-63B requirements
+	// TokenSmith/NIST SP 800-63B requirements. Enforcing callers can relax these
+	// before token generation only for provider-specific flows that supply safe
+	// generated values.
 	if c.AuthLevel == "" {
+		if enforce {
+			return errors.New("auth_level claim is required")
+		}
 		logs = append(logs, "Missing auth_level claim")
 	}
-	if c.AuthFactors == 0 {
-		logs = append(logs, "No authentication factors specified")
+	if c.AuthFactors < 2 {
+		if enforce {
+			return errors.New("auth_factors must be at least 2")
+		}
+		logs = append(logs, "Fewer than 2 authentication factors specified")
 	}
 	if len(c.AuthMethods) == 0 {
+		if enforce {
+			return errors.New("auth_methods claim is required")
+		}
 		logs = append(logs, "Missing auth_methods claim")
 	}
 	if c.SessionID == "" {
+		if enforce {
+			return errors.New("session_id claim is required")
+		}
 		logs = append(logs, "Missing session_id claim")
 	}
 	if c.SessionExp == 0 {
+		if enforce {
+			return errors.New("session_exp claim is required")
+		}
 		logs = append(logs, "Missing session_exp claim")
 	}
 	if len(c.AuthEvents) == 0 {
+		if enforce {
+			return errors.New("auth_events claim is required")
+		}
 		logs = append(logs, "Missing auth_events claim")
 	}
 	iat := int64(0)

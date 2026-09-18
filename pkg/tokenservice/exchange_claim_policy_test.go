@@ -31,6 +31,23 @@ func TestExchangeToken_EnrichedPolicyStillRequiresTokenSmithClaims(t *testing.T)
 	assert.ElementsMatch(t, []string{"auth_level", "auth_factors", "auth_methods", "session_id", "session_exp", "auth_events"}, claimsErr.Claims)
 }
 
+func TestExchangeToken_EnrichedPolicyAMRDoesNotRelaxSessionClaims(t *testing.T) {
+	service := newExchangePolicyService(t, OIDCClaimPolicyEnriched, map[string]interface{}{
+		"sub":    "admin-user",
+		"groups": []interface{}{"admin"},
+		"amr":    []interface{}{"pwd", "otp"},
+	})
+
+	tokenValue, err := service.ExchangeToken(context.Background(), "oidc-token")
+
+	require.Error(t, err)
+	assert.Empty(t, tokenValue)
+	assert.True(t, errors.Is(err, ErrExchangeMissingClaims), "error %v should be missing-claims", err)
+	var claimsErr *ExchangeClaimsError
+	require.True(t, errors.As(err, &claimsErr))
+	assert.ElementsMatch(t, []string{"auth_level", "session_id", "session_exp", "auth_events"}, claimsErr.Claims)
+}
+
 func TestExchangeToken_CSMKeycloakPolicyMapsStandardClaims(t *testing.T) {
 	now := time.Now()
 	service := newExchangePolicyService(t, OIDCClaimPolicyCSMKeycloak, map[string]interface{}{

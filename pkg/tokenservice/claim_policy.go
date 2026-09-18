@@ -34,7 +34,6 @@ func ParseOIDCClaimPolicy(value string) (OIDCClaimPolicy, error) {
 func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims, policy OIDCClaimPolicy) error {
 	var missing []string
 	amr := stringArrayClaim(source, "amr")
-	hasStandardAuthenticationClaims := len(amr) > 0
 
 	authLevel, ok := stringClaim(source, "auth_level")
 	if !ok && policy == OIDCClaimPolicyCSMKeycloak {
@@ -44,7 +43,7 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 			ok = true
 		}
 	}
-	if !ok && !hasStandardAuthenticationClaims {
+	if !ok {
 		missing = append(missing, "auth_level")
 	}
 
@@ -85,7 +84,7 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 			sessionID, ok = stringClaim(source, "azp")
 		}
 	}
-	if !ok && !hasStandardAuthenticationClaims {
+	if !ok {
 		missing = append(missing, "session_id")
 	}
 
@@ -93,7 +92,7 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	if !ok && policy == OIDCClaimPolicyCSMKeycloak {
 		sessionExp, ok = numberClaim(source, "exp")
 	}
-	if !ok && !hasStandardAuthenticationClaims {
+	if !ok {
 		missing = append(missing, "session_exp")
 	}
 
@@ -101,7 +100,7 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	if len(authEvents) == 0 && policy == OIDCClaimPolicyCSMKeycloak {
 		authEvents = []string{"token_exchange"}
 	}
-	if len(authEvents) == 0 && !hasStandardAuthenticationClaims {
+	if len(authEvents) == 0 {
 		missing = append(missing, "auth_events")
 	}
 

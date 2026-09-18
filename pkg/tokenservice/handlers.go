@@ -230,7 +230,8 @@ func (s *TokenService) TokenExchangeHandler(w http.ResponseWriter, r *http.Reque
 }
 
 // RevokeTokenHandler handles token revocation requests per RFC 7009.
-// POST /oauth/revoke with parameters: token (required), token_type_hint (optional).
+// POST /oauth/revoke with parameter: token (required).
+// token_type_hint is accepted but intentionally ignored.
 // Per RFC 7009 Section 2.2, the endpoint MUST return 200 OK regardless of whether
 // the token was valid, already revoked, or never existed (prevent token scanning).
 func (s *TokenService) RevokeTokenHandler(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +257,7 @@ func (s *TokenService) RevokeTokenHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if claims.ExpiresAt != nil {
+	if claims.ID != "" && claims.ExpiresAt != nil {
 		s.revocationStore.Revoke(claims.ID, claims.ExpiresAt.Time)
 	}
 

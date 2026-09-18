@@ -244,6 +244,15 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	return svc, nil
 }
 
+// IsRevoked implements authn.RevocationChecker for consumers that want to
+// enforce this service's process-local revocation store.
+func (s *TokenService) IsRevoked(jti string) bool {
+	if s == nil || s.revocationStore == nil {
+		return false
+	}
+	return s.revocationStore.IsRevoked(jti)
+}
+
 func loadCertPoolFromPEMFile(path string) (*x509.CertPool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

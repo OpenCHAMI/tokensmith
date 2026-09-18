@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"errors"
 	"testing"
 	"time"
 
@@ -38,10 +39,14 @@ func Test_ExchangeToken_OIDCMFAClaims(t *testing.T) {
 				ExpiresAt: now.Add(time.Hour).Unix(),
 				IssuedAt:  now.Unix(),
 				Claims: map[string]interface{}{
-					"sub":       "mfa-user",
-					"aud":       []interface{}{"test-audience"},
-					"amr":       []interface{}{"pwd", "otp"},
-					"auth_time": float64(now.Unix()),
+					"sub":         "mfa-user",
+					"aud":         []interface{}{"test-audience"},
+					"amr":         []interface{}{"pwd", "otp"},
+					"auth_time":   float64(now.Unix()),
+					"auth_level":  "IAL2",
+					"session_id":  "mfa-session",
+					"session_exp": float64(now.Add(time.Hour).Unix()),
+					"auth_events": []interface{}{"login", "mfa"},
 				},
 				TokenType: "Bearer",
 			}, nil
@@ -76,10 +81,14 @@ func Test_ExchangeToken_OIDCMFAClaims(t *testing.T) {
 				ExpiresAt: now.Add(time.Hour).Unix(),
 				IssuedAt:  now.Unix(),
 				Claims: map[string]interface{}{
-					"sub": "acr-user",
-					"aud": []interface{}{"test-audience"},
-					"acr": "urn:mfa:required",
-					"amr": []interface{}{"pwd", "fido2"},
+					"sub":         "acr-user",
+					"aud":         []interface{}{"test-audience"},
+					"acr":         "urn:mfa:required",
+					"amr":         []interface{}{"pwd", "fido2"},
+					"auth_level":  "IAL2",
+					"session_id":  "acr-session",
+					"session_exp": float64(now.Add(time.Hour).Unix()),
+					"auth_events": []interface{}{"login", "mfa"},
 				},
 				TokenType: "Bearer",
 			}, nil
@@ -112,10 +121,16 @@ func Test_ExchangeToken_OIDCMFAClaims(t *testing.T) {
 				ExpiresAt: now.Add(time.Hour).Unix(),
 				IssuedAt:  now.Unix(),
 				Claims: map[string]interface{}{
-					"sub":       "auth-time-user",
-					"aud":       []interface{}{"test-audience"},
-					"auth_time": float64(authTime),
-					"amr":       []interface{}{"pwd"},
+					"sub":          "auth-time-user",
+					"aud":          []interface{}{"test-audience"},
+					"auth_time":    float64(authTime),
+					"amr":          []interface{}{"pwd"},
+					"auth_level":   "IAL2",
+					"auth_factors": float64(2),
+					"auth_methods": []interface{}{"pwd", "otp"},
+					"session_id":   "auth-time-session",
+					"session_exp":  float64(now.Add(time.Hour).Unix()),
+					"auth_events":  []interface{}{"login", "mfa"},
 				},
 				TokenType: "Bearer",
 			}, nil
@@ -147,9 +162,13 @@ func Test_ExchangeToken_OIDCMFAClaims(t *testing.T) {
 				ExpiresAt: now.Add(time.Hour).Unix(),
 				IssuedAt:  now.Unix(),
 				Claims: map[string]interface{}{
-					"sub": "multi-factor-user",
-					"aud": []interface{}{"test-audience"},
-					"amr": []interface{}{"pwd", "sms", "fido2"},
+					"sub":         "multi-factor-user",
+					"aud":         []interface{}{"test-audience"},
+					"amr":         []interface{}{"pwd", "sms", "fido2"},
+					"auth_level":  "IAL2",
+					"session_id":  "multi-factor-session",
+					"session_exp": float64(now.Add(time.Hour).Unix()),
+					"auth_events": []interface{}{"login", "mfa"},
 				},
 				TokenType: "Bearer",
 			}, nil
@@ -187,6 +206,9 @@ func Test_ExchangeToken_OIDCMFAClaims(t *testing.T) {
 					"auth_level":   "IAL2",
 					"auth_factors": float64(2),
 					"auth_methods": []interface{}{"password", "webauthn"},
+					"session_id":   "nist-session",
+					"session_exp":  float64(now.Add(time.Hour).Unix()),
+					"auth_events":  []interface{}{"login", "mfa"},
 					"amr":          []interface{}{"pwd", "fido2"},
 					"acr":          "urn:mfa:required",
 					"auth_time":    float64(now.Unix()),
@@ -218,7 +240,7 @@ func Test_ExchangeToken_OIDCMFAClaims(t *testing.T) {
 		assert.NotZero(t, claims.AuthTime, "OIDC auth_time also populated")
 	})
 
-	t.Run("OIDC-only claims work without custom NIST claims", func(t *testing.T) {
+	t.Run("OIDC-only claims fail outside Vault mode", func(t *testing.T) {
 		mockProvider := oidc.NewMockProvider()
 		mockProvider.IntrospectTokenFunc = func(ctx context.Context, token string) (*oidc.IntrospectionResponse, error) {
 			now := time.Now()
@@ -247,17 +269,9 @@ func Test_ExchangeToken_OIDCMFAClaims(t *testing.T) {
 		}
 
 		jwtToken, err := service.ExchangeToken(context.Background(), "test-token")
-		require.NoError(t, err, "Should succeed with OIDC-only claims")
-
-		claims, _, err := tokenManager.ParseToken(jwtToken)
-		require.NoError(t, err)
-
-		assert.Equal(t, []string{"pwd", "otp"}, claims.AMR)
-		assert.Equal(t, "AAL2", claims.ACR)
-		assert.NotZero(t, claims.AuthTime)
-		assert.Equal(t, 2, claims.AuthFactors, "Derived from AMR")
-		assert.Equal(t, []string{"pwd", "otp"}, claims.AuthMethods, "Mapped from AMR")
-		assert.Empty(t, claims.AuthLevel, "Not provided, not required")
+		require.Error(t, err)
+		assert.Empty(t, jwtToken)
+		assert.True(t, errors.Is(err, ErrExchangeMissingClaims), "error %v should be missing-claims", err)
 	})
 
 	t.Run("Vault mode preserves standard MFA claims and supplies generated claims", func(t *testing.T) {

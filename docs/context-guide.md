@@ -80,14 +80,41 @@ In practice:
 - if your handler reads principal directly, always handle the missing-principal case explicitly
 - unmapped routes in enforce mode should be treated as deny-by-default according to your AuthZ configuration
 
+## Revocation enforcement
+
+`pkg/authn` can reject revoked TokenSmith JWTs when the service supplies an
+`authn.RevocationChecker`:
+
+```go
+authnMiddleware, err := authn.Middleware(authn.Options{
+    Issuers:           []string{"https://tokensmith.example"},
+    Audiences:         []string{"metadata-service"},
+    JWKSURLs:          []string{"https://tokensmith.example/.well-known/jwks.json"},
+    RevocationChecker: tokenService,
+    Mapper:            mapper,
+})
+```
+
+`TokenService` implements `IsRevoked(jti string) bool` for this purpose. The
+store is process-local and in-memory: revocations are lost on restart and are not
+propagated to other services or replicas. Consumers that need cross-process
+revocation must provide their own shared checker implementation. Tokens without
+a `jti` are not checked or stored as revoked.
+
+TokenSmith's claim validator still enforces the TokenSmith/NIST claim set when
+called with `enforce=true`. Provider-specific exchange paths, such as Vault mode,
+must populate safe generated values before minting a TokenSmith JWT instead of
+globally disabling claim enforcement.
+
 ## Adoption checklist
 
 1. Configure `authn.Middleware(authn.Options{...})` with issuer, audience, and JWKS or static key material.
 2. Provide an `authn.Mapper` that maps verified claims into `authz.Principal`.
-3. Attach AuthZ middleware with a route mapper or path/method mapper.
-4. Read principal in handlers with `authn.PrincipalFromContext` or `authz.PrincipalFromContext`.
-5. Roll out authorization in `shadow` mode before moving to `enforce`.
-6. Track `policy_version` during rollout to verify consistent policy deployment.
+3. Attach an `authn.RevocationChecker` when the service has a revocation source.
+4. Attach AuthZ middleware with a route mapper or path/method mapper.
+5. Read principal in handlers with `authn.PrincipalFromContext` or `authz.PrincipalFromContext`.
+6. Roll out authorization in `shadow` mode before moving to `enforce`.
+7. Track `policy_version` during rollout to verify consistent policy deployment.
 
 ## Common wiring issues
 

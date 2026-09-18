@@ -5,6 +5,7 @@
 package tokenservice
 
 import (
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/authn"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/token"
 	"github.com/stretchr/testify/assert"
@@ -58,6 +61,66 @@ func TestRevokeTokenHandler_RFC7009Compliance(t *testing.T) {
 		parsedClaims, _, err := tokenManager.ParseToken(validToken)
 		require.NoError(t, err)
 		assert.True(t, service.revocationStore.IsRevoked(parsedClaims.ID), "Token JTI should be revoked")
+	})
+
+	t.Run("Accepts token_type_hint without changing revocation behavior", func(t *testing.T) {
+		claims := token.NewClaims()
+		claims.Subject = "test-user"
+		claims.Issuer = "test-issuer"
+		claims.Audience = []string{"test-audience"}
+
+		validToken, err := tokenManager.GenerateToken(claims)
+		require.NoError(t, err)
+
+		form := url.Values{}
+		form.Set("token", validToken)
+		form.Set("token_type_hint", "access_token")
+
+		req := httptest.NewRequest(http.MethodPost, "/oauth/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+
+		service.RevokeTokenHandler(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		parsedClaims, _, err := tokenManager.ParseToken(validToken)
+		require.NoError(t, err)
+		assert.True(t, service.revocationStore.IsRevoked(parsedClaims.ID))
+	})
+
+	t.Run("Token without JTI is not stored as empty revocation", func(t *testing.T) {
+		now := time.Now()
+		claims := &token.TSClaims{
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    "test-issuer",
+				Subject:   "test-user",
+				Audience:  []string{"test-audience"},
+				ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+				NotBefore: jwt.NewNumericDate(now),
+				IssuedAt:  jwt.NewNumericDate(now),
+			},
+			AuthLevel:   "IAL2",
+			AuthFactors: 2,
+			AuthMethods: []string{"password", "mfa"},
+			SessionID:   "test-session",
+			SessionExp:  now.Add(time.Hour).Unix(),
+			AuthEvents:  []string{"login", "mfa"},
+		}
+		jwtToken := jwt.NewWithClaims(jwt.SigningMethodPS256, claims)
+		signed, err := jwtToken.SignedString(privateKey)
+		require.NoError(t, err)
+
+		form := url.Values{}
+		form.Set("token", signed)
+
+		req := httptest.NewRequest(http.MethodPost, "/oauth/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		w := httptest.NewRecorder()
+
+		service.RevokeTokenHandler(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.False(t, service.revocationStore.IsRevoked(""))
 	})
 
 	t.Run("RFC 7009 Section 2.2: Returns 200 OK for invalid token", func(t *testing.T) {
@@ -148,4 +211,57 @@ func TestRevokeTokenHandler_RFC7009Compliance(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		assert.True(t, service.revocationStore.IsRevoked(parsedClaims.ID), "Token should still be revoked")
 	})
+}
+
+func TestTokenService_ImplementsAuthNRevocationChecker(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	keyManager := keys.NewKeyManager()
+	require.NoError(t, keyManager.SetKeyPair(privateKey, &privateKey.PublicKey))
+
+	tokenManager := token.NewTokenManager(keyManager, "test-issuer", "test-cluster", "test-openchami", true)
+	service := &TokenService{
+		TokenManager:    tokenManager,
+		revocationStore: NewRevocationStore(),
+	}
+
+	claims := token.NewClaims()
+	claims.Subject = "test-user"
+	claims.Issuer = "test-issuer"
+	claims.Audience = []string{"test-audience"}
+	claims.AuthLevel = "IAL2"
+	claims.AuthFactors = 2
+	claims.AuthMethods = []string{"password", "mfa"}
+	claims.SessionID = "test-session"
+	claims.SessionExp = time.Now().Add(time.Hour).Unix()
+	claims.AuthEvents = []string{"login", "mfa"}
+
+	validToken, err := tokenManager.GenerateToken(claims)
+	require.NoError(t, err)
+	parsedClaims, _, err := tokenManager.ParseToken(validToken)
+	require.NoError(t, err)
+
+	mw, err := authn.Middleware(authn.Options{
+		Issuers:           []string{"test-issuer"},
+		Audiences:         []string{"test-audience"},
+		StaticKeys:        []crypto.PublicKey{&privateKey.PublicKey},
+		RevocationChecker: service,
+	})
+	require.NoError(t, err)
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+validToken)
+	before := httptest.NewRecorder()
+	handler.ServeHTTP(before, req)
+	assert.Equal(t, http.StatusOK, before.Code)
+
+	service.revocationStore.Revoke(parsedClaims.ID, parsedClaims.ExpiresAt.Time)
+	after := httptest.NewRecorder()
+	handler.ServeHTTP(after, req)
+	assert.Equal(t, http.StatusUnauthorized, after.Code)
 }

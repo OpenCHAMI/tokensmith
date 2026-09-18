@@ -90,6 +90,13 @@ These claims describe how the user authenticated and their assurance level. Used
 }
 ```
 
+When `TSClaims.Validate(true)` or `TSClaims.ValidateAt(true, now)` is used,
+TokenSmith enforces `auth_level`, `auth_factors >= 2`, `auth_methods`,
+`session_id`, `session_exp`, and `auth_events`. Provider-specific exchange paths
+that accept upstream tokens without these fields must populate safe generated
+TokenSmith values before minting an internal JWT; they should not disable claim
+enforcement globally.
+
 ### Using auth_level for policy enforcement
 
 ```go

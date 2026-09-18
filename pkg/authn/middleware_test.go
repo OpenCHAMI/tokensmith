@@ -272,6 +272,52 @@ func TestAuthN_RejectsRevokedToken(t *testing.T) {
 	}
 }
 
+func TestAuthN_SkipsRevocationCheckerWhenJTIMissing(t *testing.T) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	claims := validTokenSmithClaims("iss", []string{"svc"})
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	setRFC7638KID(t, tok, &priv.PublicKey)
+	signed, err := tok.SignedString(priv)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	checkerCalled := false
+	mw, err := Middleware(Options{
+		Issuers:    []string{"iss"},
+		Audiences:  []string{"svc"},
+		StaticKeys: []crypto.PublicKey{&priv.PublicKey},
+		now:        func() time.Time { return time.Unix(150, 0) },
+		RevocationChecker: revocationCheckerFunc(func(jti string) bool {
+			checkerCalled = true
+			return true
+		}),
+	})
+	if err != nil {
+		t.Fatalf("middleware init: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	req.Header.Set("Authorization", "Bearer "+signed)
+	rr := httptest.NewRecorder()
+
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if checkerCalled {
+		t.Fatal("revocation checker should not be called for tokens without jti")
+	}
+}
+
 func TestAuthN_JWKSFetchFailureFailsClosedWithoutCache(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 
@@ -350,7 +396,7 @@ func TestAuthN_JWKSRejectsMismatchedJWKAlg(t *testing.T) {
 	}
 }
 
-func TestAuthN_AcceptsStandardOIDCClaimsOnly(t *testing.T) {
+func TestAuthN_RejectsStandardOIDCClaimsOnly(t *testing.T) {
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 
 	claims := jwt.MapClaims{
@@ -379,17 +425,12 @@ func TestAuthN_AcceptsStandardOIDCClaimsOnly(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+s)
 	rr := httptest.NewRecorder()
 
-	nextCalled := false
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		nextCalled = true
-		w.WriteHeader(http.StatusOK)
+		t.Fatal("next handler should not be called for missing TokenSmith claims")
 	}))
 	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
-	}
-	if !nextCalled {
-		t.Fatal("next handler should be called for valid standard OIDC claims")
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
 	}
 }
 

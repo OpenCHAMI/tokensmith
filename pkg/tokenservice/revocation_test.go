@@ -23,6 +23,28 @@ func TestRevocationStore_Revoke(t *testing.T) {
 	assert.Equal(t, 1, store.Size(), "Store should contain 1 entry")
 }
 
+func TestRevocationStore_EmptyJTINoOp(t *testing.T) {
+	store := NewRevocationStore()
+
+	store.Revoke("", time.Now().Add(time.Hour))
+	store.Revoke("   ", time.Now().Add(time.Hour))
+
+	assert.False(t, store.IsRevoked(""))
+	assert.False(t, store.IsRevoked("   "))
+	assert.Equal(t, 0, store.Size())
+}
+
+func TestRevocationStore_RevokePrunesExpiredEntries(t *testing.T) {
+	store := NewRevocationStore()
+	store.revoked["expired"] = time.Now().Add(-time.Minute)
+
+	store.Revoke("current", time.Now().Add(time.Hour))
+
+	assert.False(t, store.IsRevoked("expired"))
+	assert.True(t, store.IsRevoked("current"))
+	assert.Equal(t, 1, store.Size())
+}
+
 func TestRevocationStore_IsRevoked_NotRevoked(t *testing.T) {
 	store := NewRevocationStore()
 
@@ -48,7 +70,7 @@ func TestRevocationStore_IsRevoked_AutoPruneOnCheck(t *testing.T) {
 	store.Revoke("jti-2", time.Now().Add(1*time.Hour))
 	store.Revoke("jti-3", time.Now().Add(-30*time.Minute))
 
-	assert.Equal(t, 3, store.Size(), "Store should contain 3 entries")
+	assert.Equal(t, 2, store.Size(), "Only current and latest expired entry should remain before check")
 
 	assert.False(t, store.IsRevoked("jti-1"), "Expired JTI should return false")
 	assert.True(t, store.IsRevoked("jti-2"), "Valid JTI should return true")
@@ -75,10 +97,10 @@ func TestRevocationStore_Revoke_UpdateExpiry(t *testing.T) {
 func TestRevocationStore_Prune(t *testing.T) {
 	store := NewRevocationStore()
 
-	store.Revoke("expired-1", time.Now().Add(-2*time.Hour))
-	store.Revoke("expired-2", time.Now().Add(-1*time.Hour))
-	store.Revoke("valid-1", time.Now().Add(1*time.Hour))
-	store.Revoke("valid-2", time.Now().Add(2*time.Hour))
+	store.revoked["expired-1"] = time.Now().Add(-2 * time.Hour)
+	store.revoked["expired-2"] = time.Now().Add(-1 * time.Hour)
+	store.revoked["valid-1"] = time.Now().Add(1 * time.Hour)
+	store.revoked["valid-2"] = time.Now().Add(2 * time.Hour)
 
 	assert.Equal(t, 4, store.Size(), "Store should contain 4 entries before pruning")
 

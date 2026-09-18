@@ -244,7 +244,7 @@ func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 				return
 			}
 
-			if opt.RevocationChecker != nil && opt.RevocationChecker.IsRevoked(claims.ID) {
+			if opt.RevocationChecker != nil && claims.ID != "" && opt.RevocationChecker.IsRevoked(claims.ID) {
 				logAuthNFailure(r, "token_revoked", nil)
 				http.Error(w, "token has been revoked", http.StatusUnauthorized)
 				return
