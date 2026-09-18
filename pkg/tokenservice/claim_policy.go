@@ -33,6 +33,7 @@ func ParseOIDCClaimPolicy(value string) (OIDCClaimPolicy, error) {
 
 func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims, policy OIDCClaimPolicy) error {
 	var missing []string
+	amr := stringArrayClaim(source, "amr")
 
 	authLevel, ok := stringClaim(source, "auth_level")
 	if !ok && policy == OIDCClaimPolicyCSMKeycloak {
@@ -48,19 +49,23 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 
 	authMethods := stringArrayClaim(source, "auth_methods")
 	if len(authMethods) == 0 && policy == OIDCClaimPolicyCSMKeycloak {
-		authMethods = normalizeCSMAuthMethods(stringArrayClaim(source, "amr"))
+		authMethods = normalizeCSMAuthMethods(amr)
 		if len(authMethods) == 0 {
 			authMethods = []string{"keycloak", "client_credentials"}
 		}
+	} else if len(authMethods) == 0 {
+		authMethods = amr
 	}
 	if len(authMethods) == 0 {
 		missing = append(missing, "auth_methods")
 	}
 
-	authFactors, ok := numberClaim(source, "auth_factors")
-	if !ok {
+	authFactors, hasExplicitAuthFactors := numberClaim(source, "auth_factors")
+	if !hasExplicitAuthFactors {
 		if policy == OIDCClaimPolicyCSMKeycloak && len(authMethods) > 0 {
 			authFactors = max(countCSMAuthFactorCategories(authMethods), 2)
+		} else if len(amr) > 0 {
+			authFactors = deriveAuthFactorsFromAMR(amr)
 		} else {
 			missing = append(missing, "auth_factors")
 		}
@@ -102,7 +107,7 @@ func normalizeExchangeClaims(source map[string]interface{}, dst *token.TSClaims,
 	if len(missing) > 0 {
 		return missingExchangeClaims(missing...)
 	}
-	if authFactors < 2 {
+	if hasExplicitAuthFactors && authFactors < 2 {
 		return invalidExchangeClaim("auth_factors")
 	}
 

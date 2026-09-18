@@ -231,6 +231,48 @@ func TestTokenOperations(t *testing.T) {
 		require.ErrorIs(t, claims.ValidateAt(true, base.Add(10*time.Minute)), ErrTokenExpired)
 	})
 
+	t.Run("ValidateAt enforces TokenSmith claims", func(t *testing.T) {
+		base := time.Unix(100, 0)
+		valid := func() *TSClaims {
+			return &TSClaims{
+				RegisteredClaims: jwt.RegisteredClaims{
+					Issuer:    "test-issuer",
+					Subject:   "test-subject",
+					Audience:  []string{"test-audience"},
+					ExpiresAt: jwt.NewNumericDate(base.Add(5 * time.Minute)),
+					NotBefore: jwt.NewNumericDate(base),
+					IssuedAt:  jwt.NewNumericDate(base),
+				},
+				AuthLevel:   "IAL2",
+				AuthFactors: 2,
+				AuthMethods: []string{"password", "mfa"},
+				SessionID:   "test-session",
+				SessionExp:  base.Add(5 * time.Minute).Unix(),
+				AuthEvents:  []string{"login", "mfa"},
+			}
+		}
+
+		for _, tt := range []struct {
+			name   string
+			mutate func(*TSClaims)
+		}{
+			{name: "missing auth level", mutate: func(c *TSClaims) { c.AuthLevel = "" }},
+			{name: "single auth factor", mutate: func(c *TSClaims) { c.AuthFactors = 1 }},
+			{name: "missing auth methods", mutate: func(c *TSClaims) { c.AuthMethods = nil }},
+			{name: "missing session id", mutate: func(c *TSClaims) { c.SessionID = "" }},
+			{name: "missing session expiration", mutate: func(c *TSClaims) { c.SessionExp = 0 }},
+			{name: "missing auth events", mutate: func(c *TSClaims) { c.AuthEvents = nil }},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				claims := valid()
+				tt.mutate(claims)
+
+				require.Error(t, claims.ValidateAt(true, base.Add(10*time.Second)))
+				require.NoError(t, claims.ValidateAt(false, base.Add(10*time.Second)))
+			})
+		}
+	})
+
 	t.Run("GenerateTokenWithClaims with additional claims", func(t *testing.T) {
 		claims := &TSClaims{
 			RegisteredClaims: jwt.RegisteredClaims{

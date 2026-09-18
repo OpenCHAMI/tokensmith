@@ -65,10 +65,43 @@ func (s *TokenService) ExchangeToken(ctx context.Context, idtoken string) (strin
 		claims.EmailVerified = emailVerified
 	}
 
-	if s.Config.OIDCProviderMode != oidc.ProviderModeVault {
-		if err := normalizeExchangeClaims(introspection.Claims, claims, s.Config.OIDCClaimPolicy); err != nil {
-			return "", err
-		}
+	amr := stringArrayClaim(introspection.Claims, "amr")
+	if len(amr) > 0 {
+		claims.AMR = amr
+	}
+	if acr, ok := stringClaim(introspection.Claims, "acr"); ok {
+		claims.ACR = acr
+	}
+	if authTime, ok := numberClaim(introspection.Claims, "auth_time"); ok {
+		claims.AuthTime = int64(authTime)
+	}
+	if authLevel, ok := stringClaim(introspection.Claims, "auth_level"); ok {
+		claims.AuthLevel = authLevel
+	}
+	if authFactors, ok := numberClaim(introspection.Claims, "auth_factors"); ok {
+		claims.AuthFactors = authFactors
+	} else if len(amr) > 0 {
+		claims.AuthFactors = deriveAuthFactorsFromAMR(amr)
+	}
+	if authMethods := stringArrayClaim(introspection.Claims, "auth_methods"); len(authMethods) > 0 {
+		claims.AuthMethods = authMethods
+	} else if len(amr) > 0 {
+		claims.AuthMethods = amr
+	}
+	if sessionID, ok := stringClaim(introspection.Claims, "session_id"); ok {
+		claims.SessionID = sessionID
+	}
+	if sessionExp, ok := numberClaim(introspection.Claims, "session_exp"); ok {
+		claims.SessionExp = int64(sessionExp)
+	}
+	if authEvents := stringArrayClaim(introspection.Claims, "auth_events"); len(authEvents) > 0 {
+		claims.AuthEvents = authEvents
+	}
+
+	if s.Config.OIDCProviderMode == oidc.ProviderModeVault {
+		populateVaultGeneratedClaims(claims)
+	} else if err := normalizeExchangeClaims(introspection.Claims, claims, s.Config.OIDCClaimPolicy); err != nil {
+		return "", err
 	}
 	capExchangeSession(claims, s.Config.MaxExchangeSessionLifetime)
 
@@ -181,4 +214,44 @@ func constrainRequestedScopes(allowed []string, requested []string) ([]string, e
 		out = append(out, scope)
 	}
 	return out, nil
+}
+
+func deriveAuthFactorsFromAMR(amr []string) int {
+	factorCategories := make(map[string]struct{})
+
+	for _, method := range amr {
+		switch method {
+		case "pwd", "pin", "kba":
+			factorCategories["knowledge"] = struct{}{}
+		case "otp", "sms", "hwk", "swk":
+			factorCategories["possession"] = struct{}{}
+		case "bio", "fido2", "fido", "face", "fpt", "iris", "retina", "vbm":
+			factorCategories["inherence"] = struct{}{}
+		default:
+			factorCategories["other"] = struct{}{}
+		}
+	}
+
+	return len(factorCategories)
+}
+
+func populateVaultGeneratedClaims(claims *token.TSClaims) {
+	if claims.AuthLevel == "" {
+		claims.AuthLevel = "vault"
+	}
+	if claims.AuthFactors < 2 {
+		claims.AuthFactors = 2
+	}
+	if len(claims.AuthMethods) == 0 {
+		claims.AuthMethods = []string{"vault"}
+	}
+	if claims.SessionID == "" {
+		claims.SessionID = fmt.Sprintf("vault:%s:%d", claims.Subject, claims.IssuedAt.Unix())
+	}
+	if claims.SessionExp == 0 && claims.ExpiresAt != nil {
+		claims.SessionExp = claims.ExpiresAt.Unix()
+	}
+	if len(claims.AuthEvents) == 0 {
+		claims.AuthEvents = []string{"token_exchange"}
+	}
 }

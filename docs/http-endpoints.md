@@ -135,6 +135,37 @@ curl -s -X POST http://localhost:8080/oauth/exchange \
 
 Failure logs use `audit_event=token_exchange_failed` with bounded categories such as `upstream_unavailable`, `upstream_rejected`, `invalid_response`, `missing_claim`, `invalid_claim`, and `inactive_token`.
 
+### `POST /oauth/revoke`
+
+Revoke a TokenSmith JWT by storing its JWT ID (`jti`) until the token's original
+expiration time.
+
+Request format:
+
+- method: `POST`
+- content type: `application/x-www-form-urlencoded`
+
+Required form fields:
+
+- `token=<tokensmith-jwt>`
+
+Optional form fields:
+
+- `token_type_hint=access_token`
+
+The optional `token_type_hint` is accepted for RFC 7009 compatibility but is
+intentionally ignored because TokenSmith currently has one revocable JWT token
+kind for this endpoint.
+
+Per RFC 7009 Section 2.2, TokenSmith returns `200 OK` when the token is valid,
+already revoked, invalid, expired, or unknown. This prevents token scanning.
+Missing `token` remains a client error and returns `400`.
+
+Revocation is process-local and in-memory. It does not survive TokenSmith
+restart and is not propagated to other services or replicas. Services that need
+to enforce revocation must wire an `authn.RevocationChecker`; see
+[`context-guide.md`](context-guide.md#revocation-enforcement).
+
 ### `POST /oauth/token`
 
 Canonical token endpoint for the service-to-service bootstrap and refresh flows.

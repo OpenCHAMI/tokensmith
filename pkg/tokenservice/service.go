@@ -118,6 +118,9 @@ type TokenService struct {
 	// (NIST SP 800-63-4 Section 5.2.2)
 	replayLimiter *replayLimiter
 
+	// RFC 7009: Token revocation store for invalidated JTIs
+	revocationStore *RevocationStore
+
 	// Trust roots for inbound mTLS service identity certificates.
 	serviceIdentityCAPool *x509.CertPool
 	oidcHTTPClient        *http.Client
@@ -185,15 +188,16 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	)
 
 	svc := &TokenService{
-		TokenManager:   tokenManager,
-		Config:         config,
-		Issuer:         config.Issuer,
-		GroupScopes:    config.GroupScopes,
-		ClusterID:      config.ClusterID,
-		OpenCHAMIID:    config.OpenCHAMIID,
-		OIDCProvider:   oidcProvider,
-		replayLimiter:  newReplayLimiter(),
-		oidcHTTPClient: oidcHTTPClient,
+		TokenManager:    tokenManager,
+		Config:          config,
+		Issuer:          config.Issuer,
+		GroupScopes:     config.GroupScopes,
+		ClusterID:       config.ClusterID,
+		OpenCHAMIID:     config.OpenCHAMIID,
+		OIDCProvider:    oidcProvider,
+		replayLimiter:   newReplayLimiter(),
+		revocationStore: NewRevocationStore(),
+		oidcHTTPClient:  oidcHTTPClient,
 	}
 
 	if strings.TrimSpace(config.ServiceIdentityCAPath) != "" {
@@ -238,6 +242,15 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	svc.refreshTokenStore = refreshStore
 
 	return svc, nil
+}
+
+// IsRevoked implements authn.RevocationChecker for consumers that want to
+// enforce this service's process-local revocation store.
+func (s *TokenService) IsRevoked(jti string) bool {
+	if s == nil || s.revocationStore == nil {
+		return false
+	}
+	return s.revocationStore.IsRevoked(jti)
 }
 
 func loadCertPoolFromPEMFile(path string) (*x509.CertPool, error) {

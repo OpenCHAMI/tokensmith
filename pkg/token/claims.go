@@ -207,7 +207,9 @@ func (c *TSClaims) ValidateAt(enforce bool, now time.Time) error {
 		logs = append(logs, "Missing audience claim")
 	}
 
-	// NIST SP 800-63B requirements
+	// TokenSmith/NIST SP 800-63B requirements. Enforcing callers can relax these
+	// before token generation only for provider-specific flows that supply safe
+	// generated values.
 	if c.AuthLevel == "" {
 		if enforce {
 			return errors.New("auth_level claim is required")
@@ -216,9 +218,9 @@ func (c *TSClaims) ValidateAt(enforce bool, now time.Time) error {
 	}
 	if c.AuthFactors < 2 {
 		if enforce {
-			return errors.New("at least 2 authentication factors are required")
+			return errors.New("auth_factors must be at least 2")
 		}
-		logs = append(logs, "Less than 2 authentication factors")
+		logs = append(logs, "Fewer than 2 authentication factors specified")
 	}
 	if len(c.AuthMethods) == 0 {
 		if enforce {
@@ -248,13 +250,13 @@ func (c *TSClaims) ValidateAt(enforce bool, now time.Time) error {
 	if c.IssuedAt != nil {
 		iat = c.IssuedAt.Unix()
 	}
-	if c.SessionExp < iat {
+	if c.SessionExp > 0 && c.SessionExp < iat {
 		if enforce {
 			return errors.New("session expiration is before issued-at time")
 		}
 		logs = append(logs, "Session expiration is before issued-at time")
 	}
-	if c.ExpiresAt != nil && c.SessionExp > c.ExpiresAt.Unix() {
+	if c.SessionExp > 0 && c.ExpiresAt != nil && c.SessionExp > c.ExpiresAt.Unix() {
 		if enforce {
 			return errors.New("session expiration exceeds token expiration")
 		}
