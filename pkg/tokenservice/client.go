@@ -56,6 +56,8 @@ type ServiceClient struct {
 	instanceID              string
 	clusterID               string
 
+	lifecycleMu      sync.Mutex
+	lifecycle        *lifecycleOperation
 	mu               sync.RWMutex
 	lastErrorMessage atomic.Value
 	refreshSuccesses uint64
@@ -260,13 +262,7 @@ func (c *ServiceClient) StartAutoRefresh(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if c.isRefreshTokenExpired() {
-				wrapped := fmt.Errorf("%w", ErrRefreshTokenExpired)
-				c.recordClientRefreshFailure(wrapped)
-				return
-			}
-
-			err := c.RefreshTokenIfNeeded(ctx)
+			err := c.refreshTokenIfNeeded(ctx, true)
 			if errors.Is(err, ErrRefreshTokenExpired) {
 				return
 			}
@@ -309,26 +305,13 @@ func (c *ServiceClient) GetToken(ctx context.Context) error {
 	if err := c.validateConfig(); err != nil {
 		return err
 	}
-
-	c.mu.RLock()
-	hasRefreshToken := strings.TrimSpace(c.refreshToken) != ""
-	refreshExpiresAt := c.refreshExpiresAt
-	c.mu.RUnlock()
-
-	if hasRefreshToken {
-		if !refreshExpiresAt.IsZero() && time.Now().After(refreshExpiresAt) {
-			wrapped := fmt.Errorf("%w", ErrRefreshTokenExpired)
-			c.recordClientRefreshFailure(wrapped)
-			return wrapped
-		}
-		return c.requestServiceToken(ctx, "refresh")
+	if !c.accessTokenNeedsRefresh() {
+		return nil
 	}
-
-	if certPath, keyPath, ok := c.readableServiceIdentityPaths(); ok {
-		return c.requestServiceIdentitySession(ctx, certPath, keyPath)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-
-	return c.requestServiceToken(ctx, "bootstrap")
+	return c.runTokenLifecycle(ctx)
 }
 
 func (c *ServiceClient) requestServiceToken(ctx context.Context, grantType string) error {
@@ -366,6 +349,10 @@ func (c *ServiceClient) requestServiceToken(ctx context.Context, grantType strin
 }
 
 func (c *ServiceClient) requestServiceIdentitySession(ctx context.Context, certPath, keyPath string) error {
+	if err := validateServiceIdentityURL(c.tokensmithURL); err != nil {
+		return err
+	}
+
 	mtlsClient, err := c.clientWithMutualTLS(certPath, keyPath)
 	if err != nil {
 		return err
@@ -444,14 +431,29 @@ func (c *ServiceClient) doTokenRequestWithClient(httpClient *http.Client, req *h
 
 // RefreshTokenIfNeeded checks if the token needs to be refreshed and refreshes it if necessary
 func (c *ServiceClient) RefreshTokenIfNeeded(ctx context.Context) error {
-	c.mu.RLock()
-	token := c.token
-	c.mu.RUnlock()
+	return c.refreshTokenIfNeeded(ctx, false)
+}
 
-	if token == nil || time.Until(token.ExpiresAt) < c.refreshBefore {
-		return c.GetToken(ctx)
+func (c *ServiceClient) refreshTokenIfNeeded(ctx context.Context, stopOnBootstrapTerminalExpiry bool) error {
+	if !c.accessTokenNeedsRefresh() {
+		if stopOnBootstrapTerminalExpiry && c.isRefreshTokenExpired() {
+			certPath := c.currentServiceIdentityCertPath()
+			keyPath := c.currentServiceIdentityKeyPath()
+			if certPath == "" && keyPath == "" {
+				c.recordClientRefreshFailure(ErrRefreshTokenExpired)
+				return ErrRefreshTokenExpired
+			}
+		}
+		return nil
 	}
-	return nil
+	return c.GetToken(ctx)
+}
+
+func (c *ServiceClient) accessTokenNeedsRefresh() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.token == nil || time.Until(c.token.ExpiresAt) < c.refreshBefore
 }
 
 func (c *ServiceClient) recordClientRefreshFailure(err error) {
