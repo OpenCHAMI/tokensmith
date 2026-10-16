@@ -67,6 +67,87 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
 
 ---
 
+## Service client lifecycle issues
+
+### Symptom: `refresh token expired` or `ErrRefreshTokenExpired`
+
+**Cause**: The refresh family hit its absolute TTL and the client has no mTLS recovery path.
+
+**Diagnosis**:
+
+1. Inspect `client.Stats()`.
+2. Check `HasRefreshToken` and `RefreshExpiresAt`.
+3. If `RefreshExpiresAt` is in the past and no cert plus key are configured, bootstrap-only callers are at terminal expiry.
+
+**Resolution**:
+
+1. If you expect recovery, configure both `TOKENSMITH_SERVICE_IDENTITY_CERT` and `TOKENSMITH_SERVICE_IDENTITY_KEY`, and point `TOKENSMITH_URL` at `https://...`.
+2. If you are bootstrap-only, mint a new bootstrap token and initialize a new client session.
+
+### Symptom: mTLS replacement fails or never starts
+
+**Cause**: The client has cert or key material missing, unreadable, or paired with a plaintext TokenSmith URL.
+
+**Diagnosis**:
+
+1. Verify both files exist and are readable.
+2. Verify the URL scheme is HTTPS.
+3. Check for `invalid service identity client certificate configuration` in the error chain.
+
+**Resolution**:
+
+1. Set both `TOKENSMITH_SERVICE_IDENTITY_CERT` and `TOKENSMITH_SERVICE_IDENTITY_KEY`.
+2. Use an `https://` TokenSmith URL.
+3. Retry the lifecycle call after correcting the material or URL. Restart only when the consuming service snapshots this configuration at startup.
+
+### Symptom: replay errors look like expiry
+
+**Cause**: A consumed bootstrap token was replayed, or an old rotated refresh token was reused.
+
+**Diagnosis**:
+
+1. `invalid_grant` with consumed bootstrap wording means bootstrap replay, not family expiry.
+2. `refresh token expired` or `ErrRefreshTokenExpired` means the family deadline passed.
+3. `refresh token hash mismatch` or family revocation means refresh replay, not terminal expiry.
+
+**Resolution**:
+
+1. Bootstrap replay needs a fresh bootstrap token and a new bootstrap exchange from the same bootstrap store path, because the consumed bootstrap token cannot be reused.
+2. Refresh replay needs a new bootstrap exchange because the whole family is revoked.
+
+### Symptom: Stats are confusing
+
+**Cause**: `RefreshExpiresAt` is the family deadline, not a renewed lease.
+
+**Diagnosis**:
+
+1. `LastRefresh` is the last attempt time.
+2. `LastSuccess` is the last successful refresh or replacement.
+3. `RefreshExpiresAt` stays fixed for the family and does not move forward on rotation.
+
+**Resolution**:
+
+1. Use `RefreshExpiresAt` to decide whether terminal expiry is near.
+2. Use `ExpiresAt` to judge whether the current access token still has time left.
+
+### Symptom: bootstrap provisioning fails or keeps replaying
+
+**Cause**: The bootstrap token was minted against a different store path, or the same one-time token was reused.
+
+**Diagnosis**:
+
+1. Confirm `tokensmith bootstrap-token create` used the same `--bootstrap-store` path as the running service.
+2. Check for `bootstrap token already consumed` in TokenSmith logs.
+
+**Resolution**:
+
+1. Mint a fresh bootstrap token from the same store path.
+2. Do not reuse a consumed bootstrap token across services.
+
+For the full caller-side behavior, see [Internal service auth](./internal-service-auth.md).
+
+---
+
 ## Local user token generation fails
 
 ### Symptom: "user-token create" command fails with permission error or endpoint not found

@@ -71,7 +71,7 @@ Notes:
 
 | Variable | Used by | Description |
 | --- | --- | --- |
-| `TOKENSMITH_URL` | Consumer services using `pkg/tokenservice` | Base URL of the TokenSmith service, used to call `POST /oauth/token` |
+| `TOKENSMITH_URL` | Consumer services using `pkg/tokenservice` | Base URL of the TokenSmith service, used to call `POST /oauth/token` or `POST /service-identity/session` over HTTPS when mTLS is enabled |
 | `TOKENSMITH_BOOTSTRAP_TOKEN` | `pkg/tokenservice/client.go` | One-time startup bootstrap token redeemed at `POST /oauth/token` |
 | `TOKENSMITH_SERVICE_IDENTITY_CERT` | `pkg/tokenservice/client.go` | Optional path to service mTLS client certificate used with `POST /service-identity/session` |
 | `TOKENSMITH_SERVICE_IDENTITY_KEY` | `pkg/tokenservice/client.go` | Optional path to service mTLS client private key used with `POST /service-identity/session` |
@@ -81,10 +81,12 @@ Notes:
 
 Notes:
 
-- `ServiceClient` prefers `TOKENSMITH_SERVICE_IDENTITY_CERT` + `TOKENSMITH_SERVICE_IDENTITY_KEY` when both files are readable, then falls back to `TOKENSMITH_BOOTSTRAP_TOKEN`
 - bootstrap and refresh paths still use RFC 8693 form fields against `POST /oauth/token`
 - target service and scopes are currently authoritative on the server side from bootstrap-token policy and refresh-token family state
 - many consumer services still map `TOKENSMITH_TARGET_SERVICE`, `TOKENSMITH_SCOPES`, and `TOKENSMITH_REFRESH_SKEW_SEC` into explicit client options for local configuration consistency
+- `TOKENSMITH_SERVICE_IDENTITY_CERT` and `TOKENSMITH_SERVICE_IDENTITY_KEY` must be set together. The files must be readable, and the TokenSmith URL must use `https://` for `POST /service-identity/session`.
+- When both files are readable, `ServiceClient` prefers them over `TOKENSMITH_BOOTSTRAP_TOKEN` for the initial exchange.
+- If a refresh family later becomes terminal, the configured pair is used for an mTLS replacement attempt. Each shared in-flight lifecycle operation sends at most one request; failures propagate without falling back to bootstrap, and a later lifecycle call may retry.
 
 ## Example-only variables
 

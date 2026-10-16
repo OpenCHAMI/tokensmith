@@ -8,6 +8,8 @@ SPDX-License-Identifier: MIT
 
 TokenSmith bridges external OIDC user identity with internal identity and access management using signed JWTs. It issues TokenSmith JWTs for user and service flows and provides AuthN/AuthZ middleware for validating those tokens and enforcing policy.
 
+For service-to-service callers, start with [Internal service-to-service AuthN/AuthZ](docs/internal-service-auth.md). It covers the mTLS-first path, bootstrap fallback, refresh rotation, and recovery limits without repeating the full contract here.
+
 ## Badges
 
 [![REUSE status](https://api.reuse.software/badge/github.com/OpenCHAMI/tokensmith)](https://api.reuse.software/info/github.com/OpenCHAMI/tokensmith)[![golangci-lint](https://github.com/OpenCHAMI/tokensmith/actions/workflows/golangci-lint.yaml/badge.svg)](https://github.com/OpenCHAMI/tokensmith/actions/workflows/golangci-lint.yaml)
@@ -53,7 +55,7 @@ TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
 **Core documentation:**
 - Setup and integration: [`docs/getting-started.md`](docs/getting-started.md)
 - HTTP endpoints and wire formats: [`docs/http-endpoints.md`](docs/http-endpoints.md)
-- Internal-only service-to-service quick guide: [`docs/internal-service-auth.md`](docs/internal-service-auth.md)
+- Internal service auth: [`docs/internal-service-auth.md`](docs/internal-service-auth.md)
 - Middleware wiring and principal context: [`docs/context-guide.md`](docs/context-guide.md)
 - Casbin model and policy workflow: [`docs/casbin-first-guide.md`](docs/casbin-first-guide.md)
 - Policy loading and `policy_version`: [`docs/authz_policy.md`](docs/authz_policy.md)

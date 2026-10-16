@@ -26,7 +26,10 @@ var (
 	ErrTLSClientMaterial     = errors.New("invalid service identity client certificate configuration")
 	ErrEmptyTokenSmithURL    = errors.New("tokensmith URL is required")
 	ErrEmptyTargetService    = errors.New("target service is required")
-	ErrRefreshTokenExpired   = errors.New("refresh token expired")
+	// ErrRefreshTokenExpired reports the terminal bootstrap-only refresh result.
+	// Clients with configured mTLS attempt HTTPS reauthentication first and return
+	// that distinct wrapped error if replacement fails.
+	ErrRefreshTokenExpired = errors.New("refresh token expired")
 )
 
 // ServiceToken represents the token response from tokensmith
@@ -35,7 +38,9 @@ type ServiceToken struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// ServiceClient handles communication with the tokensmith service
+// ServiceClient handles token acquisition and refresh against tokensmith,
+// including the shared in-flight lifecycle used for bootstrap, refresh, and
+// mTLS service-identity renewal.
 type ServiceClient struct {
 	client                  *http.Client
 	tokensmithURL           string
@@ -66,7 +71,9 @@ type ServiceClient struct {
 	lastSuccessUnix  int64
 }
 
-// ServiceClientStats summarizes token refresh lifecycle behavior.
+// ServiceClientStats summarizes token refresh lifecycle state, including token
+// counters, current token presence, and the absolute RefreshExpiresAt deadline
+// when a refresh token is present.
 type ServiceClientStats struct {
 	RefreshSuccesses uint64
 	RefreshFailures  uint64
@@ -98,8 +105,9 @@ func WithBootstrapToken(token string) ServiceClientOption {
 	}
 }
 
-// WithServiceIdentityCertKey configures client-certificate material used to obtain
-// a service session from /service-identity/session.
+// WithServiceIdentityCertKey configures the client certificate and key used for
+// HTTPS service-identity session acquisition and terminal refresh-family
+// replacement.
 func WithServiceIdentityCertKey(certPath, keyPath string) ServiceClientOption {
 	return func(c *ServiceClient) {
 		c.serviceIdentityCertPath = strings.TrimSpace(certPath)
@@ -161,12 +169,14 @@ func WithBootstrapMaxBackoff(backoff time.Duration) ServiceClientOption {
 	}
 }
 
-// NewServiceClient creates a new service client
+// NewServiceClient creates a new service client with the default lifecycle
+// settings.
 func NewServiceClient(tokensmithURL, serviceName, serviceID, instanceID, clusterID string) *ServiceClient {
 	return NewServiceClientWithOptions(tokensmithURL, serviceName, serviceID, instanceID, clusterID)
 }
 
-// NewServiceClientWithOptions creates a new service client with optional lifecycle configuration.
+// NewServiceClientWithOptions creates a new service client with optional
+// lifecycle configuration.
 func NewServiceClientWithOptions(tokensmithURL, serviceName, serviceID, instanceID, clusterID string, opts ...ServiceClientOption) *ServiceClient {
 	client := &ServiceClient{
 		client:                  &http.Client{Timeout: 10 * time.Second},
@@ -252,7 +262,9 @@ func (c *ServiceClient) Initialize(ctx context.Context) error {
 	return fmt.Errorf("bootstrap token exchange failed after %d attempts: %w", c.bootstrapMaxAttempts, lastErr)
 }
 
-// StartAutoRefresh periodically refreshes tokens until context cancellation.
+// StartAutoRefresh polls the shared refresh path until ctx is canceled. It
+// stops on context cancellation or bootstrap-only ErrRefreshTokenExpired, and
+// continues after a successful configured mTLS terminal replacement.
 func (c *ServiceClient) StartAutoRefresh(ctx context.Context) {
 	ticker := time.NewTicker(c.autoInterval)
 	defer ticker.Stop()
@@ -270,7 +282,8 @@ func (c *ServiceClient) StartAutoRefresh(ctx context.Context) {
 	}
 }
 
-// Stats returns current refresh and token state diagnostics.
+// Stats returns current refresh and token state diagnostics, including the
+// absolute RefreshExpiresAt deadline when present.
 func (c *ServiceClient) Stats() ServiceClientStats {
 	stats := ServiceClientStats{
 		RefreshSuccesses: atomic.LoadUint64(&c.refreshSuccesses),
@@ -300,7 +313,12 @@ func (c *ServiceClient) Stats() ServiceClientStats {
 	return stats
 }
 
-// GetToken obtains a new service token from tokensmith
+// GetToken ensures the client has a usable access token. Fresh access tokens
+// are left alone; otherwise callers share one in-flight lifecycle exchange,
+// which may use refresh, bootstrap, or configured mTLS service identity over
+// HTTPS. If ctx is canceled, the exchange stops. When the refresh-token family
+// has expired terminally, bootstrap-only clients return ErrRefreshTokenExpired
+// instead of replaying bootstrap.
 func (c *ServiceClient) GetToken(ctx context.Context) error {
 	if err := c.validateConfig(); err != nil {
 		return err
@@ -429,7 +447,9 @@ func (c *ServiceClient) doTokenRequestWithClient(httpClient *http.Client, req *h
 	return nil
 }
 
-// RefreshTokenIfNeeded checks if the token needs to be refreshed and refreshes it if necessary
+// RefreshTokenIfNeeded returns nil when the cached access token is still fresh.
+// Otherwise it joins the shared in-flight lifecycle exchange and defers token
+// acquisition to GetToken.
 func (c *ServiceClient) RefreshTokenIfNeeded(ctx context.Context) error {
 	return c.refreshTokenIfNeeded(ctx, false)
 }

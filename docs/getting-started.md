@@ -23,7 +23,7 @@ Start here to find the right guide for your situation:
 
 3. **I'm setting up service-to-service authentication only (no end-user OIDC)**
    - Jump to: [1.3) Internal service-to-service only](#13-internal-service-to-service-only-no-external-user-token-exchange)
-   - Details: [Internal service auth guide](./internal-service-auth.md)
+   - Details: [Internal service auth guide](./internal-service-auth.md), the canonical `ServiceClient` lifecycle contract
 
 4. **I'm troubleshooting or debugging something**
    - See: [Troubleshooting Guide](./troubleshooting.md)
@@ -179,6 +179,8 @@ If your service only needs internal service-to-service AuthN/AuthZ, you can skip
 6. Install TokenSmith AuthZ middleware and map routes using either explicit `authz.RouteMapper` or path/method style (`authz.PathMethodMapper` plus Casbin matchers).
 7. Ensure service principals map to the `service` role in policy/grouping.
 
+For the client-side lifecycle, including refresh thresholds, family expiry, and terminal mTLS replacement, see `docs/internal-service-auth.md`.
+
 ### Recommended container workflow
 
 #### Start TokenSmith with bootstrap configured
@@ -306,12 +308,13 @@ Normative requirements for service principals:
 
 ## 1.4) Endpoint overview
 
-The TokenSmith service currently exposes these user-facing endpoints:
+The TokenSmith service currently exposes these service endpoints:
 
 - `GET /health`
 - `GET /.well-known/jwks.json`
 - `POST /oauth/token`
 - `POST /token` (alias for the service-token flow)
+- `POST /service-identity/session` (mTLS service-identity session mint)
 
 See `docs/http-endpoints.md` for request/response formats and failure behavior.
 
