@@ -4,12 +4,10 @@
 
 module github.com/openchami/tokensmith/example/hydra
 
-go 1.24.0
-
-toolchain go1.24.4
+go 1.26.10
 
 require (
-	github.com/go-chi/chi/v5 v5.2.4
+	github.com/go-chi/chi/v5 v5.4.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/openchami/tokensmith v0.0.0
 )
@@ -25,7 +23,7 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
 )
 
