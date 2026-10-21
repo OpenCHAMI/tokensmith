@@ -6,6 +6,7 @@ package tokenservice
 
 import (
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -48,13 +49,48 @@ func (s *TokenService) ServiceIdentitySessionHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	policy, err := s.bootstrapTokenStore.GetLatestPolicyBySubject(subject)
-	if err != nil {
-		s.writeOAuthError(w, http.StatusForbidden, "invalid_client", "No policy configured for service identity subject")
+	if s.serviceIdentityPolicyStore == nil {
+		s.writeOAuthError(w, http.StatusForbidden, "invalid_client", "Service identity authorization failed")
 		return
 	}
 
-	accessToken, err := s.GenerateServiceIdentityToken(policy.Subject, policy.Audience, policy.Scopes, serviceIdentityAccessTTL)
+	now := time.Now().UTC()
+	policy, err := s.serviceIdentityPolicyStore.GetActive(subject, now)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("component", "tokenservice").
+			Str("handler", "service_identity_session").
+			Str("failure_class", serviceIdentityPolicyFailureClass(err)).
+			Msg("Service identity authorization denied")
+		s.writeOAuthError(w, http.StatusForbidden, "invalid_client", "Service identity authorization failed")
+		return
+	}
+
+	accessExpiresAt := policy.ExpiresAt
+	if candidate := now.Add(serviceIdentityAccessTTL); candidate.Before(accessExpiresAt) {
+		accessExpiresAt = candidate
+	}
+	refreshExpiresAt := policy.ExpiresAt
+	if candidate := now.Add(policy.RefreshTTL); candidate.Before(refreshExpiresAt) {
+		refreshExpiresAt = candidate
+	}
+	if !now.Before(accessExpiresAt) || !now.Before(refreshExpiresAt) {
+		s.writeOAuthError(w, http.StatusForbidden, "invalid_client", "Service identity authorization failed")
+		return
+	}
+	accessExpiresIn, err := oauthLifetimeSeconds(accessExpiresAt.Sub(now))
+	if err != nil {
+		s.writeOAuthError(w, http.StatusInternalServerError, "server_error", "An internal server error occurred")
+		return
+	}
+	refreshExpiresIn, err := oauthLifetimeSeconds(refreshExpiresAt.Sub(now))
+	if err != nil {
+		s.writeOAuthError(w, http.StatusInternalServerError, "server_error", "An internal server error occurred")
+		return
+	}
+
+	accessToken, err := s.generateServiceIdentityTokenUntil(policy.Subject, policy.Audience, policy.Scopes, now, accessExpiresAt)
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -66,7 +102,7 @@ func (s *TokenService) ServiceIdentitySessionHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	refreshToken, familyID, err := s.GenerateRefreshToken(policy.Subject, policy.Audience, policy.Scopes, policy.RefreshTTL)
+	refreshToken, familyID, err := s.generateRefreshTokenUntil(policy.Subject, policy.Audience, policy.Scopes, now, refreshExpiresAt)
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -90,12 +126,25 @@ func (s *TokenService) ServiceIdentitySessionHandler(w http.ResponseWriter, r *h
 	s.writeOAuthTokenResponse(w, http.StatusOK, OAuthTokenResponse{
 		AccessToken:      accessToken,
 		TokenType:        "Bearer",
-		ExpiresIn:        int(serviceIdentityAccessTTL.Seconds()),
+		ExpiresIn:        accessExpiresIn,
 		RefreshToken:     refreshToken,
-		RefreshExpiresIn: int(policy.RefreshTTL.Seconds()),
+		RefreshExpiresIn: refreshExpiresIn,
 		Scope:            strings.Join(policy.Scopes, " "),
 		IssuedTokenType:  AccessTokenTypeRFC8693,
 	})
+}
+
+func serviceIdentityPolicyFailureClass(err error) string {
+	switch {
+	case errors.Is(err, ErrServiceIdentityPolicyNotFound):
+		return "missing"
+	case errors.Is(err, ErrServiceIdentityPolicyExpired):
+		return "expired"
+	case errors.Is(err, ErrServiceIdentityPolicyRevoked):
+		return "revoked"
+	default:
+		return "invalid"
+	}
 }
 
 func peerCertificatesFromRequest(r *http.Request) ([]*x509.Certificate, error) {

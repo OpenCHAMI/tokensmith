@@ -23,6 +23,7 @@ ENV TOKENSMITH_CONFIG="/etc/tokensmith/config.json"
 ENV TOKENSMITH_KEY_DIR="/tokensmith/data/keys"
 ENV TOKENSMITH_RFC8693_BOOTSTRAP_STORE="/tokensmith/data/bootstrap"
 ENV TOKENSMITH_RFC8693_REFRESH_STORE="/tokensmith/data/refresh"
+ENV TOKENSMITH_SERVICE_IDENTITY_POLICY_STORE="/tokensmith/data/service-identities"
 ENV TOKENSMITH_PORT="8080"
 
 VOLUME /tokensmith/keys

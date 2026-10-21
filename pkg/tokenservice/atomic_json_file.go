@@ -44,6 +44,7 @@ var (
 	atomicJSONWrite      = writeAtomicJSON
 	createAtomicJSONTemp = createStoreTemp
 	renameAtomicJSONFile = func(root *storeRoot, oldName, newName string) error { return root.root.Rename(oldName, newName) }
+	linkAtomicJSONFile   = func(root *storeRoot, oldName, newName string) error { return root.root.Link(oldName, newName) }
 	removeAtomicJSONFile = func(root *storeRoot, name string) error { return root.root.Remove(name) }
 	openAtomicJSONDir    = func(root *storeRoot) (directorySyncer, error) { return root.root.Open(".") }
 	openStoreDirectory   = func(root *storeRoot) (directorySyncer, error) { return root.root.Open(".") }
@@ -92,6 +93,44 @@ func writeAtomicJSON(root *storeRoot, name string, value any) (bool, error) {
 		return false, removeTemporary(root, temporaryName, fmt.Errorf("rename temporary JSON file: %w", err))
 	}
 	if err := syncAndCloseDirectory(openAtomicJSONDir, root, "JSON"); err != nil {
+		return true, &CommittedWriteError{Err: err}
+	}
+	return true, nil
+}
+
+func createAtomicJSON(root *storeRoot, name string, value any) (bool, error) {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("marshal JSON: %w", err)
+	}
+	name, err = safeStoreBasename(name)
+	if err != nil {
+		return false, err
+	}
+	temporary, err := createAtomicJSONTemp(root, ".tmp-*")
+	if err != nil {
+		return false, fmt.Errorf("create temporary JSON file: %w", err)
+	}
+	temporaryName := temporary.Name()
+	if err := temporary.Chmod(0o600); err != nil {
+		return false, closeAndRemoveTemporary(root, temporary, temporaryName, err)
+	}
+	if _, err := temporary.Write(data); err != nil {
+		return false, closeAndRemoveTemporary(root, temporary, temporaryName, err)
+	}
+	if err := temporary.Sync(); err != nil {
+		return false, closeAndRemoveTemporary(root, temporary, temporaryName, err)
+	}
+	if err := temporary.Close(); err != nil {
+		return false, removeTemporary(root, temporaryName, err)
+	}
+	if err := linkAtomicJSONFile(root, temporaryName, name); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, removeTemporary(root, temporaryName, ErrServiceIdentityPolicyExists)
+		}
+		return false, removeTemporary(root, temporaryName, fmt.Errorf("link temporary JSON file: %w", err))
+	}
+	if err := errors.Join(removeTemporary(root, temporaryName, nil), syncAndCloseDirectory(openAtomicJSONDir, root, "JSON")); err != nil {
 		return true, &CommittedWriteError{Err: err}
 	}
 	return true, nil
