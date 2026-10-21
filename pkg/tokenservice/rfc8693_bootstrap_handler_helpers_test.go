@@ -67,11 +67,12 @@ func newRFC8693HandlerTestService(t *testing.T) (*TokenService, string) {
 	t.Helper()
 	storePath := t.TempDir()
 	svc := newTestTokenService(t, Config{
-		Issuer:                    "http://tokensmith.test",
-		ClusterID:                 "cluster-test",
-		OpenCHAMIID:               "openchami-test",
-		RFC8693BootstrapStorePath: filepath.Join(storePath, "bootstrap"),
-		RFC8693RefreshStorePath:   filepath.Join(storePath, "refresh"),
+		Issuer:                         "http://tokensmith.test",
+		ClusterID:                      "cluster-test",
+		OpenCHAMIID:                    "openchami-test",
+		RFC8693BootstrapStorePath:      filepath.Join(storePath, "bootstrap"),
+		RFC8693RefreshStorePath:        filepath.Join(storePath, "refresh"),
+		ServiceIdentityPolicyStorePath: filepath.Join(storePath, "identities"),
 	})
 	bootstrapToken := "bootstrap-token-for-handler-test"
 	now := time.Now().UTC()

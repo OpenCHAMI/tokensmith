@@ -109,6 +109,10 @@ var serveCmd = &cobra.Command{
 		if serviceIdentityCAPath == "" {
 			serviceIdentityCAPath = os.Getenv("TOKENSMITH_SERVICE_IDENTITY_CA")
 		}
+		serviceIdentityPolicyStorePath, err = resolveServiceIdentityPolicyStorePath(cmd)
+		if err != nil {
+			return err
+		}
 		if tlsCertFile == "" {
 			tlsCertFile = os.Getenv("TOKENSMITH_TLS_CERT_FILE")
 		}
@@ -118,26 +122,27 @@ var serveCmd = &cobra.Command{
 
 		// Create token service configuration
 		serviceConfig := tokenservice.Config{
-			Issuer:                     issuer,
-			GroupScopes:                fileConfig.GroupScopes, // Keep for backward compatibility
-			ClusterID:                  clusterID,
-			OpenCHAMIID:                openCHAMIID,
-			NonEnforcing:               nonEnforcing,
-			EnableLocalUserMint:        enableLocalUserMint,
-			OIDCIssuerURL:              oidcIssuerURL,
-			OIDCClientID:               oidcClientID,
-			OIDCClientSecret:           oidcClientSecret,
-			OIDCIntrospectionEndpoint:  oidcIntrospectionEndpoint,
-			OIDCClaimPolicy:            claimPolicy,
-			OIDCProviderMode:           oidcSettings.mode,
-			OIDCCAPath:                 oidcCAPath,
-			MaxExchangeSessionLifetime: maxExchangeLifetime,
-			VaultUserInfoFallbackTTL:   oidcSettings.vaultUserInfoFallbackTTL,
-			RFC8693BootstrapStorePath:  rfc8693BootstrapStorePath,
-			RFC8693RefreshStorePath:    rfc8693RefreshStorePath,
-			ServiceIdentityCAPath:      serviceIdentityCAPath,
-			TLSCertFile:                tlsCertFile,
-			TLSKeyFile:                 tlsKeyFile,
+			Issuer:                         issuer,
+			GroupScopes:                    fileConfig.GroupScopes, // Keep for backward compatibility
+			ClusterID:                      clusterID,
+			OpenCHAMIID:                    openCHAMIID,
+			NonEnforcing:                   nonEnforcing,
+			EnableLocalUserMint:            enableLocalUserMint,
+			OIDCIssuerURL:                  oidcIssuerURL,
+			OIDCClientID:                   oidcClientID,
+			OIDCClientSecret:               oidcClientSecret,
+			OIDCIntrospectionEndpoint:      oidcIntrospectionEndpoint,
+			OIDCClaimPolicy:                claimPolicy,
+			OIDCProviderMode:               oidcSettings.mode,
+			OIDCCAPath:                     oidcCAPath,
+			MaxExchangeSessionLifetime:     maxExchangeLifetime,
+			VaultUserInfoFallbackTTL:       oidcSettings.vaultUserInfoFallbackTTL,
+			RFC8693BootstrapStorePath:      rfc8693BootstrapStorePath,
+			RFC8693RefreshStorePath:        rfc8693RefreshStorePath,
+			ServiceIdentityCAPath:          serviceIdentityCAPath,
+			ServiceIdentityPolicyStorePath: serviceIdentityPolicyStorePath,
+			TLSCertFile:                    tlsCertFile,
+			TLSKeyFile:                     tlsKeyFile,
 		}
 
 		// Create key manager
@@ -195,6 +200,20 @@ func envFallback(cmd *cobra.Command, flag, env string, target *string) {
 	}
 }
 
+func resolveServiceIdentityPolicyStorePath(command *cobra.Command) (string, error) {
+	flag := command.Flags().Lookup("service-identity-policy-store")
+	if flag == nil {
+		return "", fmt.Errorf("service identity policy store flag is not configured")
+	}
+	if flag.Changed {
+		return strings.TrimSpace(flag.Value.String()), nil
+	}
+	if environmentPath := strings.TrimSpace(os.Getenv("TOKENSMITH_SERVICE_IDENTITY_POLICY_STORE")); environmentPath != "" {
+		return environmentPath, nil
+	}
+	return defaultServiceIdentityPolicyStorePath, nil
+}
+
 func init() {
 	// Serve command flags
 	serveCmd.Flags().StringVar(&issuer, "issuer", "", "Token issuer identifier (required; or set TOKENSMITH_ISSUER)")
@@ -215,6 +234,7 @@ func init() {
 	serveCmd.Flags().BoolVar(&nonEnforcing, "non-enforcing", false, "Skip validation checks and only log errors")
 	serveCmd.Flags().BoolVar(&enableLocalUserMint, "enable-local-user-mint", false, "Enable local user-token mint mode (break-glass path)")
 	serveCmd.Flags().StringVar(&serviceIdentityCAPath, "service-identity-ca", "", "Path to PEM CA bundle trusted for inbound service identity client certificates (or set TOKENSMITH_SERVICE_IDENTITY_CA)")
+	serveCmd.Flags().StringVar(&serviceIdentityPolicyStorePath, "service-identity-policy-store", "", "Path to dedicated service identity policy store (or set TOKENSMITH_SERVICE_IDENTITY_POLICY_STORE; default: ./data/service-identities)")
 	serveCmd.Flags().StringVar(&tlsCertFile, "tls-cert-file", "", "Path to TLS server certificate PEM (or set TOKENSMITH_TLS_CERT_FILE)")
 	serveCmd.Flags().StringVar(&tlsKeyFile, "tls-key-file", "", "Path to TLS server private key PEM (or set TOKENSMITH_TLS_KEY_FILE)")
 

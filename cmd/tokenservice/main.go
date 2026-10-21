@@ -13,29 +13,30 @@ import (
 )
 
 var (
-	issuer                     string
-	port                       int
-	clusterID                  string
-	openCHAMIID                string
-	oidcIssuerURL              string
-	oidcClientID               string
-	oidcClientSecret           string
-	oidcIntrospectionEndpoint  string
-	oidcClaimPolicy            string
-	oidcProviderMode           string
-	vaultUserInfoFallbackTTL   string
-	oidcCAPath                 string
-	configPath                 string
-	keyFile                    string
-	keyDir                     string
-	nonEnforcing               bool // Skip validation checks and only log errors
-	enableLocalUserMint        bool
-	rfc8693BootstrapStorePath  string
-	rfc8693RefreshStorePath    string
-	serviceIdentityCAPath      string
-	tlsCertFile                string
-	tlsKeyFile                 string
-	maxExchangeSessionLifetime string
+	issuer                         string
+	port                           int
+	clusterID                      string
+	openCHAMIID                    string
+	oidcIssuerURL                  string
+	oidcClientID                   string
+	oidcClientSecret               string
+	oidcIntrospectionEndpoint      string
+	oidcClaimPolicy                string
+	oidcProviderMode               string
+	vaultUserInfoFallbackTTL       string
+	oidcCAPath                     string
+	configPath                     string
+	keyFile                        string
+	keyDir                         string
+	nonEnforcing                   bool // Skip validation checks and only log errors
+	enableLocalUserMint            bool
+	rfc8693BootstrapStorePath      string
+	rfc8693RefreshStorePath        string
+	serviceIdentityCAPath          string
+	serviceIdentityPolicyStorePath string
+	tlsCertFile                    string
+	tlsKeyFile                     string
+	maxExchangeSessionLifetime     string
 )
 
 var rootCmd = &cobra.Command{
