@@ -103,7 +103,8 @@ type RefreshTokenFamily struct {
 	FamilyID string // Shared across all rotations in this family
 
 	// Current state
-	CurrentTokenHash string // SHA-256(currently-valid-refresh-token)
+	CurrentTokenHash         string // SHA-256(currently-valid-refresh-token)
+	ConsumedGenerationHashes []string
 
 	// Policy
 	Subject  string   // Service ID
