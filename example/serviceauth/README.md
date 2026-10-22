@@ -6,13 +6,15 @@ SPDX-License-Identifier: MIT
 
 # Service Authentication Example
 
-This example demonstrates TokenSmith service-to-service authentication using `pkg/tokenservice`.
+This example demonstrates the bootstrap-only TokenSmith service-to-service path using `pkg/tokenservice`.
 
 It shows how a caller service can:
 
 1. redeem a startup bootstrap token for an access token plus refresh token
 2. refresh tokens automatically when they approach expiry
 3. call another service with a TokenSmith-issued bearer token
+
+The current code does not perform mTLS session replacement. After the refresh-token family reaches its absolute expiry, it fails closed. To recover that path, you need fresh bootstrap material and a restart, or you can extend the example with `tokenservice.WithServiceIdentityCertKey(...)` and run TokenSmith over HTTPS with inbound service-identity mTLS enabled.
 
 ## Prerequisites
 
@@ -72,6 +74,8 @@ The example will:
 3. run a refresh check
 4. call the target service with `Authorization: Bearer <token>`
 
+It remains bootstrap-only throughout this flow. If the refresh-token family reaches absolute expiry, the current code has no mTLS session replacement path and cannot recover without fresh bootstrap material and a restart, or the service-identity extension noted above.
+
 ### Expected example logs
 
 Successful run:
@@ -110,6 +114,7 @@ Current behavior:
 - refresh uses `grant_type=refresh_token` at `POST /oauth/token`
 - the client stores the current access token, refresh token, and expiry timestamps in memory
 - `CallTargetService()` refreshes first if the token is near expiry
+- the client is configured with a bootstrap token only, not `WithServiceIdentityCertKey(...)`
 
 The direct service-token HTTP contract is documented in `docs/http-endpoints.md`.
 
@@ -129,6 +134,7 @@ TokenSmith-issued service tokens include OpenCHAMI-specific claims configured on
 - replaying an old refresh token revokes the refresh-token family
 - use HTTPS for real deployments
 - use durable RFC 8693 stores on the TokenSmith server if you need restart-safe replay protection
+- the example cannot recover from absolute family expiry unless you extend it with service-identity client cert and key support
 
 ## Integration pattern for your own services
 

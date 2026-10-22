@@ -8,6 +8,8 @@ SPDX-License-Identifier: MIT
 
 This guide is for services that only need internal service-to-service authentication and authorization.
 
+This is the canonical `pkg/tokenservice.ServiceClient` lifecycle contract.
+
 Use this path when:
 
 - callers are trusted services, not end users
@@ -70,6 +72,8 @@ curl -s https://tokensmith.example/service-identity/session \
 
 - if both `TOKENSMITH_SERVICE_IDENTITY_CERT` and `TOKENSMITH_SERVICE_IDENTITY_KEY` are set and readable, it uses `POST /service-identity/session`
 - else, it falls back to bootstrap token exchange via `POST /oauth/token`
+- when a refresh family is terminal and cert plus key are configured, it attempts one HTTPS `POST /service-identity/session` replacement; bootstrap-only callers return `ErrRefreshTokenExpired`, while mTLS reacquisition failures propagate their wrapped reauthentication, material, or HTTP error and preserve the old state
+- a consumed bootstrap token is never replayed as a fallback after that terminal point
 
 ### Bootstrap token request
 
@@ -246,18 +250,46 @@ Defaults when unset:
 
 ## 4) Use the shared client (`pkg/tokenservice/client.go`)
 
-`ServiceClient` is the canonical caller-side client for bootstrap exchange, refresh rotation, and attaching bearer tokens to downstream requests.
+`ServiceClient` is the canonical caller-side client for bootstrap exchange, refresh rotation, terminal mTLS recovery, and attaching bearer tokens to downstream requests.
 
 Recommended caller configuration:
 
 - `TOKENSMITH_URL`: base URL of the TokenSmith service
 - `TOKENSMITH_BOOTSTRAP_TOKEN`: one-time bootstrap token
+- `TOKENSMITH_SERVICE_IDENTITY_CERT`: service mTLS client certificate path
+- `TOKENSMITH_SERVICE_IDENTITY_KEY`: service mTLS client private key path
 - `TOKENSMITH_TARGET_SERVICE`: consumer-side config convention for intended audience
 
 Important implementation note:
 
 - current server-side issuance is determined by the bootstrap-token policy and refresh-token family
 - `pkg/tokenservice.ServiceClient` sends RFC 8693 bootstrap and refresh form fields only; `WithTargetService` is client-local metadata (not sent to the server) used for validation and audit logging
+
+### Lifecycle contract
+
+- `Initialize` blocks until the first token exchange succeeds or the configured retry budget is exhausted.
+- `GetToken` and `RefreshTokenIfNeeded` share one in-flight lifecycle operation. Concurrent callers wait on the same success or failure and respect their own context cancellation.
+- Access tokens stay usable until the refresh threshold says to renew, even if the refresh family deadline has already passed.
+- Refresh rotation does not extend the absolute refresh-family deadline. `refresh_expires_in` is the remaining family lifetime at the moment the server replies.
+- When the access token needs renewal, a still-valid refresh family uses `POST /oauth/token` with the refresh grant. A transient refresh failure stays on that path and does not switch auth modes.
+- When the refresh family is terminal, configured cert plus key trigger one HTTPS `POST /service-identity/session` replacement. Bootstrap-only callers return the exact `ErrRefreshTokenExpired` error, and the consumed bootstrap token is not replayed.
+- `StartAutoRefresh` keeps running after an mTLS replacement, but it stops on bootstrap-only terminal expiry or context cancellation.
+
+### `ServiceClientStats`
+
+| Field | Meaning |
+| --- | --- |
+| `RefreshSuccesses` | Number of successful token lifecycle exchanges, including initial acquisition, refresh, and replacement |
+| `RefreshFailures` | Number of failed token lifecycle attempts recorded by the client |
+| `LastError` | Last refresh-related error string |
+| `LastRefresh` | Time of the last recorded token lifecycle attempt |
+| `LastSuccess` | Time of the last successful token acquisition, refresh, or replacement |
+| `HasToken` | Whether an access token is currently cached |
+| `ExpiresAt` | Cached access token expiry |
+| `HasRefreshToken` | Whether a refresh token is currently cached |
+| `RefreshExpiresAt` | Absolute refresh-family deadline for the cached refresh token family |
+
+`RefreshExpiresAt` does not advance beyond the original family deadline on rotation. It tracks the family deadline, not a fresh lease.
 
 Example wiring:
 
@@ -269,6 +301,10 @@ client := tokenservice.NewServiceClientWithOptions(
   "instance-1",
   "cluster-1",
   tokenservice.WithBootstrapToken(os.Getenv("TOKENSMITH_BOOTSTRAP_TOKEN")),
+  tokenservice.WithServiceIdentityCertKey(
+    os.Getenv("TOKENSMITH_SERVICE_IDENTITY_CERT"),
+    os.Getenv("TOKENSMITH_SERVICE_IDENTITY_KEY"),
+  ),
   tokenservice.WithTargetService("metadata-service"),
   tokenservice.WithRefreshBefore(120*time.Second),
 )

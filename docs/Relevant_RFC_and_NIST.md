@@ -107,7 +107,7 @@ This document validates all normative references used in the RFC 8693 bootstrap 
 **OpenCHAMI Application:**
 - Access token lifetime: 1 hour (default) aligns with NIST 5.1.1 guidance
 - Bootstrap token lifetime: 10 minutes (default, min 1m, max 1h) aligns with short-lived assertion requirement
-- Refresh token expiry: 24 hours (default, min 1h, max 30d) provides reasonable baseline
+- Refresh token expiry: 24 hours (default, min 1h, max 30d) is the absolute refresh-family lifetime
 - Token family revocation on replay (Section 5.1.2) implements revocation for security incidents
 - JWT signatures provide assertion protection (Section 7.1.1)
 - `subject` and `audience` claims provide assertion binding (Section 6)
@@ -146,7 +146,8 @@ This document validates all normative references used in the RFC 8693 bootstrap 
 **OpenCHAMI Application:**
 - Refresh token rotation on every use (Section 6.2.2) is explicitly implemented
 - Token-family tracking for replay detection (Section 6.2.3) is a core mitigation
-- Access token lifetime refreshed on each rotation to prevent long-lived tokens from being stolen and used indefinitely
+- Refresh-token family lifetime stays fixed across rotations, so rotation does not extend the family expiry
+- Access tokens are replaced on each rotation until the family reaches absolute expiry
 
 **Relevance:** NIST SP 800-63-4 provides the most current guidance and explicitly defines refresh token family concepts and replay detection, which are central to OpenCHAMI's Phase 3 implementation.
 

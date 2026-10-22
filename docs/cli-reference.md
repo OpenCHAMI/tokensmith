@@ -133,6 +133,7 @@ The `serve` command exposes:
 - `POST /service-identity/session` (mTLS service-identity session mint)
 
 See `docs/http-endpoints.md` for request and response formats.
+See `docs/internal-service-auth.md` for the caller-side lifecycle contract, including terminal expiry and stats fields.
 
 ## `tokensmith bootstrap-token create` (recommended for RFC 8693)
 
@@ -276,6 +277,8 @@ podman run -d --name metadata-service \
 
 If your service uses `pkg/tokenservice`, that bootstrap token is exchanged once at runtime at `POST /oauth/token`. After that, the service uses the returned refresh token family to keep getting fresh JWTs without reusing the bootstrap token.
 
+For the full lifecycle contract, including mTLS replacement after terminal refresh expiry, see `docs/internal-service-auth.md`.
+
 #### 4. What logs to expect
 
 In TokenSmith, a successful first-time bootstrap exchange produces a log like:
@@ -321,7 +324,7 @@ failed to get token: status=429, body={"error":"too_many_requests","error_descri
 refresh token expired
 ```
 
-If you are integrating `pkg/tokenservice` into your own service, log the return values from `Initialize()` and `RefreshTokenIfNeeded()`, and expose `client.Stats()` in diagnostics so operators can see the last refresh error and token state.
+If you are integrating `pkg/tokenservice` into your own service, log the return values from `Initialize()` and `RefreshTokenIfNeeded()`, and expose `client.Stats()` in diagnostics so operators can see the last refresh error, the refresh-family deadline, and the current token state.
 
 ### What the token is for
 

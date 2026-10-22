@@ -41,6 +41,17 @@ AuthN in `pkg/authn` validates TokenSmith JWTs against the current TokenSmith cl
 
 If your environment considers roles sensitive, configure TokenSmith to omit role lists in logs.
 
+## Service-token lifecycle security
+
+- Bootstrap tokens are one-time use. A consumed bootstrap replay is rejected with `invalid_grant`.
+- Replaying an old rotated refresh token revokes the refresh-token family tied to that exchange.
+- The refresh-token family has an absolute lifetime. Rotation issues a new token, but it does not extend the family TTL.
+- Bootstrap-only callers stop at terminal refresh-family expiry unless they are extended with service-identity client cert and key support over HTTPS.
+- mTLS session minting supports initial acquisition and terminal family replacement. It does not replace the normal refresh path.
+- Transient network or upstream errors do not trigger terminal reauthentication or change acquisition mode.
+- When service-identity mTLS is enabled, keep `--service-identity-ca`, `--tls-cert-file`, and `--tls-key-file` in place, and protect the client cert and key files with tight filesystem permissions.
+- Use HTTPS for all service-identity requests.
+
 ## Key IDs (`kid`) and key binding
 
 TokenSmith uses RFC 7638 JWK thumbprints (SHA-256, base64url) as JWT `kid` values.

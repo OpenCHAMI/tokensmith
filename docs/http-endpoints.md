@@ -172,6 +172,8 @@ Canonical token endpoint for the service-to-service bootstrap and refresh flows.
 
 Do not send upstream Keycloak/OIDC bearer tokens to this endpoint. Use `POST /oauth/exchange` instead.
 
+Caller-side lifecycle details, including mTLS replacement, terminal expiry, and `ErrRefreshTokenExpired`, live in [Internal service auth](./internal-service-auth.md).
+
 ### `POST /token`
 
 Compatibility alias for the same RFC 8693 / RFC 6749 token handling used by the service-token flow.
@@ -193,6 +195,8 @@ Behavior:
 - service identity subject is extracted from client certificate Common Name (`CN`)
 - TokenSmith looks up policy by subject (same subject/audience/scopes model used by bootstrap policy storage)
 - response shape matches `POST /oauth/token` success payload (`access_token`, `refresh_token`, `expires_in`, etc.)
+- `refresh_expires_in` is the remaining family lifetime. Refresh rotation does not extend the family deadline.
+- Client behavior for this endpoint is documented in [Internal service auth](./internal-service-auth.md)
 
 Example:
 
@@ -276,6 +280,7 @@ Notes:
 - refresh tokens are rotated on every successful use
 - replaying an old refresh token revokes the entire token family
 - expired or revoked refresh tokens fail with `invalid_grant`
+- `refresh_expires_in` reports remaining family lifetime, not a renewed deadline
 
 ## Error responses
 

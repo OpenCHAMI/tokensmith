@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refactored middleware and tokenservice structure for clearer responsibilities.
 
 ### Fixed
+- ServiceClient can replace terminally expired refresh-token families via HTTPS mTLS, coalesces lifecycle calls, and never replays consumed bootstrap tokens.
 - Linter and build errors caused by incorrect construction of embedded RegisteredClaims fields.
 - go mod tidy / import casing issues (added guidance and temporary replace workaround).
 - Token parsing/validation bugs related to date/time handling and claim types.
@@ -69,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced scope validation and added email verification handling where applicable.
 
 ### Documentation
+- Issue #69: clarified service-token flow, bootstrap replay handling, absolute refresh-family lifetime, and mTLS recovery limits.
 - **Policy Engine Documentation**: Added comprehensive documentation for the new policy engine system.
   - Policy engine interface documentation with usage examples.
   - Static policy engine configuration and examples.

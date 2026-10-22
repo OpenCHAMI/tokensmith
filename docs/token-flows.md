@@ -80,6 +80,30 @@ curl -s -X POST http://localhost:8080/oauth/exchange \
 
 Do not use `POST /oauth/token` for Keycloak tokens. That endpoint is reserved for bootstrap-token exchange and refresh-token rotation.
 
+## Internal service token flow
+
+Use this flow for trusted caller services that need a TokenSmith service token and then keep it alive with refreshes.
+
+### How it works
+
+1. The caller establishes a session with service-identity mTLS (preferred) or exchanges a one-time bootstrap token.
+2. TokenSmith returns an access token and a refresh token.
+3. The caller uses the access token until it nears expiry.
+4. TokenSmith rotates the refresh token on use and returns a new access token.
+5. The refresh-token family has an absolute lifetime. Rotation does not extend it.
+6. If the family reaches absolute expiry, an mTLS-capable caller can mint a replacement session with `POST /service-identity/session`.
+7. A bootstrap-only caller stops with `ErrRefreshTokenExpired` and must receive fresh bootstrap material; it never replays the consumed token.
+
+### Security notes
+
+- A consumed bootstrap replay is rejected with `invalid_grant`.
+- Replaying an old rotated refresh token revokes the refresh-token family.
+- Do not treat transient transport or HTTP errors as a mode switch.
+- mTLS session minting supports initial acquisition and terminal family replacement; normal rotation still uses the refresh grant.
+- Use HTTPS and protect client cert and key files when service-identity mTLS is enabled.
+
+See [Internal service-to-service AuthN/AuthZ](./internal-service-auth.md) for the full contract and endpoint details.
+
 ## Local user token flow (break-glass)
 
 This flow is designed for emergency access when upstream OIDC is unavailable. It should not be used as the primary authentication method.
