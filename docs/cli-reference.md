@@ -21,6 +21,7 @@ See also:
 - **Start TokenSmith** → Use `tokensmith serve`
 - **Generate a default config file** → Use `tokensmith generate-config`
 - **Mint a service bootstrap token for RFC 8693 exchange (recommended)** → Use `tokensmith bootstrap-token create`
+- **Create, list, or revoke a dedicated mTLS caller policy** → Use `tokensmith service-identity-policy`
 - **Check current OIDC provider** → Use `tokensmith oidc status`
 - **Reconfigure the OIDC provider (no restart)** → Use `tokensmith oidc configure`
 - **Mint a break-glass user token (emergency access)** → Use `tokensmith user-token create`
@@ -31,6 +32,7 @@ See also:
 
 - `tokensmith generate-config`
 - `tokensmith bootstrap-token create`
+- `tokensmith service-identity-policy`
 - `tokensmith oidc status`
 - `tokensmith oidc configure`
 - `tokensmith serve`
@@ -77,6 +79,7 @@ Starts the TokenSmith service.
 | `--rfc8693-bootstrap-store` | Path to the bootstrap token policy store, or `TOKENSMITH_RFC8693_BOOTSTRAP_STORE` | `./data/bootstrap-tokens` |
 | `--rfc8693-refresh-store` | Path to the refresh token family store, or `TOKENSMITH_RFC8693_REFRESH_STORE` | `./data/refresh-tokens` |
 | `--service-identity-ca` | PEM CA bundle trusted for inbound service-identity mTLS client certificates, or `TOKENSMITH_SERVICE_IDENTITY_CA` | `""` |
+| `--service-identity-policy-store` | Dedicated mTLS policy store, or `TOKENSMITH_SERVICE_IDENTITY_POLICY_STORE` | `./data/service-identities` |
 | `--tls-cert-file` | HTTPS server certificate PEM, or `TOKENSMITH_TLS_CERT_FILE` | `""` |
 | `--tls-key-file` | HTTPS server private key PEM, or `TOKENSMITH_TLS_KEY_FILE` | `""` |
 | `--non-enforcing` | Skip strict validation checks and only log errors | `false` |
@@ -93,6 +96,7 @@ Starts the TokenSmith service.
 - If `--max-exchange-session-lifetime` is omitted, TokenSmith reads `TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME`, then `maxExchangeSessionLifetime` from the JSON config, then defaults to `24h`.
 - If RFC 8693 store flags are omitted, TokenSmith falls back to environment variables and then the defaults shown above.
 - `--oidc-ca` validates outbound TLS to Keycloak/OIDC; `--service-identity-ca` validates inbound mTLS client certificates and requires `--tls-cert-file` plus `--tls-key-file`.
+- `--service-identity-policy-store` is separate from the bootstrap and refresh stores. It controls dedicated caller policy only.
 - Exchanged TokenSmith tokens never outlive the upstream OIDC token or upstream `session_exp`; the maximum exchange session lifetime only caps the generated TokenSmith token.
 
 ### Minimal run example
@@ -149,6 +153,7 @@ This is the recommended command for current RFC 8693 bootstrap exchange flows.
 - Treat this as a strictly local operation to the TokenSmith runtime context.
 - For Podman Quadlets, run `tokensmith bootstrap-token create` via `podman exec` in the TokenSmith container namespace.
 - Runtime behavior: when `/oauth/token` does not find a bootstrap policy in memory, TokenSmith attempts a one-file disk lookup (`<token-hash>.json`) and caches the result for subsequent requests.
+- These tokens are only for `POST /oauth/token`. They do not authorize `POST /service-identity/session`.
 
 ### Flags
 
@@ -318,10 +323,10 @@ Successfully called target service!
 If the bootstrap token is missing or wrong, a caller service using `pkg/tokenservice` typically surfaces errors like:
 
 ```text
-missing bootstrap token: set TOKENSMITH_BOOTSTRAP_TOKEN or WithBootstrapToken
-bootstrap token exchange failed after 5 attempts: failed to get token: status=400, body={"error":"invalid_grant","error_description":"The provided token is invalid or has already been used"}
-failed to get token: status=429, body={"error":"too_many_requests","error_description":"Too many failed token exchange attempts from this address"}
-refresh token expired
+token request response status=400 oauth_error=invalid_request
+token request response status=400 oauth_error=invalid_grant
+token request response status=429
+token request response status=500 oauth_error=server_error
 ```
 
 If you are integrating `pkg/tokenservice` into your own service, log the return values from `Initialize()` and `RefreshTokenIfNeeded()`, and expose `client.Stats()` in diagnostics so operators can see the last refresh error, the refresh-family deadline, and the current token state.
@@ -329,6 +334,28 @@ If you are integrating `pkg/tokenservice` into your own service, log the return 
 ### What the token is for
 
 Opaque bootstrap tokens are one-time startup credentials exchanged at `POST /oauth/token` using the RFC 8693 bootstrap-token request shape documented in `docs/http-endpoints.md`.
+
+## `tokensmith service-identity-policy`
+
+Creates, lists, and revokes dedicated mTLS service identity policy entries.
+
+### Flags
+
+| Flag | Description | Default |
+| --- | --- | --- |
+| `--service-identity-policy-store` | Dedicated mTLS policy store, or `TOKENSMITH_SERVICE_IDENTITY_POLICY_STORE` | `./data/service-identities` |
+
+### Subcommands
+
+- `create` requires `--subject`, `--audience`, `--scopes`, `--ttl`, and `--refresh-ttl`
+- `list` prints policy metadata only, not tokens or secrets
+- `revoke` marks the matching policy revoked immediately
+
+### Rules
+
+- `--refresh-ttl` must be positive and no longer than `--ttl`
+- policy expiry and revocation are independent of bootstrap token state and refresh-family state
+- existing mTLS callers must have a dedicated policy before upgrade, there is no automatic migration
 
 ## `tokensmith oidc status`
 
