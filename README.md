@@ -8,7 +8,7 @@ SPDX-License-Identifier: MIT
 
 TokenSmith bridges external OIDC user identity with internal identity and access management using signed JWTs. It issues TokenSmith JWTs for user and service flows and provides AuthN/AuthZ middleware for validating those tokens and enforcing policy.
 
-For service-to-service callers, start with [Internal service-to-service AuthN/AuthZ](docs/internal-service-auth.md). It covers the mTLS-first path, bootstrap fallback, refresh rotation, and recovery limits without repeating the full contract here.
+For service-to-service callers, start with [Internal service-to-service AuthN/AuthZ](docs/internal-service-auth.md). It covers the mTLS-first path, bootstrap fallback, refresh rotation, and recovery limits without repeating the full contract here. If you are migrating mTLS callers, create a dedicated service identity policy first. The bootstrap path does not authorize mTLS.
 
 ## Badges
 
@@ -56,6 +56,7 @@ TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
 - Setup and integration: [`docs/getting-started.md`](docs/getting-started.md)
 - HTTP endpoints and wire formats: [`docs/http-endpoints.md`](docs/http-endpoints.md)
 - Internal service auth: [`docs/internal-service-auth.md`](docs/internal-service-auth.md)
+- Service identity policy lifecycle: [`docs/cli-reference.md`](docs/cli-reference.md)
 - Middleware wiring and principal context: [`docs/context-guide.md`](docs/context-guide.md)
 - Casbin model and policy workflow: [`docs/casbin-first-guide.md`](docs/casbin-first-guide.md)
 - Policy loading and `policy_version`: [`docs/authz_policy.md`](docs/authz_policy.md)
@@ -158,12 +159,19 @@ For most OpenCHAMI setups, start with the internal service bootstrap flow:
 3. Inject `TOKENSMITH_BOOTSTRAP_TOKEN` into the caller service.
 4. Exchange at `POST /oauth/token` and verify `access_token` + `refresh_token` are returned.
 
+If the caller will use mTLS, create a dedicated service identity policy before you switch it over. Existing mTLS callers are not migrated automatically, and bootstrap tokens do not authorize `POST /service-identity/session`.
+
 Important:
 
 - Bootstrap token issuance is strictly local to the TokenSmith runtime context.
 - For Podman Quadlets (common deployment), use `podman exec` into the TokenSmith container when minting bootstrap tokens.
 
 See full guide: [`docs/internal-service-auth.md`](docs/internal-service-auth.md)
+
+`ServiceClient.GetToken` preserves the compatibility contract: it returns the
+cached access token without rotating while that token is fresh. Use
+`ServiceClient.ForceRefresh` only when the caller explicitly needs a new token;
+normal request paths should use `GetToken` or `RefreshTokenIfNeeded`.
 
 ### CSM/Keycloak Token Exchange
 
@@ -314,7 +322,8 @@ Stability policy:
 
 ### Prerequisites
 
-- Go 1.21 or later
+- Go 1.26.10 or later. This minimum is intentional so consumers, builds, and
+  security scans use the patched standard library and dependency baseline.
 - Access to an OIDC provider (Keycloak, Hydra, or Authelia)
 
 ### Build & Install

@@ -36,6 +36,8 @@ AuthN in `pkg/authn` validates TokenSmith JWTs against the current TokenSmith cl
 
 - TokenSmith **MUST NOT log raw JWTs**.
 - TokenSmith deny responses **MUST NOT echo** Authorization headers or arbitrary JWT claims.
+- Audit logs should record `jti` only, not the compact JWT or bearer token string.
+- Error bodies should stay bounded and redacted. They should not echo raw tokens or large claim payloads.
 - Principal summaries in logs/deny bodies should contain only:
   - `principal.id`, `principal.type`, and optionally `principal.roles`
 
@@ -51,6 +53,13 @@ If your environment considers roles sensitive, configure TokenSmith to omit role
 - Transient network or upstream errors do not trigger terminal reauthentication or change acquisition mode.
 - When service-identity mTLS is enabled, keep `--service-identity-ca`, `--tls-cert-file`, and `--tls-key-file` in place, and protect the client cert and key files with tight filesystem permissions.
 - Use HTTPS for all service-identity requests.
+
+## Dedicated service identity policy lifecycle
+
+- The service identity policy store is separate from the bootstrap and refresh stores.
+- `tokensmith service-identity-policy create`, `list`, and `revoke` manage per-subject mTLS authorization.
+- Existing mTLS callers must have a dedicated policy before upgrade. TokenSmith does not migrate them automatically.
+- Bootstrap tokens never authorize `POST /service-identity/session`.
 
 ## Key IDs (`kid`) and key binding
 
@@ -284,6 +293,15 @@ TokenSmith exposes local-only admin endpoints for runtime OIDC provider reconfig
 - ❌ Do not configure OIDC secrets via admin endpoints; use environment variables instead.
 - ❌ Do not expose TokenSmith's HTTP port without network segmentation.
 
+### Client IP attribution
+
+TokenSmith uses the direct TCP peer for rate-limit keys and security audit
+events. Forwarded client-IP headers, including `X-Forwarded-For`, `X-Real-IP`,
+and `True-Client-IP`, are intentionally untrusted by default. The router uses
+chi v5.4 `middleware.ClientIPFromRemoteAddr`, which does not modify
+`http.Request.RemoteAddr`. A future trusted-proxy deployment mode must require
+explicit trusted-proxy CIDRs before it can use forwarded headers.
+
 ### Combined with other controls
 
 Admin endpoints are **local-only by design** but benefit from defense-in-depth:
@@ -293,4 +311,4 @@ Admin endpoints are **local-only by design** but benefit from defense-in-depth:
 - RBAC on the `exec` or SSH privilege needed to access the container
 - Audit logging of admin endpoint calls
 
-See: [Getting started: Break-glass local user tokens](./getting-started.md#14-break-glass-local-user-tokens-emergency-access) for operational workflows that safely use admin endpoints.
+See: [Getting started: Break-glass local user tokens](./getting-started.md#12-break-glass-local-user-tokens-emergency-access) for operational workflows that safely use admin endpoints.
