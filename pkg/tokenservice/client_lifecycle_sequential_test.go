@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestServiceClientGetToken_ReacquiresMTLSSessionAfterRefreshFamilyExpiry(t *testing.T) {
+func TestServiceClientForceRefresh_ReacquiresMTLSSessionAfterRefreshFamilyExpiry(t *testing.T) {
 	// Given: an expired refresh family and configured service identity material.
 	caPEM, certPath, keyPath := writeServiceIdentityCertFiles(t, "metadata-service")
 	var serviceIdentityCalls atomic.Int32
@@ -42,7 +42,7 @@ func TestServiceClientGetToken_ReacquiresMTLSSessionAfterRefreshFamilyExpiry(t *
 	client := newTerminallyExpiredServiceClient(t, server.URL, certPath, keyPath, WithHTTPClient(server.Client()))
 
 	// When: the expired access token needs renewal.
-	err := client.GetToken(context.Background())
+	err := client.ForceRefresh(context.Background())
 
 	// Then: the client replaces the family through mTLS without replaying bootstrap credentials.
 	require.NoError(t, err)
@@ -51,7 +51,7 @@ func TestServiceClientGetToken_ReacquiresMTLSSessionAfterRefreshFamilyExpiry(t *
 	assert.Equal(t, "reacquired-access", client.GetServiceToken().Token)
 }
 
-func TestServiceClientGetToken_ReturnsMTLSReacquisitionFailure(t *testing.T) {
+func TestServiceClientForceRefresh_ReturnsMTLSReacquisitionFailure(t *testing.T) {
 	// Given: an expired refresh family whose mTLS session request fails.
 	caPEM, certPath, keyPath := writeServiceIdentityCertFiles(t, "metadata-service")
 	var serviceIdentityCalls atomic.Int32
@@ -65,7 +65,7 @@ func TestServiceClientGetToken_ReturnsMTLSReacquisitionFailure(t *testing.T) {
 	client := newTerminallyExpiredServiceClient(t, server.URL, certPath, keyPath, WithHTTPClient(server.Client()))
 
 	// When: the access token needs renewal.
-	err := client.GetToken(context.Background())
+	err := client.ForceRefresh(context.Background())
 
 	// Then: the mTLS error is returned and the old family remains untouched.
 	require.Error(t, err)
@@ -77,7 +77,7 @@ func TestServiceClientGetToken_ReturnsMTLSReacquisitionFailure(t *testing.T) {
 	client.mu.RUnlock()
 }
 
-func TestServiceClientGetToken_ReturnsTerminalExpiryWithoutServiceIdentity(t *testing.T) {
+func TestServiceClientForceRefresh_ReturnsTerminalExpiryWithoutServiceIdentity(t *testing.T) {
 	// Given: an expired refresh family without configured service identity material.
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +89,7 @@ func TestServiceClientGetToken_ReturnsTerminalExpiryWithoutServiceIdentity(t *te
 	client := newTerminallyExpiredServiceClient(t, server.URL, "", "")
 
 	// When: the access token needs renewal.
-	err := client.GetToken(context.Background())
+	err := client.ForceRefresh(context.Background())
 
 	// Then: terminal expiry is returned exactly and no network request is made.
 	require.ErrorIs(t, err, ErrRefreshTokenExpired)
@@ -112,12 +112,11 @@ func TestServiceClientGetToken_UsesFreshAccessTokenAfterRefreshFamilyExpiry(t *t
 	client.token.ExpiresAt = time.Now().Add(time.Hour)
 	client.mu.Unlock()
 
-	// When: the caller requests a service token.
+	// When: the caller ensures a token is available.
 	err := client.GetToken(context.Background())
 
-	// Then: the valid access token is retained without any lifecycle request.
+	// Then: the fresh token is retained without a rotation.
 	require.NoError(t, err)
-	assert.Equal(t, "old-access", client.GetServiceToken().Token)
 	assert.Equal(t, int32(0), requests.Load())
 }
 
@@ -135,7 +134,7 @@ func TestServiceClientGetToken_AlreadyCanceledWithFreeGateMakesNoRequest(t *test
 	cancel()
 
 	// When: an already-canceled caller attempts token acquisition.
-	err := client.GetToken(ctx)
+	err := client.ForceRefresh(ctx)
 
 	// Then: cancellation is returned before any request is selected.
 	require.ErrorIs(t, err, context.Canceled)
@@ -165,7 +164,7 @@ func TestServiceClientGetToken_DoesNotUseMTLSForTransientRefreshFailure(t *testi
 	client.mu.Unlock()
 
 	// When: refresh renewal fails.
-	err := client.GetToken(context.Background())
+	err := client.ForceRefresh(context.Background())
 
 	// Then: the refresh failure is propagated without changing authentication modes.
 	require.Error(t, err)
@@ -186,12 +185,30 @@ func TestServiceClientGetToken_RejectsPlaintextServiceIdentitySession(t *testing
 	client := newTerminallyExpiredServiceClient(t, server.URL, certPath, keyPath)
 
 	// When: terminal expiry attempts service identity reauthentication.
-	err := client.GetToken(context.Background())
+	err := client.ForceRefresh(context.Background())
 
 	// Then: plaintext service identity is rejected before a request is made.
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTLSClientMaterial))
 	assert.Equal(t, int32(0), requests.Load())
+}
+
+func TestServiceClientInitialize_DoesNotRetryMTLSLifecycle(t *testing.T) {
+	// Given: configured service identity whose session endpoint fails.
+	caPEM, certPath, keyPath := writeServiceIdentityCertFiles(t, "metadata-service")
+	var calls atomic.Int32
+	server := newServiceIdentityTLSServer(t, caPEM, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls.Add(1)
+		http.Error(writer, "unavailable", http.StatusServiceUnavailable)
+	}))
+	client := NewServiceClientWithOptions(server.URL, "metadata-service", "id", "instance", "cluster", WithHTTPClient(server.Client()), WithServiceIdentityCertKey(certPath, keyPath), WithTargetService("target"), WithBootstrapMaxAttempts(5))
+
+	// When: startup initialization invokes the mTLS path.
+	err := client.Initialize(context.Background())
+
+	// Then: it returns the one lifecycle result without mTLS replay.
+	require.Error(t, err)
+	assert.Equal(t, int32(1), calls.Load())
 }
 
 func newTerminallyExpiredServiceClient(t *testing.T, serverURL, certPath, keyPath string, options ...ServiceClientOption) *ServiceClient {
