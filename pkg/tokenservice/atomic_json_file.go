@@ -68,6 +68,11 @@ func writeAtomicJSON(path string, value any) (bool, error) {
 	return true, nil
 }
 
+func committedWriteWarning(err error) bool {
+	var warning interface{ Committed() bool }
+	return errors.As(err, &warning) && warning.Committed()
+}
+
 func closeAndRemoveTemporary(file atomicJSONFile, path string, primary error) error {
 	return removeTemporary(path, errors.Join(primary, closeAtomicJSONFile(file)))
 }

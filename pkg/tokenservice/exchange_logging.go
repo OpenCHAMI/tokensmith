@@ -6,7 +6,6 @@ package tokenservice
 
 import (
 	"errors"
-	"net"
 	"net/http"
 
 	"github.com/openchami/tokensmith/pkg/oidc"
@@ -91,12 +90,5 @@ func exchangeProviderError(err error) *oidc.ProviderError {
 }
 
 func exchangeClientIP(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
-	}
-	return r.RemoteAddr
+	return requestClientIP(r)
 }
