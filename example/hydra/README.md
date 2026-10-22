@@ -20,7 +20,7 @@ This example demonstrates how to use the JWT authentication middleware with any 
 ## Prerequisites
 
 - A running OIDC-compliant provider (Hydra, Keycloak, Authelia, etc.)
-- Go 1.21 or later
+- Go 1.26.10 or later
 
 ## Running the Example
 
