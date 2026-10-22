@@ -69,9 +69,9 @@ This document validates all normative references used in the RFC 8693 bootstrap 
 
 ---
 
-### RFC 5627 - Use Cases and Requirements for JSON Web Signature (JWS) and JSON Web Encryption (JWE)
-**Status:** Informational (Published August 2015)
-**Reference:** https://datatracker.ietf.org/doc/html/rfc7517 (JSON Web Key - JWK)
+### RFC 7517 - JSON Web Key (JWK)
+**Status:** Proposed Standard (Published May 2015)
+**Reference:** https://datatracker.ietf.org/doc/html/rfc7517
 **Note:** Access tokens remain JWTs in OpenCHAMI Phase 1-3. JWT security is covered by RFC 7519 (JSON Web Token).
 
 **Key Context:**
@@ -86,7 +86,7 @@ This document validates all normative references used in the RFC 8693 bootstrap 
 **Status:** Published June 2017
 **Reference:** https://pages.nist.gov/800-63-3/sp800-63-3.html
 
-**Note on Revision:** SP 800-63-3 was superseded by SP 800-63-4 (Draft) and then SP 800-63-4 (Approved, Published December 2022). However, SP 800-63-3 remains widely used and is referenced for backward compatibility and stable guidance.
+**Note on Revision:** SP 800-63-3 was superseded by SP 800-63-4, which is published as the final Revision 4 in July 2025. SP 800-63-3 remains widely used and is referenced here only for backward compatibility and stable guidance.
 
 **Key Sections Used:**
 
@@ -111,6 +111,8 @@ This document validates all normative references used in the RFC 8693 bootstrap 
 - Token family revocation on replay (Section 5.1.2) implements revocation for security incidents
 - JWT signatures provide assertion protection (Section 7.1.1)
 - `subject` and `audience` claims provide assertion binding (Section 6)
+- Dedicated service identity policies are created, listed, and revoked separately from bootstrap token policies.
+- Existing mTLS callers require an explicit policy before upgrade. TokenSmith does not migrate bootstrap-only callers into the mTLS path automatically.
 
 **Relevance:** NIST SP 800-63C Part 3 provides authoritative guidance on assertion/token lifecycle. The restriction on token lifetime, revocation requirements, and binding semantics directly inform OpenCHAMI's policy choices.
 
@@ -128,28 +130,23 @@ This document validates all normative references used in the RFC 8693 bootstrap 
 
 ---
 
-### NIST SP 800-63-4 (Approved December 2022)
+### NIST SP 800-63-4 (Approved July 2025)
 **Status:** Current/Approved Special Publication
 **Reference:** https://pages.nist.gov/800-63-4/
 
-**Key Differences from SP 800-63-3:**
-- Increased emphasis on cryptographic agility and stronger algorithms
-- Enhanced refresh token security (Section 6 Part B)
-- Explicit guidance on token family replay detection (Section 6.2.3)
-- Requirements for secure token rotation (Section 6.2.2)
-
-**Key Sections Used:**
-- Section 6.2.2: Token Rotation (refresh tokens must be rotated on use)
-- Section 6.2.3: Replay Detection (token-family concepts for detecting replayed refresh tokens)
-- Section 5: Assertion Lifecycle (consistent with 800-63-3 but with enhanced guidance)
+**Topics Used:**
+- cryptographic agility and stronger algorithms
+- refresh-token security
+- token-family replay detection
+- secure token rotation
 
 **OpenCHAMI Application:**
-- Refresh token rotation on every use (Section 6.2.2) is explicitly implemented
-- Token-family tracking for replay detection (Section 6.2.3) is a core mitigation
+- Refresh token rotation on every use is an OpenCHAMI implementation choice aligned with NIST replay-resistance guidance.
+- Token-family tracking for replay detection is a core mitigation in OpenCHAMI.
 - Refresh-token family lifetime stays fixed across rotations, so rotation does not extend the family expiry
 - Access tokens are replaced on each rotation until the family reaches absolute expiry
 
-**Relevance:** NIST SP 800-63-4 provides the most current guidance and explicitly defines refresh token family concepts and replay detection, which are central to OpenCHAMI's Phase 3 implementation.
+**Relevance:** NIST SP 800-63-4 provides current guidance relevant to rotation and replay resistance, which informs OpenCHAMI's Phase 3 implementation.
 
 ---
 
@@ -165,39 +162,33 @@ This document validates all normative references used in the RFC 8693 bootstrap 
 
 ## Summary of Alignment
 
-| Aspect | Standard | Section | OpenCHAMI Implementation |
-|--------|----------|---------|--------------------------|
-| Token exchange | RFC 8693 | 2-6 | Bootstrap token → service token exchange |
-| Token endpoint | RFC 6749 | 3, 6 | `/oauth/token` with multiple grant types |
-| Bearer tokens | RFC 6750 | 2 | Access tokens used as bearer credentials |
-| Token lifecycle | NIST SP 800-63-3/4 | Part C § 5-7 | Expiry, binding, revocation policies |
-| Refresh rotation | NIST SP 800-63-4 | § 6.2 | New token issued on every refresh |
-| Replay detection | NIST SP 800-63-4 | § 6.2.3 | Token-family tracking and revocation |
-| Entropy | NIST SP 800-63-3/4 | Part B § 5 | Cryptographically secure random generation |
+| Aspect | Standard | OpenCHAMI Implementation |
+|--------|----------|--------------------------|
+| Token exchange | RFC 8693 | Bootstrap token → service token exchange |
+| Token endpoint | RFC 6749 | `/oauth/token` with multiple grant types |
+| Bearer tokens | RFC 6750 | Access tokens used as bearer credentials |
+| Token lifecycle | NIST SP 800-63-3/4 | Expiry, binding, revocation policies |
+| Refresh rotation | NIST SP 800-63-4 | New token issued on every refresh |
+| Replay detection | NIST SP 800-63-4 | Token-family tracking and revocation |
+| Entropy | NIST SP 800-63-3/4 | Cryptographically secure random generation |
 
 ---
 
 ## Validation Results
 
-✅ **All RFCs and standards are real and normative for OpenCHAMI implementation.**
+The referenced standards and their stated uses were checked against the current OpenCHAMI docs and implementation notes.
 
-✅ **Key design decisions validated against standards:**
+**Key design decisions validated against standards:**
 - Opaque bootstrap tokens with server-side hashing (RFC 8693, NIST SP 800-63)
-- Immutable scope/audience enforcement (RFC 8693 § 6.1, RFC 6749 § 4.1.2.1)
-- One-time-use bootstrap tokens (NIST SP 800-63 assertion lifecycle rules)
-- Refresh token rotation on every use (NIST SP 800-63-4 § 6.2.2)
-- Token-family replay detection (NIST SP 800-63-4 § 6.2.3)
+- Immutable scope/audience enforcement (RFC 8693 and RFC 6749 scope semantics)
+- One-time-use bootstrap tokens (NIST SP 800-63 guidance on short-lived assertions)
+- Refresh token rotation on every use (TokenSmith implementation choice aligned with NIST replay-resistance guidance)
+- Token-family replay detection (TokenSmith implementation choice aligned with NIST replay-resistance guidance)
 - Access token JWT format with local signature validation (RFC 7519, no introspection needed)
 - Bearer token usage model (RFC 6750, suitable for internal services)
 
 ---
 
-## No Hallucinations Confirmed
+## Verification Scope
 
-All RFC and NIST standards referenced in the bootstrap token migration plan are:
-1. Real, published standards (not fictional)
-2. Publicly available and discoverable
-3. Applied correctly to OpenCHAMI's context
-4. Aligned with industry best practices for token-based authentication
-
-The design leverages established standards rather than creating bespoke security mechanisms.
+This document covers the standards cited in the bootstrap token migration plan and the specific claims made here. It does not certify unrelated protocol usage or future docs.

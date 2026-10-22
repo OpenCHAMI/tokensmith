@@ -75,6 +75,21 @@ curl -s https://tokensmith.example/service-identity/session \
 - when a refresh family is terminal and cert plus key are configured, it attempts one HTTPS `POST /service-identity/session` replacement; bootstrap-only callers return `ErrRefreshTokenExpired`, while mTLS reacquisition failures propagate their wrapped reauthentication, material, or HTTP error and preserve the old state
 - a consumed bootstrap token is never replayed as a fallback after that terminal point
 
+### Dedicated service identity policy
+
+Use `tokensmith service-identity-policy create`, `list`, and `revoke` to manage per-subject mTLS authorization.
+
+Important:
+
+- the policy store is separate from the bootstrap and refresh stores
+- the default store path is `./data/service-identities`
+- override it with `--service-identity-policy-store` or `TOKENSMITH_SERVICE_IDENTITY_POLICY_STORE`
+- `list` returns metadata only, not tokens or secrets
+- `--refresh-ttl` must be positive and must not exceed `--ttl`
+- policy expiry and revocation are independent of bootstrap token state and refresh-family state
+- bootstrap tokens never authorize `POST /service-identity/session`
+- existing mTLS callers must have a dedicated policy before upgrade, TokenSmith does not migrate them automatically
+
 ### Bootstrap token request
 
 Request format:
@@ -267,22 +282,27 @@ Important implementation note:
 
 ### Lifecycle contract
 
-- `Initialize` blocks until the first token exchange succeeds or the configured retry budget is exhausted.
-- `GetToken` and `RefreshTokenIfNeeded` share one in-flight lifecycle operation. Concurrent callers wait on the same success or failure and respect their own context cancellation.
-- Access tokens stay usable until the refresh threshold says to renew, even if the refresh family deadline has already passed.
+- `Initialize` blocks until the first token exchange succeeds or the configured retry budget is exhausted. It only retries failures that are still safely pre-send, so a bootstrap credential may be spent after a request reaches TokenSmith and the next lifecycle call must start from fresh material.
+- `GetToken` preserves compatibility by returning without a lifecycle request while the cached access token is fresh. `RefreshTokenIfNeeded` has the same fresh-token no-op behavior.
+- `ForceRefresh` is the explicit API for callers that require acquisition or rotation even while the cached access token is fresh.
+- `GetToken`, `ForceRefresh`, and `RefreshTokenIfNeeded` share one operation-owned bounded context when a lifecycle request is needed. Concurrent callers wait on the same success or failure, and each caller only cancels its own wait.
+- Completion is atomic. The client either publishes one new token state or leaves the previous state untouched on failure.
 - Refresh rotation does not extend the absolute refresh-family deadline. `refresh_expires_in` is the remaining family lifetime at the moment the server replies.
-- When the access token needs renewal, a still-valid refresh family uses `POST /oauth/token` with the refresh grant. A transient refresh failure stays on that path and does not switch auth modes.
+- When the access token needs renewal, a still-valid refresh family uses `POST /oauth/token` with the refresh grant. A refresh replay revokes the family and the current refresh generation, but it does not revoke an already-issued access JWT.
+- Access-token revocation remains separate and is handled through `/oauth/revoke` by `jti`.
 - When the refresh family is terminal, configured cert plus key trigger one HTTPS `POST /service-identity/session` replacement. Bootstrap-only callers return the exact `ErrRefreshTokenExpired` error, and the consumed bootstrap token is not replayed.
-- `StartAutoRefresh` keeps running after an mTLS replacement, but it stops on bootstrap-only terminal expiry or context cancellation.
+- If that terminal mTLS replacement fails, the current auto-refresh loop stops. A later explicit lifecycle call can retry after the underlying cause is fixed.
 
 ### `ServiceClientStats`
 
+Stats are operation-level. They describe the last token lifecycle attempt, not each caller wait.
+
 | Field | Meaning |
 | --- | --- |
-| `RefreshSuccesses` | Number of successful token lifecycle exchanges, including initial acquisition, refresh, and replacement |
-| `RefreshFailures` | Number of failed token lifecycle attempts recorded by the client |
+| `RefreshSuccesses` | Number of successful token lifecycle operations, including initial acquisition, refresh, and replacement |
+| `RefreshFailures` | Number of failed token lifecycle operations recorded by the client |
 | `LastError` | Last refresh-related error string |
-| `LastRefresh` | Time of the last recorded token lifecycle attempt |
+| `LastRefresh` | Time of the last recorded token lifecycle operation |
 | `LastSuccess` | Time of the last successful token acquisition, refresh, or replacement |
 | `HasToken` | Whether an access token is currently cached |
 | `ExpiresAt` | Cached access token expiry |
@@ -290,6 +310,10 @@ Important implementation note:
 | `RefreshExpiresAt` | Absolute refresh-family deadline for the cached refresh token family |
 
 `RefreshExpiresAt` does not advance beyond the original family deadline on rotation. It tracks the family deadline, not a fresh lease.
+
+When persistence helpers report a durability error after a write or rename, treat the one-time credential as potentially committed and verify the stored state before retrying.
+
+`refresh_family_id` values are opaque generated identifiers and may differ across processes or runs.
 
 Example wiring:
 
@@ -314,6 +338,16 @@ if err := client.Initialize(ctx); err != nil {
 }
 
 go client.StartAutoRefresh(ctx)
+
+// GetToken is a no-op while the cached access token is fresh.
+if err := client.GetToken(ctx); err != nil {
+  return err
+}
+
+// ForceRefresh explicitly requests a new token.
+if err := client.ForceRefresh(ctx); err != nil {
+  return err
+}
 ```
 
 `Initialize` performs a blocking startup exchange with bounded retry and exponential backoff before failing closed.

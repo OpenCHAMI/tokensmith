@@ -28,6 +28,7 @@ This page lists environment variables currently used by TokenSmith code paths.
 | `TOKENSMITH_RFC8693_BOOTSTRAP_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--rfc8693-bootstrap-store`; default `./data/bootstrap-tokens` |
 | `TOKENSMITH_RFC8693_REFRESH_STORE` | `cmd/tokenservice/serve.go` | Fallback value for `--rfc8693-refresh-store`; default `./data/refresh-tokens` |
 | `TOKENSMITH_SERVICE_IDENTITY_CA` | `cmd/tokenservice/serve.go` | Fallback value for `--service-identity-ca` (PEM CA bundle for inbound mTLS client cert trust) |
+| `TOKENSMITH_SERVICE_IDENTITY_POLICY_STORE` | `cmd/tokenservice/serve.go`, `cmd/tokenservice/service_identity_policy.go` | Fallback value for `--service-identity-policy-store`; default `./data/service-identities` |
 | `TOKENSMITH_TLS_CERT_FILE` | `cmd/tokenservice/serve.go` | Fallback value for `--tls-cert-file` (TokenSmith HTTPS server certificate) |
 | `TOKENSMITH_TLS_KEY_FILE` | `cmd/tokenservice/serve.go` | Fallback value for `--tls-key-file` (TokenSmith HTTPS server private key) |
 
@@ -38,6 +39,7 @@ OIDC runtime configuration notes:
 - `TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT` is optional. When empty, TokenSmith uses `introspection_endpoint` from discovery metadata, then the compatibility alias `token_introspection_endpoint`.
 - `TOKENSMITH_OIDC_CLAIM_POLICY` defaults to `enriched`; use `csm-keycloak` only for CSM Keycloak bearer-token exchange.
 - `TOKENSMITH_OIDC_CA` affects outbound HTTPS validation for OIDC discovery, JWKS, and introspection only. It is separate from `TOKENSMITH_SERVICE_IDENTITY_CA`, which trusts inbound service-identity client certificates.
+- `TOKENSMITH_SERVICE_IDENTITY_POLICY_STORE` is the dedicated mTLS policy store. It does not share state with the bootstrap or refresh stores.
 - `TOKENSMITH_MAX_EXCHANGE_SESSION_LIFETIME` defaults to `24h`. Longer values are explicit risk acceptance for longer generated TokenSmith tokens; exchanged tokens are still capped by upstream `exp` and `session_exp`.
 
 Precedence for these values:
@@ -87,6 +89,7 @@ Notes:
 - `TOKENSMITH_SERVICE_IDENTITY_CERT` and `TOKENSMITH_SERVICE_IDENTITY_KEY` must be set together. The files must be readable, and the TokenSmith URL must use `https://` for `POST /service-identity/session`.
 - When both files are readable, `ServiceClient` prefers them over `TOKENSMITH_BOOTSTRAP_TOKEN` for the initial exchange.
 - If a refresh family later becomes terminal, the configured pair is used for an mTLS replacement attempt. Each shared in-flight lifecycle operation sends at most one request; failures propagate without falling back to bootstrap, and a later lifecycle call may retry.
+- Existing mTLS callers need a dedicated service identity policy before upgrade. TokenSmith does not migrate bootstrap-only callers into the mTLS path automatically.
 
 ## Example-only variables
 

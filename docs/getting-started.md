@@ -8,6 +8,11 @@ SPDX-License-Identifier: MIT
 
 This guide is the fastest path to running TokenSmith and integrating AuthN/AuthZ in a service.
 
+## Requirements
+
+TokenSmith requires Go 1.26.10 or later. This intentional compatibility change
+keeps consumer builds and security scans on the same patched toolchain baseline.
+
 ## Which path applies to me?
 
 Start here to find the right guide for your situation:
@@ -18,7 +23,7 @@ Start here to find the right guide for your situation:
     - CSM Keycloak example: [Keycloak token exchange](./keycloak-token-exchange.md)
 
 2. **TokenSmith is down or I need emergency access without OIDC**
-   - Use the break-glass local user token flow: [Break-glass: Local user tokens](#break-glass-local-user-tokens)
+    - Use the break-glass local user token flow: [Break-glass: Local user tokens](#12-break-glass-local-user-tokens-emergency-access)
    - Details: [Token Flows: Local user token](./token-flows.md#local-user-token-flow-break-glass)
 
 3. **I'm setting up service-to-service authentication only (no end-user OIDC)**
@@ -179,6 +184,8 @@ If your service only needs internal service-to-service AuthN/AuthZ, you can skip
 6. Install TokenSmith AuthZ middleware and map routes using either explicit `authz.RouteMapper` or path/method style (`authz.PathMethodMapper` plus Casbin matchers).
 7. Ensure service principals map to the `service` role in policy/grouping.
 
+If the caller already uses mTLS, create a dedicated service identity policy before you switch it over. Bootstrap tokens do not authorize `POST /service-identity/session`, and TokenSmith does not migrate existing mTLS callers automatically.
+
 For the client-side lifecycle, including refresh thresholds, family expiry, and terminal mTLS replacement, see `docs/internal-service-auth.md`.
 
 ### Recommended container workflow
@@ -284,10 +291,12 @@ Common caller-service errors when bootstrap wiring is wrong:
 
 ```text
 missing bootstrap token: set TOKENSMITH_BOOTSTRAP_TOKEN or WithBootstrapToken
-bootstrap token exchange failed after 5 attempts: failed to get token: status=400, body={"error":"invalid_grant","error_description":"The provided token is invalid or has already been used"}
-failed to get token: status=429, body={"error":"too_many_requests","error_description":"Too many failed token exchange attempts from this address"}
-refresh token expired
+token request response status=400 oauth_error=invalid_request
+token request response status=400 oauth_error=invalid_grant
+token request response status=429
 ```
+
+If the missing-bootstrap-token path is hit before any HTTP exchange, the client returns `ErrMissingBootstrapToken` instead of a server error.
 
 Important:
 

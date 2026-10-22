@@ -14,11 +14,11 @@ It shows how a caller service can:
 2. refresh tokens automatically when they approach expiry
 3. call another service with a TokenSmith-issued bearer token
 
-The current code does not perform mTLS session replacement. After the refresh-token family reaches its absolute expiry, it fails closed. To recover that path, you need fresh bootstrap material and a restart, or you can extend the example with `tokenservice.WithServiceIdentityCertKey(...)` and run TokenSmith over HTTPS with inbound service-identity mTLS enabled.
+This example stays bootstrap-only. It refreshes the current family until terminal expiry, then fails closed. To move it to mTLS, create a dedicated service identity policy, add `tokenservice.WithServiceIdentityCertKey(...)`, and run TokenSmith over HTTPS. The example does not do that automatically.
 
 ## Prerequisites
 
-- Go 1.16 or later
+- Go 1.26.10 or later
 - a running TokenSmith service (default: `http://localhost:8080`)
 - a target service that accepts TokenSmith-issued bearer tokens
 - a one-time bootstrap token minted with `tokensmith bootstrap-token create`
@@ -84,9 +84,9 @@ Successful run:
 Getting initial service token...
 Got token, expires at: 2026-04-14 22:49:10 +0000 UTC
 
-Waiting for token to be close to expiration...
-Refreshing token...
-Refreshed token, new expiration: 2026-04-14 23:49:10 +0000 UTC
+Waiting before checking the token lifetime...
+Checking whether token refresh is needed...
+Token available, expires at: 2026-04-14 22:49:10 +0000 UTC
 
 Calling target service...
 Successfully called target service!
@@ -95,14 +95,16 @@ Successfully called target service!
 Common failure output:
 
 ```text
-Failed to get initial token: bootstrap token exchange failed after 5 attempts: failed to get token: status=400, body={"error":"invalid_grant","error_description":"The provided token is invalid or has already been used"}
+Failed to get initial token: ErrMissingBootstrapToken
 ```
 
 ```text
-Failed to get initial token: missing bootstrap token: set TOKENSMITH_BOOTSTRAP_TOKEN or WithBootstrapToken
+Failed to get initial token: token request response status=400 oauth_error=invalid_request
 ```
 
-If this example succeeds, TokenSmith should log a matching successful bootstrap exchange and later refresh rotation.
+If this example succeeds, TokenSmith should log a matching successful bootstrap
+exchange. The later refresh check is intentionally a no-op while the access
+token is fresh.
 
 ## What the client actually does
 
@@ -112,6 +114,8 @@ Current behavior:
 
 - initial exchange uses RFC 8693 form data at `POST /oauth/token`
 - refresh uses `grant_type=refresh_token` at `POST /oauth/token`
+- `GetToken` and `RefreshTokenIfNeeded` retain a fresh cached token without a
+  network request; `ForceRefresh` is the explicit API for forced rotation
 - the client stores the current access token, refresh token, and expiry timestamps in memory
 - `CallTargetService()` refreshes first if the token is near expiry
 - the client is configured with a bootstrap token only, not `WithServiceIdentityCertKey(...)`
@@ -132,9 +136,10 @@ TokenSmith-issued service tokens include OpenCHAMI-specific claims configured on
 - reusing a consumed bootstrap token fails
 - refresh tokens are rotated on every successful use
 - replaying an old refresh token revokes the refresh-token family
+- existing mTLS callers need a dedicated policy before upgrade, there is no automatic migration
 - use HTTPS for real deployments
 - use durable RFC 8693 stores on the TokenSmith server if you need restart-safe replay protection
-- the example cannot recover from absolute family expiry unless you extend it with service-identity client cert and key support
+- the example cannot recover from absolute family expiry unless you extend it with service-identity client cert and key support plus the matching policy
 
 ## Integration pattern for your own services
 

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Authorization contract: normative AuthZ contract doc (modes off|shadow|enforce, decision taxonomy allow|deny|indeterminate|error, deny-by-default route model, stable JSON error schema, and deterministic policy hash requirement).
 - Public Go AuthZ contract types/constants in `pkg/authz`.
+- Added `ServiceClient.ForceRefresh` for callers that explicitly require token rotation while a cached access token is still fresh.
 
 ### Added
 - **Pluggable Policy Engine System**: Introduced a flexible policy engine architecture for determining scopes, audiences, and permissions in access tokens.
@@ -54,9 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved key management and NIST/FIPS-oriented naming and algorithms.
 - Updated dependencies; tidied `go.mod` and resolved module import casing issues (canonicalized to `github.com/openchami/tokensmith`).
 - Refactored middleware and tokenservice structure for clearer responsibilities.
+- Raised the minimum supported Go version to 1.26.10 intentionally; consumer builds and security scans now share the same patched toolchain baseline.
+- Upgraded chi to v5.4.0 and replaced spoofable `RealIP` handling with direct TCP-peer attribution; forwarded client-IP headers remain intentionally untrusted.
 
 ### Fixed
 - ServiceClient can replace terminally expired refresh-token families via HTTPS mTLS, coalesces lifecycle calls, and never replays consumed bootstrap tokens.
+- Restored `ServiceClient.GetToken` fresh-token behavior: it returns without rotating while the cached access token is valid; forced rotation now uses `ForceRefresh`.
 - Linter and build errors caused by incorrect construction of embedded RegisteredClaims fields.
 - go mod tidy / import casing issues (added guidance and temporary replace workaround).
 - Token parsing/validation bugs related to date/time handling and claim types.
@@ -70,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced scope validation and added email verification handling where applicable.
 
 ### Documentation
-- Issue #69: clarified service-token flow, bootstrap replay handling, absolute refresh-family lifetime, and mTLS recovery limits.
+- Issue #69: clarified service-token flow, shared lifecycle semantics, bootstrap replay handling, absolute refresh-family lifetime, dedicated service identity policies, and mTLS recovery limits.
 - **Policy Engine Documentation**: Added comprehensive documentation for the new policy engine system.
   - Policy engine interface documentation with usage examples.
   - Static policy engine configuration and examples.

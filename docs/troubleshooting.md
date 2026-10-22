@@ -78,11 +78,13 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
 1. Inspect `client.Stats()`.
 2. Check `HasRefreshToken` and `RefreshExpiresAt`.
 3. If `RefreshExpiresAt` is in the past and no cert plus key are configured, bootstrap-only callers are at terminal expiry.
+4. If `RefreshTokenIfNeeded` sees a fresh access token, it returns without changing state.
 
 **Resolution**:
 
 1. If you expect recovery, configure both `TOKENSMITH_SERVICE_IDENTITY_CERT` and `TOKENSMITH_SERVICE_IDENTITY_KEY`, and point `TOKENSMITH_URL` at `https://...`.
 2. If you are bootstrap-only, mint a new bootstrap token and initialize a new client session.
+3. If you are using mTLS callers, create the dedicated service identity policy before upgrade and make sure `TOKENSMITH_SERVICE_IDENTITY_POLICY_STORE` points at the same store path the server reads.
 
 ### Symptom: mTLS replacement fails or never starts
 
@@ -93,6 +95,7 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
 1. Verify both files exist and are readable.
 2. Verify the URL scheme is HTTPS.
 3. Check for `invalid service identity client certificate configuration` in the error chain.
+4. If the terminal mTLS replacement fails, the current auto-refresh loop stops. Fix the certs or policy, then retry with a new lifecycle call.
 
 **Resolution**:
 
@@ -114,6 +117,7 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
 
 1. Bootstrap replay needs a fresh bootstrap token and a new bootstrap exchange from the same bootstrap store path, because the consumed bootstrap token cannot be reused.
 2. Refresh replay needs a new bootstrap exchange because the whole family is revoked.
+3. `Initialize` only retries failures that are still safely pre-send. If the request may already have reached TokenSmith, treat the bootstrap credential as spent and mint a fresh one.
 
 ### Symptom: Stats are confusing
 
@@ -124,11 +128,28 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
 1. `LastRefresh` is the last attempt time.
 2. `LastSuccess` is the last successful refresh or replacement.
 3. `RefreshExpiresAt` stays fixed for the family and does not move forward on rotation.
+4. `Stats()` reports operation-level lifecycle counters, not per-caller wait counts.
 
 **Resolution**:
 
 1. Use `RefreshExpiresAt` to decide whether terminal expiry is near.
 2. Use `ExpiresAt` to judge whether the current access token still has time left.
+
+### Symptom: mTLS caller fails after upgrade because policy is missing
+
+**Cause**: The caller switched to the mTLS path before a dedicated service identity policy was created for its subject.
+
+**Diagnosis**:
+
+1. Run `tokensmith service-identity-policy list` against the store path.
+2. Confirm the subject, audience, scopes, and TTL values match the caller you are upgrading.
+3. Check that the service is reading the same `TOKENSMITH_SERVICE_IDENTITY_POLICY_STORE` path you used when creating the policy.
+
+**Resolution**:
+
+1. Create the dedicated policy before retrying the caller upgrade.
+2. Do not rely on bootstrap tokens to authorize `POST /service-identity/session`.
+3. There is no automatic migration from bootstrap-only callers to mTLS policies.
 
 ### Symptom: bootstrap provisioning fails or keeps replaying
 
