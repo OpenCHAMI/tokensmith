@@ -31,6 +31,7 @@ var (
 	atomicJSONWrite      = writeAtomicJSON
 	createAtomicJSONTemp = func(directory, pattern string) (atomicJSONFile, error) { return os.CreateTemp(directory, pattern) }
 	renameAtomicJSONFile = os.Rename
+	linkAtomicJSONFile   = os.Link
 	removeAtomicJSONFile = os.Remove
 	openAtomicJSONDir    = func(directory string) (directorySyncer, error) { return os.Open(directory) }
 	openStoreDirectory   = func(directory string) (directorySyncer, error) { return os.Open(directory) }
@@ -62,6 +63,41 @@ func writeAtomicJSON(path string, value any) (bool, error) {
 		return false, removeTemporary(temporaryPath, fmt.Errorf("rename temporary JSON file: %w", err))
 	}
 	err = syncAndCloseDirectory(openAtomicJSONDir, filepath.Dir(path), "JSON")
+	if err != nil {
+		return true, &CommittedWriteError{Err: err}
+	}
+	return true, nil
+}
+
+func createAtomicJSON(path string, value any) (bool, error) {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("marshal JSON: %w", err)
+	}
+	temporary, err := createAtomicJSONTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return false, fmt.Errorf("create temporary JSON file: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	if err := temporary.Chmod(0o600); err != nil {
+		return false, closeAndRemoveTemporary(temporary, temporaryPath, err)
+	}
+	if _, err := temporary.Write(data); err != nil {
+		return false, closeAndRemoveTemporary(temporary, temporaryPath, err)
+	}
+	if err := temporary.Sync(); err != nil {
+		return false, closeAndRemoveTemporary(temporary, temporaryPath, err)
+	}
+	if err := temporary.Close(); err != nil {
+		return false, removeTemporary(temporaryPath, err)
+	}
+	if err := linkAtomicJSONFile(temporaryPath, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return false, removeTemporary(temporaryPath, ErrServiceIdentityPolicyExists)
+		}
+		return false, removeTemporary(temporaryPath, fmt.Errorf("link temporary JSON file: %w", err))
+	}
+	err = errors.Join(removeTemporary(temporaryPath, nil), syncAndCloseDirectory(openAtomicJSONDir, filepath.Dir(path), "JSON"))
 	if err != nil {
 		return true, &CommittedWriteError{Err: err}
 	}

@@ -137,6 +137,10 @@ func (s *TokenService) generateServiceTokenResult(subject, audience string, scop
 	return s.generateServiceTokenWithContextResult(subject, audience, scopes, ttl, "bootstrap_exchange", "bootstrap_token_exchange", "bootstrap-exchange")
 }
 
+func (s *TokenService) generateServiceIdentityTokenUntil(subject, audience string, scopes []string, issuedAt, expiresAt time.Time) (string, error) {
+	return s.generateServiceTokenAt(subject, audience, scopes, issuedAt, expiresAt, "service_identity_mtls", "service_identity_session", "service-identity")
+}
+
 func (s *TokenService) generateServiceTokenWithContext(subject, audience string, scopes []string, ttl time.Duration, authMethod, authEvent, sessionPrefix string) (string, error) {
 	result, err := s.generateServiceTokenWithContextResult(subject, audience, scopes, ttl, authMethod, authEvent, sessionPrefix)
 	if err != nil {
@@ -148,6 +152,14 @@ func (s *TokenService) generateServiceTokenWithContext(subject, audience string,
 func (s *TokenService) generateServiceTokenWithContextResult(subject, audience string, scopes []string, ttl time.Duration, authMethod, authEvent, sessionPrefix string) (mintedAccessToken, error) {
 	now := time.Now()
 	return s.generateServiceTokenAtResult(subject, audience, scopes, now, now.Add(ttl), authMethod, authEvent, sessionPrefix)
+}
+
+func (s *TokenService) generateServiceTokenAt(subject, audience string, scopes []string, issuedAt, expiresAt time.Time, authMethod, authEvent, sessionPrefix string) (string, error) {
+	result, err := s.generateServiceTokenAtResult(subject, audience, scopes, issuedAt, expiresAt, authMethod, authEvent, sessionPrefix)
+	if err != nil {
+		return "", err
+	}
+	return result.JWT, nil
 }
 
 func (s *TokenService) generateServiceTokenAtResult(subject, audience string, scopes []string, issuedAt, expiresAt time.Time, authMethod, authEvent, sessionPrefix string) (mintedAccessToken, error) {
