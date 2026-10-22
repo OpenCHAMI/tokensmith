@@ -69,20 +69,24 @@ func TestServiceClientGetToken_CoalescesFailedMTLSReacquisition(t *testing.T) {
 	}))
 
 	client := newTerminallyExpiredServiceClient(t, server.URL, certPath, keyPath, WithHTTPClient(server.Client()))
-	errCh := make(chan error, 1)
-	go func() { errCh <- client.GetToken(context.Background()) }()
+	errCh := make(chan error, 2)
+	go func() { errCh <- client.ForceRefresh(context.Background()) }()
 	waitForLifecycle(t, started, "owner request")
-	op, owner := client.joinLifecycle()
-	require.False(t, owner)
+	observedDone := make(chan struct{})
+	go func() {
+		errCh <- client.ForceRefresh(&observingContext{Context: context.Background(), observedDone: observedDone})
+	}()
+	<-observedDone
 
 	// When: the shared request fails.
 	close(release)
 	ownerErr := waitForLifecycle(t, errCh, "owner failure")
-	waiterErr := client.waitForLifecycle(context.Background(), op)
+	waiterErr := waitForLifecycle(t, errCh, "waiter failure")
 
 	// Then: both callers receive the same failure class from one network attempt.
 	require.Error(t, ownerErr)
 	require.Error(t, waiterErr)
+	require.EqualError(t, waiterErr, ownerErr.Error())
 	assert.ErrorContains(t, ownerErr, "service identity reauthentication:")
 	assert.ErrorContains(t, waiterErr, "service identity reauthentication:")
 	assert.Equal(t, int32(1), serviceIdentityCalls.Load())
@@ -107,14 +111,14 @@ func TestServiceClientGetToken_CanceledWaiterDoesNotStartAnotherLifecycleRequest
 
 	client := newTerminallyExpiredServiceClient(t, server.URL, certPath, keyPath, WithHTTPClient(server.Client()))
 	ownerErr := make(chan error, 1)
-	go func() { ownerErr <- client.GetToken(context.Background()) }()
+	go func() { ownerErr <- client.ForceRefresh(context.Background()) }()
 	waitForLifecycle(t, started, "owner request")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cancel()
 
 	// When: a waiter is canceled while the owner completes its lifecycle operation.
-	waiterErr := client.GetToken(ctx)
+	waiterErr := client.ForceRefresh(ctx)
 	close(release)
 
 	// Then: cancellation wins at gate release and only the owner made a request.
@@ -123,19 +127,17 @@ func TestServiceClientGetToken_CanceledWaiterDoesNotStartAnotherLifecycleRequest
 	assert.Equal(t, int32(1), serviceIdentityCalls.Load())
 }
 
-func TestServiceClientGetToken_CancellationDuringRequestReleasesLifecycleGate(t *testing.T) {
-	// Given: a session request that is canceled by its caller.
+func TestServiceClientGetToken_OwnerCancellationDoesNotPoisonHealthyWaiter(t *testing.T) {
+	// Given: a session request that outlives its canceled creator.
 	caPEM, certPath, keyPath := writeServiceIdentityCertFiles(t, "metadata-service")
 	requestStarted := make(chan struct{})
 	release := make(chan struct{})
 	var calls atomic.Int32
 	server := newServiceIdentityTLSServer(t, caPEM, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.NotEmpty(t, r.TLS.PeerCertificates)
-		if calls.Add(1) == 1 {
-			close(requestStarted)
-			if !waitForLifecycleSignal(t, release, "canceled request release") {
-				return
-			}
+		calls.Add(1)
+		close(requestStarted)
+		if !waitForLifecycleSignal(t, release, "owner cancellation release") {
 			return
 		}
 		assert.NoError(t, writeLifecycleToken(w, "reacquired-access", "reacquired-refresh"))
@@ -144,33 +146,20 @@ func TestServiceClientGetToken_CancellationDuringRequestReleasesLifecycleGate(t 
 	client := newTerminallyExpiredServiceClient(t, server.URL, certPath, keyPath, WithHTTPClient(server.Client()))
 	ctx, cancel := context.WithCancel(context.Background())
 	firstErrCh := make(chan error, 1)
-	go func() { firstErrCh <- client.GetToken(ctx) }()
+	go func() { firstErrCh <- client.ForceRefresh(ctx) }()
 	waitForLifecycle(t, requestStarted, "first request")
 
-	// When: the canceled request returns and a new caller retries.
+	// When: the creator cancels and a healthy caller joins the same operation.
 	cancel()
 	firstErr := waitForLifecycle(t, firstErrCh, "canceled result")
+	secondErr := make(chan error, 1)
+	go func() { secondErr <- client.ForceRefresh(context.Background()) }()
 	close(release)
-	secondErr := client.GetToken(context.Background())
 
-	// Then: cancellation remains in the error chain and the retry owns a later operation.
+	// Then: cancellation remains local and the healthy waiter receives the shared result.
 	require.ErrorIs(t, firstErr, context.Canceled)
-	require.NoError(t, secondErr)
-	assert.Equal(t, int32(2), calls.Load())
-}
-
-func TestServiceClientWaitForLifecycle_CancellationAtGateRelease(t *testing.T) {
-	// Given: a completed lifecycle operation and a context canceled at its release boundary.
-	op := &lifecycleOperation{done: make(chan struct{})}
-	close(op.done)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	// When: a waiter observes both completion and cancellation.
-	err := (&ServiceClient{}).waitForLifecycle(ctx, op)
-
-	// Then: cancellation wins regardless of which ready channel select chooses.
-	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, waitForLifecycle(t, secondErr, "healthy waiter result"))
+	assert.Equal(t, int32(1), calls.Load())
 }
 
 func TestServiceClientStartAutoRefresh_ReacquiresMTLSSessionAfterTerminalExpiry(t *testing.T) {
@@ -198,6 +187,33 @@ func TestServiceClientStartAutoRefresh_ReacquiresMTLSSessionAfterTerminalExpiry(
 
 	// Then: it continued through mTLS reacquisition and stops only on cancellation.
 	waitForLifecycle(t, done, "auto-refresh shutdown")
+}
+
+func TestServiceClientStartAutoRefresh_StopsAfterTerminalMTLSFailure(t *testing.T) {
+	// Given: terminal expiry with a replacement endpoint that fails once.
+	caPEM, certPath, keyPath := writeServiceIdentityCertFiles(t, "metadata-service")
+	called := make(chan struct{})
+	var calls atomic.Int32
+	server := newServiceIdentityTLSServer(t, caPEM, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if calls.Add(1) == 1 {
+			close(called)
+		}
+		http.Error(writer, "unavailable", http.StatusServiceUnavailable)
+	}))
+	client := newTerminallyExpiredServiceClient(t, server.URL, certPath, keyPath, WithHTTPClient(server.Client()), WithAutoRefreshInterval(time.Millisecond))
+	done := make(chan struct{})
+
+	// When: automatic refresh reaches the terminal mTLS transition.
+	go func() {
+		defer close(done)
+		client.StartAutoRefresh(context.Background())
+	}()
+	waitForLifecycle(t, called, "terminal mTLS request")
+
+	// Then: the worker records one failed transition and exits without replaying it.
+	waitForLifecycle(t, done, "auto-refresh terminal stop")
+	assert.Equal(t, int32(1), calls.Load())
+	assert.Equal(t, uint64(1), client.Stats().RefreshFailures)
 }
 
 func waitForLifecycle[T any](t *testing.T, ch <-chan T, name string) T {
