@@ -1,6 +1,5 @@
 package tokenservice
 
-// Close releases the pinned directory descriptor.
 func (s *BootstrapTokenStore) Close() error {
 	if s == nil {
 		return nil
@@ -13,7 +12,6 @@ func (s *BootstrapTokenStore) Close() error {
 	return s.root.Close()
 }
 
-// Close releases the pinned directory descriptor.
 func (s *RefreshTokenStore) Close() error {
 	if s == nil {
 		return nil
