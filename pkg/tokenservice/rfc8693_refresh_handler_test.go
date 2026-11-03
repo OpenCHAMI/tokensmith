@@ -118,6 +118,35 @@ func TestOAuthTokenHandler_refresh_mint_failure_does_not_rotate_family(t *testin
 	require.Equal(t, http.StatusOK, original.Code)
 }
 
+func TestOAuthTokenHandler_refresh_unknown_token_audits_authentication_failed_without_credentials(t *testing.T) {
+	// Given
+	logs := useSynchronizedTestLogger(t)
+	svc, bootstrapToken := newRFC8693HandlerTestService(t)
+	router := svc.newRouter(zerolog.New(logs))
+	bootstrapResponse := httptest.NewRecorder()
+	router.ServeHTTP(bootstrapResponse, bootstrapExchangeRequest(bootstrapToken))
+	require.Equal(t, http.StatusOK, bootstrapResponse.Code)
+	var bootstrapTokens OAuthTokenResponse
+	require.NoError(t, json.NewDecoder(bootstrapResponse.Body).Decode(&bootstrapTokens))
+	unknownRefreshToken := bootstrapTokens.RefreshToken + "-unknown"
+	logs.Reset()
+
+	// When
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, refreshRequest(unknownRefreshToken))
+
+	// Then
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	var errorResponse OAuthErrorResponse
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&errorResponse))
+	require.Equal(t, "invalid_grant", errorResponse.Error)
+	require.Equal(t, "The provided refresh token is invalid or has expired", errorResponse.ErrorDescription)
+	require.Contains(t, logs.String(), string(AuditAuthenticationFailed))
+	require.Contains(t, logs.String(), "refresh_token_not_found")
+	require.NotContains(t, logs.String(), unknownRefreshToken)
+	require.NotContains(t, logs.String(), bootstrapTokens.RefreshToken)
+}
+
 func TestOAuthTokenHandler_concurrent_refresh_reuse_revokes_family(t *testing.T) {
 	// Given
 	logs := useSynchronizedTestLogger(t)

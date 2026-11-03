@@ -68,6 +68,7 @@ func (s *TokenService) handleRefreshTokenGrant(w http.ResponseWriter, _ *http.Re
 	tokenHash := HashBootstrapToken(req.RefreshToken)
 	family, err := s.refreshTokenStore.GetFamilyByTokenHash(tokenHash)
 	if err != nil {
+		AuditLogAuthenticationFailed("", "refresh_token_not_found", clientIP)
 		s.writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "The provided refresh token is invalid or has expired")
 		return
 	}
