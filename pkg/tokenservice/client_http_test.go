@@ -63,7 +63,7 @@ func TestServiceClientGetToken_RedactsAndBoundsOAuthError(t *testing.T) {
 	// Then: the externally visible failure contains only bounded safe metadata.
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "status=400")
-	assert.ErrorContains(t, err, "oauth_error=invalid_grant")
+	assert.ErrorContains(t, err, "body_truncated=true")
 	assert.NotContains(t, err.Error(), secret)
 	assert.NotContains(t, client.Stats().LastError, secret)
 	assert.Less(t, len(err.Error()), 256)
@@ -213,6 +213,45 @@ func TestServiceClientInitialize_DoesNotRetryRefreshLifecycle(t *testing.T) {
 	// Then: refresh runs exactly once even when its transport failure is pre-send.
 	require.Error(t, err)
 	assert.Equal(t, int32(2), requests.Load())
+}
+
+func TestAllowedOAuthCode_RequiresCompleteSingleJSONDocument(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "canonical invalid_grant",
+			body: `{"error":"invalid_grant"}`,
+			want: "invalid_grant",
+		},
+		{
+			name: "trailing garbage",
+			body: `{"error":"invalid_grant"}garbage`,
+			want: "",
+		},
+		{
+			name: "trailing json document",
+			body: `{"error":"invalid_grant"}{"error":"invalid_grant"}`,
+			want: "",
+		},
+		{
+			name: "malformed json",
+			body: `{"error":"invalid_grant"`,
+			want: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Given: an OAuth error body that may or may not be a complete single JSON document.
+			// When: the response classifier inspects the body.
+			got := allowedOAuthCode([]byte(test.body))
+			// Then: only a complete single-object invalid_grant document is accepted.
+			assert.Equal(t, test.want, got)
+		})
+	}
 }
 
 func canceledContext() context.Context {

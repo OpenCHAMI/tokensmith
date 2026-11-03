@@ -171,7 +171,11 @@ func allowedOAuthCode(body []byte) string {
 	var response struct {
 		Error string `json:"error"`
 	}
-	if json.NewDecoder(bytes.NewReader(body)).Decode(&response) != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := decoder.Decode(&response); err != nil {
+		return ""
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return ""
 	}
 	switch response.Error {
