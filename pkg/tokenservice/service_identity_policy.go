@@ -5,14 +5,8 @@
 package tokenservice
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +25,7 @@ var (
 // ServiceIdentityPolicy authorizes one mTLS certificate subject independently of bootstrap tokens.
 type ServiceIdentityPolicy struct {
 	Version    int           `json:"version"`
+	Revision   uint64        `json:"revision"`
 	ID         string        `json:"id"`
 	Subject    string        `json:"subject"`
 	Audience   string        `json:"audience"`
@@ -44,6 +39,7 @@ type ServiceIdentityPolicy struct {
 // ServiceIdentityPolicyStore persists per-subject mTLS authorization policies.
 type ServiceIdentityPolicyStore struct {
 	storePath string
+	root      *storeRoot
 	mu        sync.Mutex
 }
 
@@ -53,190 +49,109 @@ func NewServiceIdentityPolicyStore(storePath string) (*ServiceIdentityPolicyStor
 	if storePath == "" {
 		return nil, fmt.Errorf("%w: store path is required", ErrServiceIdentityPolicyInvalid)
 	}
-	if err := os.MkdirAll(storePath, 0o700); err != nil {
-		return nil, fmt.Errorf("create service identity policy store: %w", err)
+	root, err := openStoreRoot(storePath)
+	if err != nil {
+		return nil, fmt.Errorf("prepare service identity policy store directory: %w", err)
 	}
-	return &ServiceIdentityPolicyStore{storePath: storePath}, nil
+	return &ServiceIdentityPolicyStore{storePath: storePath, root: root}, nil
 }
 
 // Create persists a new policy and rejects an existing subject policy.
 func (s *ServiceIdentityPolicyStore) Create(policy *ServiceIdentityPolicy) error {
-	candidate := cloneServiceIdentityPolicy(policy)
-	if err := s.validate(candidate); err != nil {
+	candidate, err := s.preparePolicyWrite(policy)
+	if err != nil {
 		return err
+	}
+	return s.withStoreLock(func() error {
+		if _, err := s.load(candidate.Subject); err == nil {
+			return ErrServiceIdentityPolicyExists
+		} else if !errors.Is(err, ErrServiceIdentityPolicyNotFound) {
+			return err
+		}
+		committed, err := createAtomicJSON(s.root, s.policyFileName(candidate.Subject), candidate)
+		return serviceIdentityWriteResult("create", committed, err)
+	})
+}
+
+// Close releases the pinned directory descriptor.
+func (s *ServiceIdentityPolicyStore) Close() error {
+	if s == nil {
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	committed, err := createAtomicJSON(s.policyPath(candidate.Subject), candidate)
-	return serviceIdentityWriteResult("create", committed, err)
+	if s.root == nil {
+		return nil
+	}
+	return s.root.Close()
 }
 
 // Save atomically replaces the policy for its normalized subject.
 func (s *ServiceIdentityPolicyStore) Save(policy *ServiceIdentityPolicy) error {
-	candidate := cloneServiceIdentityPolicy(policy)
-	if err := s.validate(candidate); err != nil {
+	candidate, err := s.preparePolicyWrite(policy)
+	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.saveLocked(candidate)
+	return s.withStoreLock(func() error {
+		current, err := s.load(candidate.Subject)
+		if err != nil && !errors.Is(err, ErrServiceIdentityPolicyNotFound) {
+			return err
+		}
+		if current == nil {
+			candidate.Revision = 1
+		} else {
+			candidate.Revision = current.Revision + 1
+		}
+		return s.saveLocked(candidate)
+	})
+}
+
+func (s *ServiceIdentityPolicyStore) preparePolicyWrite(policy *ServiceIdentityPolicy) (*ServiceIdentityPolicy, error) {
+	candidate := cloneServiceIdentityPolicy(policy)
+	if candidate == nil {
+		return nil, s.validate(candidate)
+	}
+	candidate.Revision = 1
+	if err := s.validate(candidate); err != nil {
+		return nil, err
+	}
+	return candidate, nil
 }
 
 // GetActive returns the current active policy from disk for subject at now.
 func (s *ServiceIdentityPolicyStore) GetActive(subject string, now time.Time) (*ServiceIdentityPolicy, error) {
-	policy, err := s.load(subject)
+	var policy *ServiceIdentityPolicy
+	err := s.withStoreLock(func() error {
+		var loadErr error
+		policy, loadErr = s.load(subject)
+		if loadErr != nil {
+			return loadErr
+		}
+		if policy.RevokedAt != nil {
+			return ErrServiceIdentityPolicyRevoked
+		}
+		if !now.Before(policy.ExpiresAt) {
+			return ErrServiceIdentityPolicyExpired
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	if policy.RevokedAt != nil {
-		return nil, ErrServiceIdentityPolicyRevoked
-	}
-	if !now.Before(policy.ExpiresAt) {
-		return nil, ErrServiceIdentityPolicyExpired
 	}
 	return cloneServiceIdentityPolicy(policy), nil
 }
 
 // Revoke marks a policy revoked immediately and persists the change atomically.
 func (s *ServiceIdentityPolicyStore) Revoke(subject string, now time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	policy, err := s.load(subject)
-	if err != nil {
-		return err
-	}
-	if policy.RevokedAt == nil {
-		revokedAt := now.UTC()
-		policy.RevokedAt = &revokedAt
-	}
-	return s.saveLocked(policy)
-}
-
-// List returns defensive copies of every valid policy currently on disk.
-func (s *ServiceIdentityPolicyStore) List() ([]ServiceIdentityPolicy, error) {
-	entries, err := os.ReadDir(s.storePath)
-	if err != nil {
-		return nil, fmt.Errorf("read service identity policy store: %w", err)
-	}
-	policies := make([]ServiceIdentityPolicy, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(s.storePath, entry.Name()))
+	return s.withStoreLock(func() error {
+		policy, err := s.load(subject)
 		if err != nil {
-			return nil, fmt.Errorf("%w: read policy file", ErrServiceIdentityPolicyInvalid)
+			return err
 		}
-		var policy ServiceIdentityPolicy
-		if err := json.Unmarshal(data, &policy); err != nil {
-			return nil, fmt.Errorf("%w: decode policy file", ErrServiceIdentityPolicyInvalid)
+		if policy.RevokedAt == nil {
+			revokedAt := now.UTC()
+			policy.RevokedAt = &revokedAt
 		}
-		if err := s.validate(&policy); err != nil || entry.Name() != filepath.Base(s.policyPath(policy.Subject)) {
-			return nil, fmt.Errorf("%w: invalid policy file", ErrServiceIdentityPolicyInvalid)
-		}
-		policies = append(policies, *cloneServiceIdentityPolicy(&policy))
-	}
-	sort.Slice(policies, func(i, j int) bool { return policies[i].Subject < policies[j].Subject })
-	return policies, nil
-}
-
-func (s *ServiceIdentityPolicyStore) load(subject string) (*ServiceIdentityPolicy, error) {
-	subject = normalizeServiceIdentitySubject(subject)
-	if subject == "" {
-		return nil, fmt.Errorf("%w: subject is required", ErrServiceIdentityPolicyInvalid)
-	}
-	data, err := os.ReadFile(s.policyPath(subject))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, ErrServiceIdentityPolicyNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: read policy file", ErrServiceIdentityPolicyInvalid)
-	}
-	var policy ServiceIdentityPolicy
-	if err := json.Unmarshal(data, &policy); err != nil {
-		return nil, fmt.Errorf("%w: decode policy file", ErrServiceIdentityPolicyInvalid)
-	}
-	if err := s.validate(&policy); err != nil || policy.Subject != subject {
-		return nil, fmt.Errorf("%w: malformed policy", ErrServiceIdentityPolicyInvalid)
-	}
-	entries, err := os.ReadDir(s.storePath)
-	if err != nil {
-		return nil, fmt.Errorf("%w: read policy store", ErrServiceIdentityPolicyInvalid)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" || entry.Name() == filepath.Base(s.policyPath(subject)) {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(s.storePath, entry.Name()))
-		if err != nil {
-			return nil, fmt.Errorf("%w: read policy file", ErrServiceIdentityPolicyInvalid)
-		}
-		var candidate ServiceIdentityPolicy
-		if err := json.Unmarshal(data, &candidate); err != nil {
-			return nil, fmt.Errorf("%w: decode policy file", ErrServiceIdentityPolicyInvalid)
-		}
-		if normalizeServiceIdentitySubject(candidate.Subject) == subject {
-			return nil, fmt.Errorf("%w: duplicate subject", ErrServiceIdentityPolicyInvalid)
-		}
-	}
-	return &policy, nil
-}
-
-func (s *ServiceIdentityPolicyStore) saveLocked(policy *ServiceIdentityPolicy) error {
-	copy := cloneServiceIdentityPolicy(policy)
-	committed, err := atomicJSONWrite(s.policyPath(copy.Subject), copy)
-	return serviceIdentityWriteResult("write", committed, err)
-}
-
-func serviceIdentityWriteResult(operation string, committed bool, err error) error {
-	if err == nil {
-		return nil
-	}
-	if committed {
-		return fmt.Errorf("%s service identity policy committed but directory durability failed: %w", operation, err)
-	}
-	return fmt.Errorf("%s service identity policy: %w", operation, err)
-}
-
-func (s *ServiceIdentityPolicyStore) policyPath(subject string) string {
-	sum := sha256.Sum256([]byte(normalizeServiceIdentitySubject(subject)))
-	return filepath.Join(s.storePath, hex.EncodeToString(sum[:])+".json")
-}
-
-func (s *ServiceIdentityPolicyStore) validate(policy *ServiceIdentityPolicy) error {
-	if policy == nil || policy.Version != ServiceIdentityPolicyVersion || strings.TrimSpace(policy.ID) == "" {
-		return ErrServiceIdentityPolicyInvalid
-	}
-	policy.Subject = normalizeServiceIdentitySubject(policy.Subject)
-	policy.Audience = strings.TrimSpace(policy.Audience)
-	if policy.Subject == "" || policy.Audience == "" || policy.CreatedAt.IsZero() || policy.ExpiresAt.IsZero() || !policy.ExpiresAt.After(policy.CreatedAt) || policy.RefreshTTL <= 0 || policy.RefreshTTL > policy.ExpiresAt.Sub(policy.CreatedAt) {
-		return ErrServiceIdentityPolicyInvalid
-	}
-	if len(policy.Scopes) == 0 {
-		return ErrServiceIdentityPolicyInvalid
-	}
-	for index, scope := range policy.Scopes {
-		policy.Scopes[index] = strings.TrimSpace(scope)
-		if policy.Scopes[index] == "" {
-			return ErrServiceIdentityPolicyInvalid
-		}
-	}
-	return nil
-}
-
-func normalizeServiceIdentitySubject(subject string) string {
-	return strings.TrimSpace(subject)
-}
-
-func cloneServiceIdentityPolicy(policy *ServiceIdentityPolicy) *ServiceIdentityPolicy {
-	if policy == nil {
-		return nil
-	}
-	copy := *policy
-	copy.Scopes = append([]string(nil), policy.Scopes...)
-	if policy.RevokedAt != nil {
-		revokedAt := *policy.RevokedAt
-		copy.RevokedAt = &revokedAt
-	}
-	return &copy
+		return s.saveLocked(policy)
+	})
 }

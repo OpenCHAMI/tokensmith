@@ -32,6 +32,21 @@ func TestServiceIdentityPolicyStore_GetActive(t *testing.T) {
 	assert.Equal(t, "read", again.Scopes[0])
 }
 
+func TestNewServiceIdentityPolicyStore_restricts_existing_directory(t *testing.T) {
+	// Given
+	storePath := filepath.Join(t.TempDir(), "service-identities")
+	require.NoError(t, os.Mkdir(storePath, 0o755))
+
+	// When
+	_, err := NewServiceIdentityPolicyStore(storePath)
+
+	// Then
+	require.NoError(t, err)
+	info, err := os.Stat(storePath)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+}
+
 func TestServiceIdentityPolicyStore_GetActiveDeniesInvalidStates(t *testing.T) {
 	now := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	tests := []struct {
@@ -52,7 +67,7 @@ func TestServiceIdentityPolicyStore_GetActiveDeniesInvalidStates(t *testing.T) {
 			require.NoError(t, store.Revoke(policy.Subject, now))
 		}, wantErr: ErrServiceIdentityPolicyRevoked},
 		{name: "corrupt", setup: func(t *testing.T, store *ServiceIdentityPolicyStore) {
-			require.NoError(t, os.WriteFile(store.policyPath("boot-service"), []byte("{"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(store.storePath, store.policyFileName("boot-service")), []byte("{"), 0o600))
 		}, wantErr: ErrServiceIdentityPolicyInvalid},
 	}
 	for _, test := range tests {
@@ -87,9 +102,15 @@ func TestServiceIdentityPolicyStore_PersistsRevocationAndReadsDiskUpdates(t *tes
 	assert.Equal(t, "updated-audience", got.Audience)
 	entries, err := os.ReadDir(storePath)
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Equal(t, filepath.Base(store.policyPath(policy.Subject)), entries[0].Name())
-	assert.NotContains(t, entries[0].Name(), policy.Subject)
+	policyFiles := make([]os.DirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".json" {
+			policyFiles = append(policyFiles, entry)
+		}
+	}
+	require.Len(t, policyFiles, 1)
+	assert.Equal(t, store.policyFileName(policy.Subject), policyFiles[0].Name())
+	assert.NotContains(t, policyFiles[0].Name(), policy.Subject)
 }
 
 func TestServiceIdentityPolicyStore_RejectsInvalidPolicy(t *testing.T) {
@@ -100,6 +121,71 @@ func TestServiceIdentityPolicyStore_RejectsInvalidPolicy(t *testing.T) {
 	policy.RefreshTTL = 2 * time.Hour
 	err = store.Save(policy)
 	assert.ErrorIs(t, err, ErrServiceIdentityPolicyInvalid)
+}
+
+func TestServiceIdentityPolicyStore_CreateAndSave_reject_nil_policy(t *testing.T) {
+	tests := []struct {
+		name  string
+		write func(*ServiceIdentityPolicyStore, *ServiceIdentityPolicy) error
+	}{
+		{name: "create", write: (*ServiceIdentityPolicyStore).Create},
+		{name: "save", write: (*ServiceIdentityPolicyStore).Save},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Given
+			store, err := NewServiceIdentityPolicyStore(t.TempDir())
+			require.NoError(t, err)
+
+			// When
+			err = test.write(store, nil)
+
+			// Then
+			require.ErrorIs(t, err, ErrServiceIdentityPolicyInvalid)
+		})
+	}
+}
+
+func TestServiceIdentityPolicyStore_load_rejects_zero_revision(t *testing.T) {
+	// Given
+	store, err := NewServiceIdentityPolicyStore(t.TempDir())
+	require.NoError(t, err)
+	policy := testServiceIdentityPolicy(time.Now().UTC())
+	data, err := json.Marshal(policy)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(store.storePath, store.policyFileName(policy.Subject)), data, 0o600))
+
+	// When
+	_, err = store.GetActive(policy.Subject, time.Now().UTC())
+
+	// Then
+	require.ErrorIs(t, err, ErrServiceIdentityPolicyInvalid)
+	require.ErrorContains(t, err, "revision is required")
+}
+
+func TestServiceIdentityPolicyStore_CreateAndSave_assign_revisions(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		write func(*ServiceIdentityPolicyStore, *ServiceIdentityPolicy) error
+	}{
+		{name: "create", write: (*ServiceIdentityPolicyStore).Create},
+		{name: "save", write: (*ServiceIdentityPolicyStore).Save},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// Given
+			store, err := NewServiceIdentityPolicyStore(t.TempDir())
+			require.NoError(t, err)
+			policy := testServiceIdentityPolicy(time.Now().UTC())
+
+			// When
+			require.NoError(t, test.write(store, policy))
+			persisted, err := store.GetActive(policy.Subject, time.Now().UTC())
+
+			// Then
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, persisted.Revision, uint64(1))
+		})
+	}
 }
 
 func TestServiceIdentityPolicyStore_RejectsDuplicateSubjectFiles(t *testing.T) {

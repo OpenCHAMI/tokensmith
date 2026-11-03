@@ -90,3 +90,119 @@ func TestServiceIdentityPolicyStore_Create_across_processes(t *testing.T) {
 	_, err = store.GetActive("boot-service", time.Now().UTC())
 	require.NoError(t, err)
 }
+
+func TestServiceIdentityPolicyStore_mutations_wait_for_shared_store_lock(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		prepare   func(*ServiceIdentityPolicyStore, time.Time) error
+		operation func(*ServiceIdentityPolicyStore, time.Time) error
+	}{
+		{
+			name: "create",
+			prepare: func(_ *ServiceIdentityPolicyStore, _ time.Time) error {
+				return nil
+			},
+			operation: func(store *ServiceIdentityPolicyStore, now time.Time) error {
+				return store.Create(testServiceIdentityPolicy(now))
+			},
+		},
+		{
+			name: "save",
+			prepare: func(store *ServiceIdentityPolicyStore, now time.Time) error {
+				return store.Save(testServiceIdentityPolicy(now))
+			},
+			operation: func(store *ServiceIdentityPolicyStore, now time.Time) error {
+				return store.Save(testServiceIdentityPolicy(now))
+			},
+		},
+		{
+			name: "revoke",
+			prepare: func(store *ServiceIdentityPolicyStore, now time.Time) error {
+				return store.Save(testServiceIdentityPolicy(now))
+			},
+			operation: func(store *ServiceIdentityPolicyStore, now time.Time) error {
+				return store.Revoke("boot-service", now)
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// Given
+			path := t.TempDir()
+			store, err := NewServiceIdentityPolicyStore(path)
+			require.NoError(t, err)
+			now := time.Now().UTC()
+			require.NoError(t, test.prepare(store, now))
+			release := holdStoreLock(t, path)
+			var releaseOnce sync.Once
+			unlock := func() { releaseOnce.Do(release) }
+			t.Cleanup(unlock)
+			attempted := make(chan struct{}, 1)
+			originalBeforeFlock := beforeStoreFlock
+			beforeStoreFlock = func() { attempted <- struct{}{} }
+			t.Cleanup(func() { beforeStoreFlock = originalBeforeFlock })
+			result := make(chan error, 1)
+
+			// When
+			go func() { result <- test.operation(store, now.Add(time.Second)) }()
+			select {
+			case <-attempted:
+			case <-time.After(time.Second):
+				t.Fatal("policy mutation did not attempt the shared filesystem lock")
+			}
+			select {
+			case err := <-result:
+				t.Fatalf("policy mutation completed while lock was held: %v", err)
+			default:
+			}
+			unlock()
+			err = <-result
+
+			// Then
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestServiceIdentityPolicyStore_Save_across_processes_assigns_monotonic_revisions(t *testing.T) {
+	// Given
+	path := t.TempDir()
+	store, err := NewServiceIdentityPolicyStore(path)
+	require.NoError(t, err)
+	require.NoError(t, store.Save(testServiceIdentityPolicy(time.Now().UTC())))
+
+	// When
+	first := serviceIdentityPolicyProcess(path, "save")
+	second := serviceIdentityPolicyProcess(path, "save")
+	require.NoError(t, first.Start())
+	require.NoError(t, second.Start())
+	require.NoError(t, first.Wait())
+	require.NoError(t, second.Wait())
+	policy, err := store.GetActive("boot-service", time.Now().UTC())
+
+	// Then
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), policy.Revision)
+}
+
+func TestServiceIdentityPolicyStore_ProcessHelper(t *testing.T) {
+	mode := os.Getenv("TOKENSMITH_POLICY_HELPER")
+	if mode == "" {
+		return
+	}
+	store, err := NewServiceIdentityPolicyStore(os.Getenv("TOKENSMITH_POLICY_PATH"))
+	require.NoError(t, err)
+	switch mode {
+	case "save":
+		require.NoError(t, store.Save(testServiceIdentityPolicy(time.Now().UTC())))
+	case "revoke":
+		require.NoError(t, store.Revoke("boot-service", time.Now().UTC()))
+	default:
+		t.Fatalf("unsupported policy helper mode %q", mode)
+	}
+}
+
+func serviceIdentityPolicyProcess(path, mode string) *exec.Cmd {
+	command := exec.Command(os.Args[0], "-test.run=^TestServiceIdentityPolicyStore_ProcessHelper$")
+	command.Env = append(os.Environ(), "TOKENSMITH_POLICY_HELPER="+mode, "TOKENSMITH_POLICY_PATH="+path)
+	return command
+}
