@@ -79,7 +79,7 @@ func removeStoreFile(root *storeRoot, id string) (bool, error) {
 	if err := root.root.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("remove expired store file: %w", err)
 	}
-	if err := syncAndCloseRootDirectory(openStoreDirectory, root, "store"); err != nil {
+	if err := syncAndCloseDirectory(openStoreDirectory, root, "store"); err != nil {
 		return true, &CommittedWriteError{Err: err}
 	}
 	return true, nil

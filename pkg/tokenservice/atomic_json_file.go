@@ -91,7 +91,7 @@ func writeAtomicJSON(root *storeRoot, name string, value any) (bool, error) {
 	if err := renameAtomicJSONFile(root, temporaryName, name); err != nil {
 		return false, removeTemporary(root, temporaryName, fmt.Errorf("rename temporary JSON file: %w", err))
 	}
-	if err := syncAndCloseRootDirectory(openAtomicJSONDir, root, "JSON"); err != nil {
+	if err := syncAndCloseDirectory(openAtomicJSONDir, root, "JSON"); err != nil {
 		return true, &CommittedWriteError{Err: err}
 	}
 	return true, nil
@@ -115,7 +115,7 @@ func removeTemporary(root *storeRoot, name string, primary error) error {
 	return primary
 }
 
-func syncAndCloseRootDirectory(open func(*storeRoot) (directorySyncer, error), root *storeRoot, kind string) error {
+func syncAndCloseDirectory(open func(*storeRoot) (directorySyncer, error), root *storeRoot, kind string) error {
 	directory, err := open(root)
 	if err != nil {
 		return fmt.Errorf("open %s directory: %w", kind, err)
