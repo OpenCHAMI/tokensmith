@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -30,7 +31,7 @@ func newCreateServiceIdentityPolicyCmd() *cobra.Command {
 		Use:   "create",
 		Short: "Create a dedicated mTLS service identity policy",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (retErr error) {
 			subject, err := cmd.Flags().GetString("subject")
 			if err != nil {
 				return err
@@ -74,6 +75,7 @@ func newCreateServiceIdentityPolicyCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("initialize service identity policy store: %w", err)
 			}
+			defer func() { retErr = errors.Join(retErr, store.Close()) }()
 			now := time.Now().UTC()
 			policy := &tokenservice.ServiceIdentityPolicy{
 				Version:    tokenservice.ServiceIdentityPolicyVersion,
@@ -110,7 +112,7 @@ func newRevokeServiceIdentityPolicyCmd() *cobra.Command {
 		Use:   "revoke",
 		Short: "Revoke a dedicated mTLS service identity policy",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (retErr error) {
 			subject, err := cmd.Flags().GetString("subject")
 			if err != nil {
 				return err
@@ -123,6 +125,7 @@ func newRevokeServiceIdentityPolicyCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("initialize service identity policy store: %w", err)
 			}
+			defer func() { retErr = errors.Join(retErr, store.Close()) }()
 			if err := store.Revoke(subject, time.Now().UTC()); err != nil {
 				return fmt.Errorf("revoke service identity policy: %w", err)
 			}
@@ -142,7 +145,7 @@ func newListServiceIdentityPolicyCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List dedicated mTLS service identity authorization metadata",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (retErr error) {
 			storePath, err := resolveServiceIdentityPolicyStorePath(cmd)
 			if err != nil {
 				return err
@@ -151,6 +154,7 @@ func newListServiceIdentityPolicyCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("initialize service identity policy store: %w", err)
 			}
+			defer func() { retErr = errors.Join(retErr, store.Close()) }()
 			policies, err := store.List()
 			if err != nil {
 				return fmt.Errorf("list service identity policies: %w", err)

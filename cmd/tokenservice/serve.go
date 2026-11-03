@@ -5,6 +5,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -182,9 +183,8 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to create token service: %w", err)
 		}
-
 		// Start server
-		return service.Start(port)
+		return errors.Join(service.Start(port), service.Close())
 	},
 }
 
