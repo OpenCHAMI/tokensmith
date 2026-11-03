@@ -6,8 +6,8 @@ package tokenservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -17,20 +17,37 @@ type lifecycleOperation struct {
 	err  error
 }
 
-func (c *ServiceClient) runTokenLifecycle(ctx context.Context) error {
-	op, owner := c.joinLifecycle()
-	if !owner {
-		return c.waitForLifecycle(ctx, op)
-	}
+var errLifecycleNoop = errors.New("lifecycle conditional no-op")
 
+func (c *ServiceClient) runTokenLifecycle(ctx context.Context) error {
+	return c.runLifecycle(ctx, c.requestLifecycleToken)
+}
+
+func (c *ServiceClient) runConditionalTokenLifecycle(ctx context.Context) error {
+	if !c.accessTokenNeedsRefresh() {
+		return nil
+	}
+	return c.runLifecycle(ctx, func(operationContext context.Context) error {
+		if !c.accessTokenNeedsRefresh() {
+			return errLifecycleNoop
+		}
+		return c.requestLifecycleToken(operationContext)
+	})
+}
+
+func (c *ServiceClient) runLifecycle(ctx context.Context, request func(context.Context) error) error {
 	if err := ctx.Err(); err != nil {
-		c.finishLifecycle(op, err)
 		return err
 	}
-
-	err := c.requestLifecycleToken(ctx)
-	c.finishLifecycle(op, err)
-	return err
+	op, owner := c.joinLifecycle()
+	if owner {
+		operationContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.lifecycleTimeout)
+		go func() {
+			defer cancel()
+			c.finishLifecycle(op, request(operationContext))
+		}()
+	}
+	return c.waitForLifecycle(ctx, op)
 }
 
 func (c *ServiceClient) joinLifecycle() (*lifecycleOperation, bool) {
@@ -57,6 +74,9 @@ func (c *ServiceClient) waitForLifecycle(ctx context.Context, op *lifecycleOpera
 		return err
 	}
 	if op.err != nil {
+		if errors.Is(op.err, errLifecycleNoop) {
+			return nil
+		}
 		return op.err
 	}
 	if !c.accessTokenNeedsRefresh() {
@@ -66,20 +86,19 @@ func (c *ServiceClient) waitForLifecycle(ctx context.Context, op *lifecycleOpera
 }
 
 func (c *ServiceClient) finishLifecycle(op *lifecycleOperation, err error) {
+	if !errors.Is(err, errLifecycleNoop) {
+		c.recordLifecycleResult(err)
+	}
 	c.lifecycleMu.Lock()
 	op.err = err
+	close(op.done)
 	if c.lifecycle == op {
 		c.lifecycle = nil
 	}
 	c.lifecycleMu.Unlock()
-	close(op.done)
 }
 
 func (c *ServiceClient) requestLifecycleToken(ctx context.Context) error {
-	if !c.accessTokenNeedsRefresh() {
-		return nil
-	}
-
 	c.mu.RLock()
 	hasRefreshToken := strings.TrimSpace(c.refreshToken) != ""
 	refreshExpiresAt := c.refreshExpiresAt
@@ -95,23 +114,17 @@ func (c *ServiceClient) requestLifecycleToken(ctx context.Context) error {
 				}
 				return nil
 			}
-			c.recordClientRefreshFailure(ErrRefreshTokenExpired)
 			return ErrRefreshTokenExpired
 		}
 		return c.requestServiceToken(ctx, "refresh")
 	}
 
-	if certPath, keyPath, ok := c.readableServiceIdentityPaths(); ok {
+	if certPath, keyPath, configured := c.serviceIdentityPaths(); configured {
+		if err := validateServiceIdentityMaterial(certPath, keyPath); err != nil {
+			return err
+		}
 		return c.requestServiceIdentitySession(ctx, certPath, keyPath)
 	}
 
 	return c.requestServiceToken(ctx, "bootstrap")
-}
-
-func validateServiceIdentityURL(rawURL string) error {
-	endpoint, err := url.Parse(rawURL)
-	if err != nil || !strings.EqualFold(endpoint.Scheme, "https") || endpoint.Host == "" {
-		return fmt.Errorf("%w: service identity session requires an HTTPS TokenSmith URL", ErrTLSClientMaterial)
-	}
-	return nil
 }
