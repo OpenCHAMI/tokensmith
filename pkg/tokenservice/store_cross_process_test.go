@@ -1,6 +1,7 @@
 package tokenservice
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -159,4 +160,21 @@ func storeHelper(path, mode, successor, output string) *exec.Cmd {
 	command := exec.Command(os.Args[0], "-test.run=^TestStoreProcessHelper$")
 	command.Env = append(os.Environ(), "TOKENSMITH_STORE_HELPER="+mode, "TOKENSMITH_STORE_PATH="+path, "TOKENSMITH_SUCCESSOR="+successor, "TOKENSMITH_STORE_RESULT="+output)
 	return command
+}
+
+func holdStoreLock(t *testing.T, path string) func() {
+	t.Helper()
+	command := storeHelper(path, "hold-lock", "", "")
+	input, err := command.StdinPipe()
+	require.NoError(t, err)
+	output, err := command.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, command.Start())
+	scanner := bufio.NewScanner(output)
+	require.True(t, scanner.Scan())
+	require.Equal(t, "locked", scanner.Text())
+	return func() {
+		require.NoError(t, input.Close())
+		require.NoError(t, command.Wait())
+	}
 }

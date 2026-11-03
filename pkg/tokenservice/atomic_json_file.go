@@ -35,13 +35,18 @@ func (e *CommittedWriteError) Error() string   { return e.Err.Error() }
 func (e *CommittedWriteError) Unwrap() error   { return e.Err }
 func (e *CommittedWriteError) Committed() bool { return true }
 
+func committedWriteWarning(err error) bool {
+	var warning interface{ Committed() bool }
+	return errors.As(err, &warning) && warning.Committed()
+}
+
 var (
 	atomicJSONWrite      = writeAtomicJSON
 	createAtomicJSONTemp = createStoreTemp
 	renameAtomicJSONFile = func(root *storeRoot, oldName, newName string) error { return root.root.Rename(oldName, newName) }
 	removeAtomicJSONFile = func(root *storeRoot, name string) error { return root.root.Remove(name) }
 	openAtomicJSONDir    = func(root *storeRoot) (directorySyncer, error) { return root.root.Open(".") }
-	openStoreDirectory   = func(directory string) (directorySyncer, error) { return os.Open(directory) }
+	openStoreDirectory   = func(root *storeRoot) (directorySyncer, error) { return root.root.Open(".") }
 )
 
 func createStoreTemp(root *storeRoot, _ string) (atomicJSONFile, error) {
@@ -112,19 +117,6 @@ func removeTemporary(root *storeRoot, name string, primary error) error {
 
 func syncAndCloseRootDirectory(open func(*storeRoot) (directorySyncer, error), root *storeRoot, kind string) error {
 	directory, err := open(root)
-	if err != nil {
-		return fmt.Errorf("open %s directory: %w", kind, err)
-	}
-	syncErr := directory.Sync()
-	closeErr := directory.Close()
-	if syncErr != nil || closeErr != nil {
-		return errors.Join(wrapDirectoryError(kind, "sync", syncErr), wrapDirectoryError(kind, "close", closeErr))
-	}
-	return nil
-}
-
-func syncAndCloseDirectory(open func(string) (directorySyncer, error), path, kind string) error {
-	directory, err := open(path)
 	if err != nil {
 		return fmt.Errorf("open %s directory: %w", kind, err)
 	}
