@@ -5,6 +5,7 @@
 package tokenservice
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -14,8 +15,24 @@ import (
 	"github.com/openchami/tokensmith/pkg/token"
 )
 
+var (
+	makeStoreTemp                 = os.MkdirTemp
+	newServiceIdentityPolicyStore = NewServiceIdentityPolicyStore
+	newBootstrapTokenStore        = NewBootstrapTokenStore
+	newRefreshTokenStore          = NewRefreshTokenStore
+)
+
 // NewTokenService creates a new TokenService instance.
-func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService, error) {
+func NewTokenService(keyManager *keys.KeyManager, config Config) (_ *TokenService, retErr error) {
+	var opened []interface{ Close() error }
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		for index := len(opened) - 1; index >= 0; index-- {
+			retErr = errors.Join(retErr, opened[index].Close())
+		}
+	}()
 	claimPolicy, err := ParseOIDCClaimPolicy(string(config.OIDCClaimPolicy))
 	if err != nil {
 		return nil, err
@@ -81,39 +98,42 @@ func NewTokenService(keyManager *keys.KeyManager, config Config) (*TokenService,
 	}
 	serviceIdentityPolicyStorePath := config.ServiceIdentityPolicyStorePath
 	if serviceIdentityPolicyStorePath == "" {
-		serviceIdentityPolicyStorePath, err = os.MkdirTemp("", "tokensmith-service-identities-*")
+		serviceIdentityPolicyStorePath, err = makeStoreTemp("", "tokensmith-service-identities-*")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temp service identity policy store: %w", err)
 		}
 	}
-	serviceIdentityPolicyStore, err := NewServiceIdentityPolicyStore(serviceIdentityPolicyStorePath)
+	serviceIdentityPolicyStore, err := newServiceIdentityPolicyStore(serviceIdentityPolicyStorePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize service identity policy store: %w", err)
 	}
+	opened = append(opened, serviceIdentityPolicyStore)
 	svc.serviceIdentityPolicyStore = serviceIdentityPolicyStore
 	bootstrapStorePath := config.RFC8693BootstrapStorePath
 	if bootstrapStorePath == "" {
-		bootstrapStorePath, err = os.MkdirTemp("", "tokensmith-bootstrap-*")
+		bootstrapStorePath, err = makeStoreTemp("", "tokensmith-bootstrap-*")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temp bootstrap token store: %w", err)
 		}
 	}
-	bootstrapStore, err := NewBootstrapTokenStore(bootstrapStorePath)
+	bootstrapStore, err := newBootstrapTokenStore(bootstrapStorePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize RFC 8693 bootstrap token store: %w", err)
 	}
+	opened = append(opened, bootstrapStore)
 	svc.bootstrapTokenStore = bootstrapStore
 	refreshStorePath := config.RFC8693RefreshStorePath
 	if refreshStorePath == "" {
-		refreshStorePath, err = os.MkdirTemp("", "tokensmith-refresh-*")
+		refreshStorePath, err = makeStoreTemp("", "tokensmith-refresh-*")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temp refresh token store: %w", err)
 		}
 	}
-	refreshStore, err := NewRefreshTokenStore(refreshStorePath)
+	refreshStore, err := newRefreshTokenStore(refreshStorePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize RFC 8693 refresh token store: %w", err)
 	}
+	opened = append(opened, refreshStore)
 	svc.refreshTokenStore = refreshStore
 	return svc, nil
 }
