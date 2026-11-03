@@ -3,7 +3,6 @@ package tokenservice
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,17 +16,19 @@ var (
 
 type BootstrapTokenStore struct {
 	storePath string
+	root      *storeRoot
 	mu        sync.RWMutex
 	policies  map[string]*BootstrapTokenPolicy
 }
 
 func NewBootstrapTokenStore(storePath string) (*BootstrapTokenStore, error) {
-	if err := os.MkdirAll(storePath, 0o755); err != nil {
-		return nil, fmt.Errorf("create bootstrap token store directory: %w", err)
+	root, err := openStoreRoot(storePath)
+	if err != nil {
+		return nil, fmt.Errorf("prepare bootstrap token store directory: %w", err)
 	}
-	store := &BootstrapTokenStore{storePath: storePath, policies: make(map[string]*BootstrapTokenPolicy)}
+	store := &BootstrapTokenStore{storePath: storePath, root: root, policies: make(map[string]*BootstrapTokenPolicy)}
 	if err := store.load(); err != nil {
-		return nil, err
+		return nil, errors.Join(err, root.Close())
 	}
 	return store, nil
 }
@@ -36,7 +37,7 @@ func (s *BootstrapTokenStore) SavePolicy(policy *BootstrapTokenPolicy) (retErr e
 	candidate := cloneBootstrapPolicy(policy)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := lockStore(s.storePath)
+	lock, err := lockStore(s.root)
 	if err != nil {
 		return err
 	}
@@ -107,7 +108,7 @@ func (s *BootstrapTokenStore) GetLatestPolicyBySubject(subject string) (*Bootstr
 func (s *BootstrapTokenStore) ConsumePolicy(tokenHash, clientIP string, now time.Time) (result *BootstrapTokenPolicy, retErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := lockStore(s.storePath)
+	lock, err := lockStore(s.root)
 	if err != nil {
 		return nil, err
 	}
@@ -141,11 +142,11 @@ func (s *BootstrapTokenStore) ConsumePolicy(tokenHash, clientIP string, now time
 }
 
 func (s *BootstrapTokenStore) persist(policy *BootstrapTokenPolicy) (bool, error) {
-	return atomicJSONWrite(filepath.Join(s.storePath, policy.TokenHash+".json"), policyToDisk(policy))
+	return atomicJSONWrite(s.root, policy.TokenHash+".json", policyToDisk(policy))
 }
 
 func (s *BootstrapTokenStore) load() error {
-	entries, err := os.ReadDir(s.storePath)
+	entries, err := s.root.ReadDir()
 	if err != nil {
 		return fmt.Errorf("read bootstrap token store directory: %w", err)
 	}
@@ -153,7 +154,7 @@ func (s *BootstrapTokenStore) load() error {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		data, readErr := os.ReadFile(filepath.Join(s.storePath, entry.Name()))
+		data, readErr := s.root.ReadRecord(entry.Name())
 		if readErr != nil {
 			return fmt.Errorf("read bootstrap policy %q: %w", entry.Name(), readErr)
 		}
@@ -170,7 +171,7 @@ func (s *BootstrapTokenStore) load() error {
 }
 
 func (s *BootstrapTokenStore) loadOne(hash string) (*BootstrapTokenPolicy, error) {
-	data, err := os.ReadFile(filepath.Join(s.storePath, hash+".json"))
+	data, err := s.root.ReadRecord(hash + ".json")
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap token policy not found: %w", err)
 	}
@@ -185,7 +186,7 @@ func (s *BootstrapTokenStore) loadOne(hash string) (*BootstrapTokenPolicy, error
 }
 
 func (s *BootstrapTokenStore) loadLatestFromDisk(subject string) (*BootstrapTokenPolicy, error) {
-	entries, err := os.ReadDir(s.storePath)
+	entries, err := s.root.ReadDir()
 	if err != nil {
 		return nil, fmt.Errorf("read bootstrap token store directory: %w", err)
 	}
@@ -194,7 +195,7 @@ func (s *BootstrapTokenStore) loadLatestFromDisk(subject string) (*BootstrapToke
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(s.storePath, entry.Name()))
+		data, err := s.root.ReadRecord(entry.Name())
 		if err != nil {
 			return nil, fmt.Errorf("read bootstrap policy %q: %w", entry.Name(), err)
 		}

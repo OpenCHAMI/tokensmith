@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -21,6 +20,7 @@ var (
 
 type RefreshTokenStore struct {
 	storePath string
+	root      *storeRoot
 	mu        sync.RWMutex
 	families  map[string]*RefreshTokenFamily
 }
@@ -41,12 +41,13 @@ type refreshFamilyDisk struct {
 }
 
 func NewRefreshTokenStore(storePath string) (*RefreshTokenStore, error) {
-	if err := os.MkdirAll(storePath, 0o755); err != nil {
-		return nil, fmt.Errorf("create refresh token store directory: %w", err)
+	root, err := openStoreRoot(storePath)
+	if err != nil {
+		return nil, fmt.Errorf("prepare refresh token store directory: %w", err)
 	}
-	store := &RefreshTokenStore{storePath: storePath, families: make(map[string]*RefreshTokenFamily)}
+	store := &RefreshTokenStore{storePath: storePath, root: root, families: make(map[string]*RefreshTokenFamily)}
 	if err := store.load(); err != nil {
-		return nil, err
+		return nil, errors.Join(err, root.Close())
 	}
 	return store, nil
 }
@@ -72,7 +73,7 @@ func (s *RefreshTokenStore) GetFamilyByTokenHash(hash string) (*RefreshTokenFami
 func (s *RefreshTokenStore) RotateOrRevoke(presentedHash, successorHash string, now time.Time) (result *RefreshTokenFamily, retErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := lockStore(s.storePath)
+	lock, err := lockStore(s.root)
 	if err != nil {
 		return nil, err
 	}
@@ -125,10 +126,10 @@ func (s *RefreshTokenStore) RotateOrRevoke(presentedHash, successorHash string, 
 	return cloneRefreshFamily(candidate), err
 }
 func (s *RefreshTokenStore) persist(family *RefreshTokenFamily) (bool, error) {
-	return atomicJSONWrite(filepath.Join(s.storePath, family.FamilyID+".json"), familyToDisk(family))
+	return atomicJSONWrite(s.root, family.FamilyID+".json", familyToDisk(family))
 }
 func (s *RefreshTokenStore) load() error {
-	entries, err := os.ReadDir(s.storePath)
+	entries, err := s.root.ReadDir()
 	if err != nil {
 		return fmt.Errorf("read refresh token store directory: %w", err)
 	}
@@ -136,7 +137,7 @@ func (s *RefreshTokenStore) load() error {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		data, readErr := os.ReadFile(filepath.Join(s.storePath, entry.Name()))
+		data, readErr := s.root.ReadRecord(entry.Name())
 		if readErr != nil {
 			return fmt.Errorf("read refresh token family %q: %w", entry.Name(), readErr)
 		}

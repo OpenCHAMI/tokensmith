@@ -13,17 +13,20 @@ func TestWriteAtomicJSON_returns_close_failure_without_publishing(t *testing.T) 
 	// Given
 	directory := t.TempDir()
 	destination := filepath.Join(directory, "policy.json")
+	root, err := openStoreRoot(directory)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, root.Close()) })
 	closeErr := errors.New("close failed")
-	file, err := os.CreateTemp(directory, ".tmp-*")
+	file, err := root.root.OpenFile(".tmp-test", os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 	require.NoError(t, err)
 	originalCreate := createAtomicJSONTemp
-	createAtomicJSONTemp = func(string, string) (atomicJSONFile, error) {
-		return closeFailingAtomicFile{File: file, closeErr: closeErr}, nil
+	createAtomicJSONTemp = func(*storeRoot, string) (atomicJSONFile, error) {
+		return namedAtomicJSONFile{atomicJSONFile: closeFailingAtomicFile{File: file, closeErr: closeErr}, name: ".tmp-test"}, nil
 	}
 	t.Cleanup(func() { createAtomicJSONTemp = originalCreate })
 
 	// When
-	_, err = writeAtomicJSON(destination, map[string]string{"key": "value"})
+	_, err = writeAtomicJSON(root, "policy.json", map[string]string{"key": "value"})
 
 	// Then
 	require.ErrorIs(t, err, closeErr)
@@ -38,21 +41,24 @@ func TestWriteAtomicJSON_returns_primary_and_temp_removal_failures(t *testing.T)
 	// Given
 	directory := t.TempDir()
 	destination := filepath.Join(directory, "policy.json")
+	root, err := openStoreRoot(directory)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, root.Close()) })
 	syncErr := errors.New("sync failed")
 	removeErr := errors.New("remove failed")
-	file, err := os.CreateTemp(directory, ".tmp-*")
+	file, err := root.root.OpenFile(".tmp-test", os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, os.Remove(file.Name())) })
 	originalCreate := createAtomicJSONTemp
 	originalRemove := removeAtomicJSONFile
-	createAtomicJSONTemp = func(string, string) (atomicJSONFile, error) {
-		return syncFailingAtomicFile{File: file, syncErr: syncErr}, nil
+	createAtomicJSONTemp = func(*storeRoot, string) (atomicJSONFile, error) {
+		return namedAtomicJSONFile{atomicJSONFile: syncFailingAtomicFile{File: file, syncErr: syncErr}, name: ".tmp-test"}, nil
 	}
-	removeAtomicJSONFile = func(string) error { return removeErr }
+	removeAtomicJSONFile = func(*storeRoot, string) error { return removeErr }
 	t.Cleanup(func() { createAtomicJSONTemp = originalCreate; removeAtomicJSONFile = originalRemove })
 
 	// When
-	_, err = writeAtomicJSON(destination, map[string]string{"key": "value"})
+	_, err = writeAtomicJSON(root, "policy.json", map[string]string{"key": "value"})
 
 	// Then
 	require.ErrorIs(t, err, syncErr)
@@ -67,13 +73,16 @@ func TestWriteAtomicJSON_returns_directory_close_failure_after_rename(t *testing
 	// Given
 	directory := t.TempDir()
 	destination := filepath.Join(directory, "policy.json")
+	root, err := openStoreRoot(directory)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, root.Close()) })
 	closeErr := errors.New("directory close failed")
 	originalOpen := openAtomicJSONDir
-	openAtomicJSONDir = func(string) (directorySyncer, error) { return failingDirectory{closeErr: closeErr}, nil }
+	openAtomicJSONDir = func(*storeRoot) (directorySyncer, error) { return failingDirectory{closeErr: closeErr}, nil }
 	t.Cleanup(func() { openAtomicJSONDir = originalOpen })
 
 	// When
-	committed, err := writeAtomicJSON(destination, map[string]string{"key": "value"})
+	committed, err := writeAtomicJSON(root, "policy.json", map[string]string{"key": "value"})
 
 	// Then
 	require.ErrorIs(t, err, closeErr)

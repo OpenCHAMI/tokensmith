@@ -9,7 +9,7 @@ func (s *RefreshTokenStore) SaveFamily(family *RefreshTokenFamily) (retErr error
 	candidate := cloneRefreshFamily(family)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := lockStore(s.storePath)
+	lock, err := lockStore(s.root)
 	if err != nil {
 		return err
 	}
@@ -45,7 +45,7 @@ func (s *RefreshTokenStore) UpdateFamily(family *RefreshTokenFamily) (retErr err
 	candidate := cloneRefreshFamily(family)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	lock, err := lockStore(s.storePath)
+	lock, err := lockStore(s.root)
 	if err != nil {
 		return err
 	}

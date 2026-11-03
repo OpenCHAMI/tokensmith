@@ -9,5 +9,7 @@ import (
 
 var ErrStoreLockUnsupported = errors.New("store lock unsupported on this platform")
 
-func lockStore(string) (*os.File, error) { return nil, ErrStoreLockUnsupported }
-func unlockStore(*os.File) error         { return nil }
+var beforeStoreFlock = func() {}
+
+func lockStore(*storeRoot) (*os.File, error) { return nil, ErrStoreLockUnsupported }
+func unlockStore(*os.File) error             { return nil }

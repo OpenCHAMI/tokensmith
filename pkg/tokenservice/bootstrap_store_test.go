@@ -129,7 +129,7 @@ func TestBootstrapTokenStore_ConsumePolicy_does_not_publish_on_write_failure(t *
 	hash := HashBootstrapToken("write-failure")
 	require.NoError(t, store.SavePolicy(&BootstrapTokenPolicy{ID: "write", TokenHash: hash, ExpiresAt: now.Add(time.Hour)}))
 	original := atomicJSONWrite
-	atomicJSONWrite = func(string, any) (bool, error) { return false, errors.New("write failed") }
+	atomicJSONWrite = func(*storeRoot, string, any) (bool, error) { return false, errors.New("write failed") }
 	t.Cleanup(func() { atomicJSONWrite = original })
 
 	// When
@@ -151,7 +151,7 @@ func TestBootstrapTokenStore_ConsumePolicy_publishes_committed_state_on_director
 	require.NoError(t, store.SavePolicy(policy))
 	closeErr := errors.New("directory close failed")
 	originalOpen := openAtomicJSONDir
-	openAtomicJSONDir = func(string) (directorySyncer, error) { return failingDirectory{closeErr: closeErr}, nil }
+	openAtomicJSONDir = func(*storeRoot) (directorySyncer, error) { return failingDirectory{closeErr: closeErr}, nil }
 	t.Cleanup(func() { openAtomicJSONDir = originalOpen })
 
 	// When

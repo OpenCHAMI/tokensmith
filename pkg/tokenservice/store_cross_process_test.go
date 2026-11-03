@@ -2,6 +2,7 @@ package tokenservice
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -17,12 +18,26 @@ func TestStoreProcessHelper(t *testing.T) {
 	if mode == "" {
 		return
 	}
-	_, err := io.ReadAll(os.Stdin)
-	require.NoError(t, err)
+	if mode != "hold-lock" {
+		_, err := io.ReadAll(os.Stdin)
+		require.NoError(t, err)
+	}
 	path, output := os.Getenv("TOKENSMITH_STORE_PATH"), os.Getenv("TOKENSMITH_STORE_RESULT")
 	now := time.Now().UTC()
 	result := "error"
 	switch mode {
+	case "hold-lock":
+		root, err := openStoreRoot(path)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, root.Close()) }()
+		lock, err := lockStore(root)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, unlockStore(lock)) }()
+		_, err = fmt.Fprintln(os.Stdout, "locked")
+		require.NoError(t, err)
+		_, err = io.ReadAll(os.Stdin)
+		require.NoError(t, err)
+		return
 	case "bootstrap":
 		store, err := NewBootstrapTokenStore(path)
 		require.NoError(t, err)
@@ -53,7 +68,9 @@ func TestStoreProcessHelper(t *testing.T) {
 			result = "exists"
 		}
 	case "lock":
-		lock, err := lockStore(path)
+		root, err := openStoreRoot(path)
+		require.NoError(t, err)
+		lock, err := lockStore(root)
 		require.NoError(t, err)
 		_ = lock
 		require.NoError(t, os.WriteFile(output, []byte("locked"), 0o600))

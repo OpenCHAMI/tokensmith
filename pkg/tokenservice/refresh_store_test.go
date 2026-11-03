@@ -109,7 +109,7 @@ func TestRefreshTokenStore_RotateOrRevoke_does_not_publish_on_write_failure(t *t
 	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
 	require.NoError(t, store.SaveFamily(&RefreshTokenFamily{FamilyID: "family", CurrentTokenHash: "current", ExpiresAt: now.Add(time.Hour)}))
 	original := atomicJSONWrite
-	atomicJSONWrite = func(string, any) (bool, error) { return false, errors.New("write failed") }
+	atomicJSONWrite = func(*storeRoot, string, any) (bool, error) { return false, errors.New("write failed") }
 	t.Cleanup(func() { atomicJSONWrite = original })
 
 	// When
@@ -130,7 +130,7 @@ func TestRefreshTokenStore_RotateOrRevoke_publishes_successor_on_directory_close
 	require.NoError(t, store.SaveFamily(&RefreshTokenFamily{FamilyID: "family", CurrentTokenHash: "current", ExpiresAt: now.Add(time.Hour)}))
 	closeErr := errors.New("directory close failed")
 	originalOpen := openAtomicJSONDir
-	openAtomicJSONDir = func(string) (directorySyncer, error) { return failingDirectory{closeErr: closeErr}, nil }
+	openAtomicJSONDir = func(*storeRoot) (directorySyncer, error) { return failingDirectory{closeErr: closeErr}, nil }
 	t.Cleanup(func() { openAtomicJSONDir = originalOpen })
 
 	// When
