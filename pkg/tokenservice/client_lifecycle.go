@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -116,7 +117,20 @@ func (c *ServiceClient) requestLifecycleToken(ctx context.Context) error {
 			}
 			return ErrRefreshTokenExpired
 		}
-		return c.requestServiceToken(ctx, "refresh")
+		if err := c.requestServiceToken(ctx, "refresh"); err != nil {
+			if !isTerminalRefreshGrantError(err) {
+				return err
+			}
+			certPath := c.currentServiceIdentityCertPath()
+			keyPath := c.currentServiceIdentityKeyPath()
+			if certPath == "" || keyPath == "" {
+				return err
+			}
+			if err := c.requestServiceIdentitySession(ctx, certPath, keyPath); err != nil {
+				return fmt.Errorf("service identity reauthentication: %w", err)
+			}
+		}
+		return nil
 	}
 
 	if certPath, keyPath, configured := c.serviceIdentityPaths(); configured {
@@ -127,4 +141,9 @@ func (c *ServiceClient) requestLifecycleToken(ctx context.Context) error {
 	}
 
 	return c.requestServiceToken(ctx, "bootstrap")
+}
+
+func isTerminalRefreshGrantError(err error) bool {
+	var requestErr *tokenRequestError
+	return errors.As(err, &requestErr) && requestErr.status == http.StatusBadRequest && !requestErr.truncated && requestErr.oauthCode == "invalid_grant"
 }

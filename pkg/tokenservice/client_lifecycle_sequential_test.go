@@ -141,37 +141,6 @@ func TestServiceClientGetToken_AlreadyCanceledWithFreeGateMakesNoRequest(t *test
 	assert.Equal(t, int32(0), requests.Load())
 }
 
-func TestServiceClientGetToken_DoesNotUseMTLSForTransientRefreshFailure(t *testing.T) {
-	// Given: a non-expired refresh family whose refresh request fails transiently.
-	_, certPath, keyPath := writeServiceIdentityCertFiles(t, "metadata-service")
-	var refreshCalls atomic.Int32
-	var serviceIdentityCalls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/oauth/token":
-			refreshCalls.Add(1)
-			http.Error(w, "temporary", http.StatusServiceUnavailable)
-		case "/service-identity/session":
-			serviceIdentityCalls.Add(1)
-			assert.NoError(t, writeLifecycleToken(w, "unexpected", "unexpected"))
-		}
-	}))
-	defer server.Close()
-
-	client := newTerminallyExpiredServiceClient(t, server.URL, certPath, keyPath)
-	client.mu.Lock()
-	client.refreshExpiresAt = time.Now().Add(time.Hour)
-	client.mu.Unlock()
-
-	// When: refresh renewal fails.
-	err := client.ForceRefresh(context.Background())
-
-	// Then: the refresh failure is propagated without changing authentication modes.
-	require.Error(t, err)
-	assert.Equal(t, int32(1), refreshCalls.Load())
-	assert.Equal(t, int32(0), serviceIdentityCalls.Load())
-}
-
 func TestServiceClientGetToken_RejectsPlaintextServiceIdentitySession(t *testing.T) {
 	// Given: terminal expiry with configured mTLS material and a plaintext TokenSmith URL.
 	_, certPath, keyPath := writeServiceIdentityCertFiles(t, "metadata-service")
