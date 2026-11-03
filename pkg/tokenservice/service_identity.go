@@ -102,7 +102,7 @@ func (s *TokenService) ServiceIdentitySessionHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	refreshToken, familyID, err := s.generateRefreshTokenUntil(policy.Subject, policy.Audience, policy.Scopes, now, refreshExpiresAt)
+	refreshToken, familyID, err := s.generateServiceIdentityRefreshTokenUntil(policy, now, refreshExpiresAt)
 	if err != nil {
 		log.Error().
 			Err(err).

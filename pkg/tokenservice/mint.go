@@ -225,37 +225,47 @@ func (s *TokenService) generateRefreshTokenUntil(subject, audience string, scope
 		return "", "", errors.New("max_ttl must be greater than zero")
 	}
 
-	// Generate new refresh token (opaque, 256 bits)
+	return s.generateRefreshTokenFamily(&RefreshTokenFamily{
+		Subject:    subject,
+		Audience:   audience,
+		Scopes:     append([]string(nil), scopes...),
+		IssuedAt:   issuedAt,
+		ExpiresAt:  expiresAt,
+		LastUsedAt: issuedAt,
+	})
+}
+
+func (s *TokenService) generateServiceIdentityRefreshTokenUntil(policy *ServiceIdentityPolicy, issuedAt, expiresAt time.Time) (string, string, error) {
+	binding, err := newServiceIdentityPolicyBinding(policy)
+	if err != nil {
+		return "", "", fmt.Errorf("build service identity refresh provenance: %w", err)
+	}
+	return s.generateRefreshTokenFamily(&RefreshTokenFamily{
+		Subject:               policy.Subject,
+		Audience:              policy.Audience,
+		Scopes:                append([]string(nil), policy.Scopes...),
+		IssuedAt:              issuedAt,
+		ExpiresAt:             expiresAt,
+		LastUsedAt:            issuedAt,
+		ServiceIdentityPolicy: binding,
+	})
+}
+
+func (s *TokenService) generateRefreshTokenFamily(family *RefreshTokenFamily) (string, string, error) {
 	refreshToken, err := s.generateOpaqueToken(32)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
-	// Create token family for rotation tracking
 	familyID, err := s.generateOpaqueToken(16)
 	if err != nil {
 		return "", "", fmt.Errorf("generate refresh token family ID: %w", err)
 	}
-	family := &RefreshTokenFamily{
-		FamilyID:         familyID,
-		CurrentTokenHash: HashBootstrapToken(refreshToken),
-		Subject:          subject,
-		Audience:         audience,
-		Scopes:           append([]string(nil), scopes...), // Immutable
-		IssuedAt:         issuedAt,
-		ExpiresAt:        expiresAt,
-		LastUsedAt:       issuedAt,
-		UsageCount:       0, // First generation, not yet used
-	}
-
-	// Store family for replay detection
+	family.FamilyID = familyID
+	family.CurrentTokenHash = HashBootstrapToken(refreshToken)
 	if err := s.refreshTokenStore.SaveFamily(family); err != nil {
 		return "", "", fmt.Errorf("failed to save refresh token family: %w", err)
 	}
-
-	// Opaque refresh tokens are stored server-side indexed by family ID.
-	// The family's CurrentTokenHash field allows lookup by token hash.
-	// See: RFC 6749 Section 6, NIST SP 800-63-4 Section 6.2.3
 
 	return refreshToken, familyID, nil
 }

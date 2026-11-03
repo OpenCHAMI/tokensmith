@@ -122,7 +122,15 @@ type RefreshTokenFamily struct {
 	RevokedAt        *time.Time // If family revoked after replay detection
 
 	// Operator context
-	BindingIdentifier string // Optional: pod/instance ID
+	BindingIdentifier     string // Optional: pod/instance ID
+	ServiceIdentityPolicy *ServiceIdentityPolicyBinding
+}
+
+type ServiceIdentityPolicyBinding struct {
+	Subject     string `json:"subject"`
+	PolicyID    string `json:"policy_id"`
+	Revision    uint64 `json:"revision"`
+	Fingerprint string `json:"fingerprint"`
 }
 
 // IsExpired checks if the bootstrap token policy has expired.

@@ -54,6 +54,21 @@ func (s *TokenService) auditRefreshReplay(tokenHash, clientIP string) {
 	AuditLogFamilyRevoked(family.Subject, family.Audience, family.FamilyID, clientIP, family.UsageCount)
 }
 
+func refreshPolicyFailureReason(err error) string {
+	switch {
+	case errors.Is(err, ErrServiceIdentityPolicyNotFound):
+		return "refresh_policy_missing"
+	case errors.Is(err, ErrServiceIdentityPolicyExpired):
+		return "refresh_policy_expired"
+	case errors.Is(err, ErrServiceIdentityPolicyRevoked):
+		return "refresh_policy_revoked"
+	case errors.Is(err, ErrServiceIdentityPolicyReplaced):
+		return "refresh_policy_replaced"
+	default:
+		return "refresh_policy_invalid"
+	}
+}
+
 // handleRefreshTokenGrant processes RFC 6749 refresh token grant requests.
 // Refresh tokens are rotated on every use (NIST SP 800-63-4 Section 6.2.2).
 func (s *TokenService) handleRefreshTokenGrant(w http.ResponseWriter, _ *http.Request,
@@ -71,6 +86,14 @@ func (s *TokenService) handleRefreshTokenGrant(w http.ResponseWriter, _ *http.Re
 		AuditLogAuthenticationFailed("", "refresh_token_not_found", clientIP)
 		s.writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "The provided refresh token is invalid or has expired")
 		return
+	}
+	if family.ServiceIdentityPolicy != nil {
+		if err := s.serviceIdentityPolicyStore.ValidateRefreshBinding(family.ServiceIdentityPolicy, time.Now().UTC()); err != nil {
+			AuditLogAuthenticationFailed(family.Subject, refreshPolicyFailureReason(err), clientIP)
+			log.Warn().Err(err).Str("component", "tokenservice").Str("handler", "oauth_token").Str("subject", family.Subject).Msg("Service identity refresh grant rejected")
+			s.writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "The provided refresh token is invalid or has expired")
+			return
+		}
 	}
 	refreshExpiresIn, err := oauthLifetimeSeconds(time.Until(family.ExpiresAt))
 	if err != nil {
