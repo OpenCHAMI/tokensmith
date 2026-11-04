@@ -87,6 +87,7 @@ Important:
 - `list` returns metadata only, not tokens or secrets
 - `--refresh-ttl` must be positive and must not exceed `--ttl`
 - policy expiry and revocation are independent of bootstrap token state and refresh-family state
+- mTLS sessions are bound to the exact policy instance that minted them, so policy replacement or revocation does not migrate existing callers
 - bootstrap tokens never authorize `POST /service-identity/session`
 - existing mTLS callers must have a dedicated policy before upgrade, TokenSmith does not migrate them automatically
 
@@ -278,7 +279,7 @@ Recommended caller configuration:
 Important implementation note:
 
 - current server-side issuance is determined by the bootstrap-token policy and refresh-token family
-- `pkg/tokenservice.ServiceClient` sends RFC 8693 bootstrap and refresh form fields only; `WithTargetService` is client-local metadata (not sent to the server) used for validation and audit logging
+- `pkg/tokenservice.ServiceClient` sends RFC 8693 bootstrap and refresh form fields only; `WithTargetService` is client-local metadata used for local validation and default target selection, and it is not transmitted to the server or included in audit logs
 
 ### Lifecycle contract
 
@@ -288,10 +289,13 @@ Important implementation note:
 - `GetToken`, `ForceRefresh`, and `RefreshTokenIfNeeded` share one operation-owned bounded context when a lifecycle request is needed. Concurrent callers wait on the same success or failure, and each caller only cancels its own wait.
 - Completion is atomic. The client either publishes one new token state or leaves the previous state untouched on failure.
 - Refresh rotation does not extend the absolute refresh-family deadline. `refresh_expires_in` is the remaining family lifetime at the moment the server replies.
+- A refresh family is bound to the exact service identity policy instance that minted it. Revocation, expiry, or replacement only blocks later refreshes after the new state is durably visible, and requests already past validation may still finish.
 - When the access token needs renewal, a still-valid refresh family uses `POST /oauth/token` with the refresh grant. A refresh replay revokes the family and the current refresh generation, but it does not revoke an already-issued access JWT.
 - Access-token revocation remains separate and is handled through `/oauth/revoke` by `jti`.
-- When the refresh family is terminal, configured cert plus key trigger one HTTPS `POST /service-identity/session` replacement. Bootstrap-only callers return the exact `ErrRefreshTokenExpired` error, and the consumed bootstrap token is not replayed.
-- If that terminal mTLS replacement fails, the current auto-refresh loop stops. A later explicit lifecycle call can retry after the underlying cause is fixed.
+- If the cached refresh family is already locally expired and valid mTLS material is configured, the client attempts one HTTPS `POST /service-identity/session` replacement.
+- If `POST /oauth/token` returns a complete, non-truncated HTTP `400 invalid_grant` and valid mTLS material is configured, the client attempts one HTTPS `POST /service-identity/session` replacement.
+- Transient network failures and 5xx responses do not trigger replacement.
+- If that replacement fails and the family remains expired, the current auto-refresh loop stops. A later explicit lifecycle call can retry after the underlying cause is fixed.
 
 ### `ServiceClientStats`
 

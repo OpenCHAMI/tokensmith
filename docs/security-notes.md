@@ -36,7 +36,7 @@ AuthN in `pkg/authn` validates TokenSmith JWTs against the current TokenSmith cl
 
 - TokenSmith **MUST NOT log raw JWTs**.
 - TokenSmith deny responses **MUST NOT echo** Authorization headers or arbitrary JWT claims.
-- Audit logs should record `jti` only, not the compact JWT or bearer token string.
+- Audit logs may record bounded identifiers and hash prefixes such as `jti`, `kid`, or truncated policy IDs, but never compact JWTs, bearer strings, client secrets, or other credentials.
 - Error bodies should stay bounded and redacted. They should not echo raw tokens or large claim payloads.
 - Principal summaries in logs/deny bodies should contain only:
   - `principal.id`, `principal.type`, and optionally `principal.roles`
@@ -45,12 +45,19 @@ If your environment considers roles sensitive, configure TokenSmith to omit role
 
 ## Service-token lifecycle security
 
+- TokenSmith enforces `0700` on current-owner, non-symlink bootstrap, refresh, and service identity policy store roots, including existing directories.
+- Non-regular store records are rejected by the loader.
+- Unknown refresh-family lookups are audited and rejected with `invalid_grant`.
 - Bootstrap tokens are one-time use. A consumed bootstrap replay is rejected with `invalid_grant`.
 - Replaying an old rotated refresh token revokes the refresh-token family tied to that exchange.
 - The refresh-token family has an absolute lifetime. Rotation issues a new token, but it does not extend the family TTL.
+- Revoke, expiry, or replacement only blocks later refreshes after the new state is durably visible. Requests already past validation may still complete.
 - Bootstrap-only callers stop at terminal refresh-family expiry unless they are extended with service-identity client cert and key support over HTTPS.
 - mTLS session minting supports initial acquisition and terminal family replacement. It does not replace the normal refresh path.
-- Transient network or upstream errors do not trigger terminal reauthentication or change acquisition mode.
+- If the cached refresh family is locally expired and valid mTLS material is configured, the client attempts one HTTPS `POST /service-identity/session` replacement.
+- If `POST /oauth/token` returns a complete, non-truncated HTTP `400 invalid_grant` and valid mTLS material is configured, the client attempts one HTTPS `POST /service-identity/session` replacement.
+- Transient network errors and 5xx responses do not trigger terminal reauthentication or change acquisition mode.
+- mTLS sessions are bound to the exact service identity policy instance that minted them. Replacing or revoking that policy blocks later refreshes once the change is visible.
 - When service-identity mTLS is enabled, keep `--service-identity-ca`, `--tls-cert-file`, and `--tls-key-file` in place, and protect the client cert and key files with tight filesystem permissions.
 - Use HTTPS for all service-identity requests.
 

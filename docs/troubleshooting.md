@@ -78,7 +78,9 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
 1. Inspect `client.Stats()`.
 2. Check `HasRefreshToken` and `RefreshExpiresAt`.
 3. If `RefreshExpiresAt` is in the past and no cert plus key are configured, bootstrap-only callers are at terminal expiry.
-4. If `RefreshTokenIfNeeded` sees a fresh access token, it returns without changing state.
+4. If the refresh family is already locally expired, or the server returned a complete, non-truncated `400 invalid_grant`, confirm the caller has valid mTLS cert and key material. Those are the only cases that trigger one replacement attempt.
+5. If the failure was a timeout, transport error, or 5xx, treat it as transient. It does not switch the caller into mTLS recovery mode.
+6. If `RefreshTokenIfNeeded` sees a fresh access token, it returns without changing state, even if a later refresh-family change is now visible.
 
 **Resolution**:
 
@@ -95,13 +97,15 @@ For stable TokenSmith log fields, event names, failure categories, and redaction
 1. Verify both files exist and are readable.
 2. Verify the URL scheme is HTTPS.
 3. Check for `invalid service identity client certificate configuration` in the error chain.
-4. If the terminal mTLS replacement fails, the current auto-refresh loop stops. Fix the certs or policy, then retry with a new lifecycle call.
+4. Confirm the server response was `400 invalid_grant`, not a transient or 5xx failure.
+5. If the terminal mTLS replacement fails and the family remains expired, the current auto-refresh loop stops. Fix the certs or policy, then retry with a new lifecycle call.
 
 **Resolution**:
 
 1. Set both `TOKENSMITH_SERVICE_IDENTITY_CERT` and `TOKENSMITH_SERVICE_IDENTITY_KEY`.
 2. Use an `https://` TokenSmith URL.
 3. Retry the lifecycle call after correcting the material or URL. Restart only when the consuming service snapshots this configuration at startup.
+4. If the service identity policy was replaced or revoked, mint a new session after the new state is visible.
 
 ### Symptom: replay errors look like expiry
 

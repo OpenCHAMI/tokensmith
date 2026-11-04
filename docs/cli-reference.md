@@ -300,12 +300,11 @@ INF Refresh token rotated successfully subject=boot-service audience=smd family_
 
 Common TokenSmith failure logs:
 
-```text
-WRN Bootstrap token not found client_ip=... token_hash_prefix=17c3cca6
-WRN Bootstrap token already consumed (replay attempt) client_ip=... token_hash_prefix=17c3cca6
-ERR Refresh token hash mismatch - replay attempt detected family_id=...
-ERR Refresh token family is revoked (replay detected via hash lookup) family_id=...
-```
+| Surface | Literal message | Structured fields |
+| --- | --- | --- |
+| Warning | `Bootstrap token exchange rejected` | `component=tokenservice`, `handler=oauth_token`, `client_ip=...`, `token_hash_prefix=...` |
+| Warning | `Refresh token grant rejected` | `component=tokenservice`, `handler=oauth_token`, `client_ip=...` |
+| Audit event | `audit_event=authentication_failed` | `failure_reason=bootstrap_token_consumed`, `failure_reason=bootstrap_token_expired`, `failure_reason=refresh_token_not_found`, `failure_reason=refresh_token_replay`, `failure_reason=refresh_token_revoked`, `failure_reason=refresh_token_expired`; `subject=...` when available; `client_ip=...` |
 
 In the caller service, expected logs depend on whether the service logs `pkg/tokenservice` errors itself. The library does not emit logs on its own; it returns errors to the caller.
 
