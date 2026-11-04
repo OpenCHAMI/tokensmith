@@ -122,10 +122,14 @@ type RefreshTokenFamily struct {
 	RevokedAt        *time.Time // If family revoked after replay detection
 
 	// Operator context
-	BindingIdentifier     string // Optional: pod/instance ID
+	BindingIdentifier string // Optional: pod/instance ID
+
+	// ServiceIdentityPolicy binds service-identity-issued families to their exact authorizing policy instance.
+	// Nil is reserved for bootstrap-origin compatibility only.
 	ServiceIdentityPolicy *ServiceIdentityPolicyBinding
 }
 
+// ServiceIdentityPolicyBinding is the durable provenance for a service-identity-issued refresh family.
 type ServiceIdentityPolicyBinding struct {
 	Subject     string `json:"subject"`
 	PolicyID    string `json:"policy_id"`

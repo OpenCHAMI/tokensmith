@@ -88,6 +88,7 @@ func (s *TokenService) handleRefreshTokenGrant(w http.ResponseWriter, _ *http.Re
 		return
 	}
 	if family.ServiceIdentityPolicy != nil {
+		// Revocation committed before this check fails; requests past this check may finish rotation.
 		if err := s.serviceIdentityPolicyStore.ValidateRefreshBinding(family.ServiceIdentityPolicy, time.Now().UTC()); err != nil {
 			AuditLogAuthenticationFailed(family.Subject, refreshPolicyFailureReason(err), clientIP)
 			log.Warn().Err(err).Str("component", "tokenservice").Str("handler", "oauth_token").Str("subject", family.Subject).Msg("Service identity refresh grant rejected")
