@@ -5,6 +5,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -16,12 +18,17 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Print(err)
+	}
+}
 
+func run() (retErr error) {
 	// Create key manager
 	keyManager := keys.NewKeyManager()
 	err := keyManager.GenerateRSAKeyPair()
 	if err != nil {
-		log.Fatalf("Failed to generate RSA key: %v", err)
+		return fmt.Errorf("generate RSA key: %w", err)
 	}
 
 	// Configure token service
@@ -41,8 +48,9 @@ func main() {
 	// Create token service
 	tokenService, err := tokenservice.NewTokenService(keyManager, config)
 	if err != nil {
-		log.Fatalf("Failed to create token service: %v", err)
+		return fmt.Errorf("create token service: %w", err)
 	}
+	defer func() { retErr = errors.Join(retErr, tokenService.Close()) }()
 
 	// Create router
 	r := chi.NewRouter()
@@ -62,7 +70,5 @@ func main() {
 
 	// Start server
 	log.Println("Starting server on :8080")
-	if err := http.ListenAndServe(":8080", r); err != nil {
-		log.Fatalf("Server failed: %v", err)
-	}
+	return http.ListenAndServe(":8080", r)
 }
