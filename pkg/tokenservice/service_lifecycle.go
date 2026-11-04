@@ -2,6 +2,7 @@ package tokenservice
 
 import "errors"
 
+// Close releases persistent-store resources owned by the service.
 func (s *TokenService) Close() error {
 	if s == nil {
 		return nil

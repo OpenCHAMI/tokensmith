@@ -4,6 +4,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,19 +25,31 @@ func TestStoreRoot_Close_is_nil_safe_idempotent_and_concurrent(t *testing.T) {
 	require.NoError(t, root.Close())
 }
 
-func TestCredentialStores_Close_are_nil_safe_idempotent_and_concurrent(t *testing.T) {
+func TestStoresAndService_Close_are_nil_safe_idempotent_and_concurrent(t *testing.T) {
 	// Given
 	bootstrap, err := NewBootstrapTokenStore(t.TempDir())
 	require.NoError(t, err)
 	refresh, err := NewRefreshTokenStore(t.TempDir())
 	require.NoError(t, err)
+	policies, err := NewServiceIdentityPolicyStore(t.TempDir())
+	require.NoError(t, err)
+	service, err := NewTokenService(keys.NewKeyManager(), Config{
+		RFC8693BootstrapStorePath:      t.TempDir(),
+		RFC8693RefreshStorePath:        t.TempDir(),
+		ServiceIdentityPolicyStorePath: t.TempDir(),
+	})
+	require.NoError(t, err)
 	var nilBootstrap *BootstrapTokenStore
 	var nilRefresh *RefreshTokenStore
+	var nilPolicies *ServiceIdentityPolicyStore
+	var nilService *TokenService
 	require.NoError(t, nilBootstrap.Close())
 	require.NoError(t, nilRefresh.Close())
+	require.NoError(t, nilPolicies.Close())
+	require.NoError(t, nilService.Close())
 
 	// When
-	for _, closer := range []func() error{bootstrap.Close, refresh.Close} {
+	for _, closer := range []func() error{bootstrap.Close, refresh.Close, policies.Close, service.Close} {
 		errors := closeConcurrently(closer)
 		for _, err := range errors {
 			require.NoError(t, err)
