@@ -18,6 +18,14 @@ func validateRefreshFamily(family *RefreshTokenFamily) error {
 	if family == nil || family.FamilyID == "" || family.CurrentTokenHash == "" || family.ExpiresAt.IsZero() {
 		return fmt.Errorf("refresh token family identity and expiry are required")
 	}
+	if family.ServiceIdentityPolicy != nil {
+		if err := validateServiceIdentityPolicyBinding(family.ServiceIdentityPolicy); err != nil {
+			return fmt.Errorf("refresh token service identity policy provenance: %w", err)
+		}
+		if family.ServiceIdentityPolicy.Subject != family.Subject {
+			return fmt.Errorf("refresh token service identity policy subject does not match family")
+		}
+	}
 	if containsHash(family.ConsumedGenerationHashes, family.CurrentTokenHash) {
 		return fmt.Errorf("refresh token current hash cannot be consumed")
 	}

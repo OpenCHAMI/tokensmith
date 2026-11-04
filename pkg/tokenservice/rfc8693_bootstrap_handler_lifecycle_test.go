@@ -67,11 +67,12 @@ func TestOAuthTokenHandler_bootstrap_audit_and_policy_use_JTI_not_access_JWT(t *
 func TestOAuthTokenHandler_bootstrap_mint_failure_leaves_policy_consumed(t *testing.T) {
 	// Given
 	svc := newTestTokenService(t, Config{
-		Issuer:                    "http://tokensmith.test",
-		ClusterID:                 "cluster-test",
-		OpenCHAMIID:               "openchami-test",
-		RFC8693BootstrapStorePath: filepath.Join(t.TempDir(), "bootstrap"),
-		RFC8693RefreshStorePath:   filepath.Join(t.TempDir(), "refresh"),
+		Issuer:                         "http://tokensmith.test",
+		ClusterID:                      "cluster-test",
+		OpenCHAMIID:                    "openchami-test",
+		RFC8693BootstrapStorePath:      filepath.Join(t.TempDir(), "bootstrap"),
+		RFC8693RefreshStorePath:        filepath.Join(t.TempDir(), "refresh"),
+		ServiceIdentityPolicyStorePath: filepath.Join(t.TempDir(), "identities"),
 	})
 	bootstrapToken := "bootstrap-token-with-invalid-policy"
 	now := time.Now().UTC()

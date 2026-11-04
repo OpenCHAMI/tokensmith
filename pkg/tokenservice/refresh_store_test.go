@@ -95,6 +95,19 @@ func TestRefreshTokenStore_constructor_loads_legacy_family_as_generation_zero(t 
 	require.Empty(t, family.ConsumedGenerationHashes)
 }
 
+func TestRefreshTokenStore_constructor_rejects_malformed_service_identity_policy_provenance(t *testing.T) {
+	// Given
+	path := t.TempDir()
+	data := []byte(`{"family_id":"family","current_token_hash":"current","expires_at":"2026-10-18T13:00:00Z","service_identity_policy":{"id":"policy","fingerprint":""}}`)
+	require.NoError(t, os.WriteFile(filepath.Join(path, "family.json"), data, 0o600))
+
+	// When
+	_, err := NewRefreshTokenStore(path)
+
+	// Then
+	require.Error(t, err)
+}
+
 func TestRefreshTokenStore_RotateOrRevoke_revokes_family_on_consumed_generation_replay(t *testing.T) {
 	// Given
 	store, err := NewRefreshTokenStore(t.TempDir())

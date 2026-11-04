@@ -25,19 +25,20 @@ type RefreshTokenStore struct {
 	families  map[string]*RefreshTokenFamily
 }
 type refreshFamilyDisk struct {
-	FamilyID                 string     `json:"family_id"`
-	CurrentTokenHash         string     `json:"current_token_hash"`
-	ConsumedGenerationHashes []string   `json:"consumed_generation_hashes,omitempty"`
-	Subject                  string     `json:"subject"`
-	Audience                 string     `json:"audience"`
-	Scopes                   []string   `json:"scopes"`
-	IssuedAt                 time.Time  `json:"issued_at"`
-	ExpiresAt                time.Time  `json:"expires_at"`
-	LastUsedAt               time.Time  `json:"last_used_at"`
-	UsageCount               int        `json:"usage_count"`
-	ReplayDetectedAt         *time.Time `json:"replay_detected_at,omitempty"`
-	RevokedAt                *time.Time `json:"revoked_at,omitempty"`
-	BindingIdentifier        string     `json:"binding_identifier,omitempty"`
+	FamilyID                 string                        `json:"family_id"`
+	CurrentTokenHash         string                        `json:"current_token_hash"`
+	ConsumedGenerationHashes []string                      `json:"consumed_generation_hashes,omitempty"`
+	Subject                  string                        `json:"subject"`
+	Audience                 string                        `json:"audience"`
+	Scopes                   []string                      `json:"scopes"`
+	IssuedAt                 time.Time                     `json:"issued_at"`
+	ExpiresAt                time.Time                     `json:"expires_at"`
+	LastUsedAt               time.Time                     `json:"last_used_at"`
+	UsageCount               int                           `json:"usage_count"`
+	ReplayDetectedAt         *time.Time                    `json:"replay_detected_at,omitempty"`
+	RevokedAt                *time.Time                    `json:"revoked_at,omitempty"`
+	BindingIdentifier        string                        `json:"binding_identifier,omitempty"`
+	ServiceIdentityPolicy    *ServiceIdentityPolicyBinding `json:"service_identity_policy,omitempty"`
 }
 
 func NewRefreshTokenStore(storePath string) (*RefreshTokenStore, error) {
@@ -174,7 +175,7 @@ func (s *RefreshTokenStore) consumedHashOwner(candidate *RefreshTokenFamily, exc
 	return ""
 }
 func familyToDisk(family *RefreshTokenFamily) refreshFamilyDisk {
-	return refreshFamilyDisk{family.FamilyID, family.CurrentTokenHash, append([]string(nil), family.ConsumedGenerationHashes...), family.Subject, family.Audience, append([]string(nil), family.Scopes...), family.IssuedAt, family.ExpiresAt, family.LastUsedAt, family.UsageCount, cloneTime(family.ReplayDetectedAt), cloneTime(family.RevokedAt), family.BindingIdentifier}
+	return refreshFamilyDisk{FamilyID: family.FamilyID, CurrentTokenHash: family.CurrentTokenHash, ConsumedGenerationHashes: append([]string(nil), family.ConsumedGenerationHashes...), Subject: family.Subject, Audience: family.Audience, Scopes: append([]string(nil), family.Scopes...), IssuedAt: family.IssuedAt, ExpiresAt: family.ExpiresAt, LastUsedAt: family.LastUsedAt, UsageCount: family.UsageCount, ReplayDetectedAt: cloneTime(family.ReplayDetectedAt), RevokedAt: cloneTime(family.RevokedAt), BindingIdentifier: family.BindingIdentifier, ServiceIdentityPolicy: cloneServiceIdentityPolicyBinding(family.ServiceIdentityPolicy)}
 }
 func decodeRefreshFamily(data []byte) (*RefreshTokenFamily, error) {
 	var disk refreshFamilyDisk
@@ -188,7 +189,7 @@ func decodeRefreshFamily(data []byte) (*RefreshTokenFamily, error) {
 	if disk.FamilyID == "" {
 		return cloneRefreshFamily(&legacy), nil
 	}
-	return cloneRefreshFamily(&RefreshTokenFamily{disk.FamilyID, disk.CurrentTokenHash, disk.ConsumedGenerationHashes, disk.Subject, disk.Audience, disk.Scopes, disk.IssuedAt, disk.ExpiresAt, disk.LastUsedAt, disk.UsageCount, disk.ReplayDetectedAt, disk.RevokedAt, disk.BindingIdentifier}), nil
+	return cloneRefreshFamily(&RefreshTokenFamily{FamilyID: disk.FamilyID, CurrentTokenHash: disk.CurrentTokenHash, ConsumedGenerationHashes: disk.ConsumedGenerationHashes, Subject: disk.Subject, Audience: disk.Audience, Scopes: disk.Scopes, IssuedAt: disk.IssuedAt, ExpiresAt: disk.ExpiresAt, LastUsedAt: disk.LastUsedAt, UsageCount: disk.UsageCount, ReplayDetectedAt: disk.ReplayDetectedAt, RevokedAt: disk.RevokedAt, BindingIdentifier: disk.BindingIdentifier, ServiceIdentityPolicy: cloneServiceIdentityPolicyBinding(disk.ServiceIdentityPolicy)}), nil
 }
 func cloneRefreshFamily(family *RefreshTokenFamily) *RefreshTokenFamily {
 	if family == nil {
@@ -199,7 +200,16 @@ func cloneRefreshFamily(family *RefreshTokenFamily) *RefreshTokenFamily {
 	clone.ConsumedGenerationHashes = append([]string(nil), family.ConsumedGenerationHashes...)
 	clone.ReplayDetectedAt = cloneTime(family.ReplayDetectedAt)
 	clone.RevokedAt = cloneTime(family.RevokedAt)
+	clone.ServiceIdentityPolicy = cloneServiceIdentityPolicyBinding(family.ServiceIdentityPolicy)
 	return &clone
+}
+
+func cloneServiceIdentityPolicyBinding(binding *ServiceIdentityPolicyBinding) *ServiceIdentityPolicyBinding {
+	if binding == nil {
+		return nil
+	}
+	copy := *binding
+	return &copy
 }
 func containsHash(hashes []string, hash string) bool {
 	return slices.Contains(hashes, hash)

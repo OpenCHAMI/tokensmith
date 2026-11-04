@@ -123,6 +123,18 @@ type RefreshTokenFamily struct {
 
 	// Operator context
 	BindingIdentifier string // Optional: pod/instance ID
+
+	// ServiceIdentityPolicy binds service-identity-issued families to their exact authorizing policy instance.
+	// Nil is reserved for bootstrap-origin compatibility only.
+	ServiceIdentityPolicy *ServiceIdentityPolicyBinding
+}
+
+// ServiceIdentityPolicyBinding is the durable provenance for a service-identity-issued refresh family.
+type ServiceIdentityPolicyBinding struct {
+	Subject     string `json:"subject"`
+	PolicyID    string `json:"policy_id"`
+	Revision    uint64 `json:"revision"`
+	Fingerprint string `json:"fingerprint"`
 }
 
 // IsExpired checks if the bootstrap token policy has expired.
