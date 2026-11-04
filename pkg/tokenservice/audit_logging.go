@@ -45,7 +45,7 @@ const (
 // - Subject (service ID) and audience (target service)
 // - Security-relevant context (token hash prefix, IP address, action)
 // - Outcome (success or failure with reason)
-func AuditLog(eventType AuditEventType, context map[string]interface{}) {
+func AuditLog(eventType AuditEventType, context map[string]any) {
 	event := log.WithLevel(zerolog.WarnLevel).
 		Str("component", "tokenservice").
 		Str("audit_event", string(eventType)).
@@ -115,13 +115,14 @@ func AuditLog(eventType AuditEventType, context map[string]interface{}) {
 		if lastUsedAt, ok := context["last_used_at"].(time.Time); ok {
 			event = event.Time("last_used_at", lastUsedAt)
 		}
-		event.Msg("Replay attack detected: refresh token from old rotation presented")
 
 	case AuditRefreshTokenFamilyRevoked:
 		if familyID, ok := context["family_id"].(string); ok {
 			event = event.Str("family_id", familyID)
 		}
-		event.Msg("Refresh token family revoked due to replay detection")
+		if usageCount, ok := context["usage_count"].(int); ok {
+			event = event.Int("usage_count", usageCount)
+		}
 
 	case AuditAuthenticationFailed:
 		if failureReason, ok := context["failure_reason"].(string); ok {
@@ -169,7 +170,7 @@ func maskIPIfNeeded(clientIP string) string {
 
 // AuditLogBootstrapCreated logs bootstrap token creation (admin action)
 func AuditLogBootstrapCreated(subject, audience string, scopes []string, ttl, refreshTTL time.Duration, bindingID string) {
-	AuditLog(AuditBootstrapTokenCreated, map[string]interface{}{
+	AuditLog(AuditBootstrapTokenCreated, map[string]any{
 		"subject":             subject,
 		"audience":            audience,
 		"scopes":              scopes,
@@ -180,13 +181,13 @@ func AuditLogBootstrapCreated(subject, audience string, scopes []string, ttl, re
 }
 
 // AuditLogBootstrapExchanged logs successful bootstrap token exchange
-func AuditLogBootstrapExchanged(subject, audience string, scopes []string, clientIP, accessTokenID, refreshFamilyID, tokenHashPrefix string) {
-	AuditLog(AuditBootstrapTokenExchanged, map[string]interface{}{
+func AuditLogBootstrapExchanged(subject, audience string, scopes []string, clientIP, accessTokenJTI, refreshFamilyID, tokenHashPrefix string) {
+	AuditLog(AuditBootstrapTokenExchanged, map[string]any{
 		"subject":           subject,
 		"audience":          audience,
 		"scopes":            scopes,
 		"client_ip":         clientIP,
-		"access_token_id":   accessTokenID,
+		"access_token_id":   accessTokenJTI,
 		"refresh_family_id": refreshFamilyID,
 		"token_hash_prefix": tokenHashPrefix,
 	})
@@ -194,7 +195,7 @@ func AuditLogBootstrapExchanged(subject, audience string, scopes []string, clien
 
 // AuditLogBootstrapReplay logs bootstrap token replay attempt
 func AuditLogBootstrapReplay(tokenHashPrefix, clientIP string, replayAttempts []time.Time) {
-	AuditLog(AuditBootstrapTokenReplayAttempted, map[string]interface{}{
+	AuditLog(AuditBootstrapTokenReplayAttempted, map[string]any{
 		"token_hash_prefix":    tokenHashPrefix,
 		"client_ip":            clientIP,
 		"replay_attempt_count": len(replayAttempts),
@@ -204,7 +205,7 @@ func AuditLogBootstrapReplay(tokenHashPrefix, clientIP string, replayAttempts []
 
 // AuditLogRefreshRotated logs refresh token rotation
 func AuditLogRefreshRotated(subject, audience string, scopes []string, clientIP, familyID string, usageCount int) {
-	AuditLog(AuditRefreshTokenRotated, map[string]interface{}{
+	AuditLog(AuditRefreshTokenRotated, map[string]any{
 		"subject":     subject,
 		"audience":    audience,
 		"scopes":      scopes,
@@ -216,7 +217,7 @@ func AuditLogRefreshRotated(subject, audience string, scopes []string, clientIP,
 
 // AuditLogRefreshReplayDetected logs replay attack on refresh token family
 func AuditLogRefreshReplayDetected(subject, audience string, familyID, clientIP string, lastUsedAt time.Time) {
-	AuditLog(AuditRefreshTokenReplayDetected, map[string]interface{}{
+	AuditLog(AuditRefreshTokenReplayDetected, map[string]any{
 		"subject":      subject,
 		"audience":     audience,
 		"family_id":    familyID,
@@ -228,7 +229,7 @@ func AuditLogRefreshReplayDetected(subject, audience string, familyID, clientIP 
 
 // AuditLogFamilyRevoked logs family revocation due to replay
 func AuditLogFamilyRevoked(subject, audience, familyID, clientIP string, usageCount int) {
-	AuditLog(AuditRefreshTokenFamilyRevoked, map[string]interface{}{
+	AuditLog(AuditRefreshTokenFamilyRevoked, map[string]any{
 		"subject":     subject,
 		"audience":    audience,
 		"family_id":   familyID,
@@ -240,7 +241,7 @@ func AuditLogFamilyRevoked(subject, audience, familyID, clientIP string, usageCo
 
 // AuditLogAuthenticationFailed logs authentication failure
 func AuditLogAuthenticationFailed(subject, reason, clientIP string) {
-	AuditLog(AuditAuthenticationFailed, map[string]interface{}{
+	AuditLog(AuditAuthenticationFailed, map[string]any{
 		"subject":        subject,
 		"failure_reason": reason,
 		"client_ip":      clientIP,

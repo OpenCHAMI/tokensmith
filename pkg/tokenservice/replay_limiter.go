@@ -5,6 +5,7 @@
 package tokenservice
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -17,6 +18,7 @@ const (
 	// allowed from a single IP within replayWindowDuration before the IP is
 	// blocked. Per NIST SP 800-63-4 Section 5.2.2 (throttling requirements).
 	replayMaxAttempts = 10
+	replayMaxPeers    = 1024
 )
 
 // replayLimiter tracks failed bootstrap token exchange attempts per source IP
@@ -39,7 +41,15 @@ func (r *replayLimiter) record(ip string) {
 	defer r.mu.Unlock()
 
 	now := time.Now()
-	r.attempts[ip] = append(r.pruneWindow(r.attempts[ip], now), now)
+	r.pruneAll(now)
+	if _, exists := r.attempts[ip]; !exists && len(r.attempts) >= replayMaxPeers {
+		r.evictOldest()
+	}
+	active := append(r.pruneWindow(r.attempts[ip], now), now)
+	if len(active) > replayMaxAttempts {
+		active = active[len(active)-replayMaxAttempts:]
+	}
+	r.attempts[ip] = active
 }
 
 // isBlocked returns true if the IP has exceeded replayMaxAttempts within the
@@ -50,8 +60,35 @@ func (r *replayLimiter) isBlocked(ip string) bool {
 
 	now := time.Now()
 	active := r.pruneWindow(r.attempts[ip], now)
-	r.attempts[ip] = active
+	if len(active) == 0 {
+		delete(r.attempts, ip)
+	} else {
+		r.attempts[ip] = active
+	}
 	return len(active) >= replayMaxAttempts
+}
+
+func (r *replayLimiter) pruneAll(now time.Time) {
+	for ip, attempts := range r.attempts {
+		if len(r.pruneWindow(attempts, now)) == 0 {
+			delete(r.attempts, ip)
+		}
+	}
+}
+
+func (r *replayLimiter) evictOldest() {
+	keys := make([]string, 0, len(r.attempts))
+	for ip := range r.attempts {
+		keys = append(keys, ip)
+	}
+	sort.Strings(keys)
+	oldest := keys[0]
+	for _, ip := range keys[1:] {
+		if r.attempts[ip][0].Before(r.attempts[oldest][0]) {
+			oldest = ip
+		}
+	}
+	delete(r.attempts, oldest)
 }
 
 // pruneWindow removes timestamps older than replayWindowDuration and returns
