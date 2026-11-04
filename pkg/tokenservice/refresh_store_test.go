@@ -24,6 +24,59 @@ func TestRefreshTokenStore_constructor_rejects_corrupt_JSON(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestRefreshTokenStore_constructor_joins_load_and_root_close_failures(t *testing.T) {
+	// Given
+	path := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(path, "corrupt.json"), []byte("{"), 0o600))
+	closeErr := errors.New("root close failed")
+	originalClose := closeStoreRoot
+	var root *os.Root
+	closeStoreRoot = func(candidate *os.Root) error {
+		root = candidate
+		return errors.Join(candidate.Close(), closeErr)
+	}
+	t.Cleanup(func() { closeStoreRoot = originalClose })
+
+	// When
+	_, err := NewRefreshTokenStore(path)
+
+	// Then
+	var syntaxErr *json.SyntaxError
+	require.ErrorAs(t, err, &syntaxErr)
+	require.ErrorIs(t, err, closeErr)
+	_, rootErr := root.ReadFile("corrupt.json")
+	require.Error(t, rootErr)
+}
+
+func TestRefreshTokenStore_constructor_creates_private_directory(t *testing.T) {
+	// Given
+	path := filepath.Join(t.TempDir(), "refresh")
+
+	// When
+	_, err := NewRefreshTokenStore(path)
+
+	// Then
+	require.NoError(t, err)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+}
+
+func TestRefreshTokenStore_constructor_restricts_existing_directory(t *testing.T) {
+	// Given
+	path := filepath.Join(t.TempDir(), "refresh")
+	require.NoError(t, os.Mkdir(path, 0o755))
+
+	// When
+	_, err := NewRefreshTokenStore(path)
+
+	// Then
+	require.NoError(t, err)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+}
+
 func TestRefreshTokenStore_constructor_loads_legacy_family_as_generation_zero(t *testing.T) {
 	// Given
 	path := t.TempDir()
