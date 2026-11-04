@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -41,7 +42,7 @@ Example:
     --ttl 10m \
     --refresh-ttl 24h \
     --output json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) (retErr error) {
 		// Get parameters from flags
 		subject, _ := cmd.Flags().GetString("subject")
 		audience, _ := cmd.Flags().GetString("audience")
@@ -93,6 +94,7 @@ Example:
 		if err != nil {
 			return fmt.Errorf("failed to initialize bootstrap token store: %w", err)
 		}
+		defer func() { retErr = errors.Join(retErr, store.Close()) }()
 
 		// Generate opaque token (256 bits = 32 bytes)
 		tokenBytes := make([]byte, 32)
