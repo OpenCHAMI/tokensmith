@@ -44,15 +44,14 @@ func main() {
 	}
 	log.Printf("Got token, expires at: %v\n", client.GetServiceToken().ExpiresAt)
 
-	// Demonstrate token refresh
-	log.Println("\nWaiting for token to be close to expiration...")
-	time.Sleep(2 * time.Second) // In a real application, you'd wait until closer to expiration
+	log.Println("\nWaiting before checking the token lifetime...")
+	time.Sleep(2 * time.Second)
 
-	log.Println("Refreshing token...")
+	log.Println("Checking whether token refresh is needed...")
 	if err := client.RefreshTokenIfNeeded(ctx); err != nil {
 		log.Fatalf("Failed to refresh token: %v", err)
 	}
-	log.Printf("Refreshed token, new expiration: %v\n", client.GetServiceToken().ExpiresAt)
+	log.Printf("Token available, expires at: %v\n", client.GetServiceToken().ExpiresAt)
 
 	// Demonstrate calling another service with the token
 	log.Println("\nCalling target service...")

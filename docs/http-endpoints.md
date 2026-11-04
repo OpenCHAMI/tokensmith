@@ -193,10 +193,13 @@ Requirements:
 Behavior:
 
 - service identity subject is extracted from client certificate Common Name (`CN`)
-- TokenSmith looks up policy by subject (same subject/audience/scopes model used by bootstrap policy storage)
+- TokenSmith looks up policy by subject in the dedicated service identity policy store
+- the store is independent from bootstrap token storage, and missing or revoked policy fails closed
 - response shape matches `POST /oauth/token` success payload (`access_token`, `refresh_token`, `expires_in`, etc.)
 - `refresh_expires_in` is the remaining family lifetime. Refresh rotation does not extend the family deadline.
 - Client behavior for this endpoint is documented in [Internal service auth](./internal-service-auth.md)
+- bootstrap tokens do not authorize this endpoint
+- existing mTLS callers must have a dedicated service identity policy before upgrade, TokenSmith does not auto-migrate them
 
 Example:
 
@@ -323,7 +326,7 @@ Current behavior:
 
 - 5 failed bootstrap exchanges per client IP
 - 60 second window
-- exceeding the threshold returns `429 too_many_requests`
+- exceeding the threshold returns `429 too_many_requests`; client-side redaction may still render only `429` if the code is not allowlisted
 
 ### Refresh token family revocation
 
