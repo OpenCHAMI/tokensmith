@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openchami/tokensmith/pkg/deviceauth"
 	"github.com/openchami/tokensmith/pkg/keys"
 	"github.com/openchami/tokensmith/pkg/oidc"
 	"github.com/openchami/tokensmith/pkg/token"
@@ -101,6 +102,7 @@ type OIDCConfigResponse struct {
 
 // TokenService handles token operations and provider interactions
 type TokenService struct {
+	deviceAuth   *deviceauth.Authority // Configured once, before serving.
 	TokenManager *token.TokenManager
 	Config       Config
 	Issuer       string

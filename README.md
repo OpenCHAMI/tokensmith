@@ -43,6 +43,10 @@ sequenceDiagram
 
 ## Start Here
 
+For opt-in GitLab device authorization, see
+[GitLab device authorization](docs/gitlab-device-auth.md). For the reusable OAuth
+client, see [OAuth device-grant client](docs/device-authorization.md).
+
 TokenSmith provides token exchange plus Casbin-first AuthN/AuthZ middleware.
 
 **First time users:**

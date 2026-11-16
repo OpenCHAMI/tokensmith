@@ -178,6 +178,10 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("failed to create token service: %w", err)
 		}
 
+		if err := service.ConfigureDeviceAuth(fileConfig.DeviceAuth); err != nil {
+			return fmt.Errorf("invalid device authorization configuration")
+		}
+
 		// Start server
 		return service.Start(port)
 	},

@@ -311,7 +311,7 @@ func (s *TokenService) newRouter(logger zerolog.Logger) http.Handler {
 	r.Post("/token", s.OAuthTokenHandler) // Alias for compatibility
 	r.Post("/service-identity/session", s.ServiceIdentitySessionHandler)
 
-	return r
+	return s.withDeviceAuthRoutes(r)
 }
 
 // Start starts the HTTP server.
