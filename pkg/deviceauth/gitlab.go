@@ -7,7 +7,6 @@ package deviceauth
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openchami/tokensmith/internal/httpjson"
 	"github.com/openchami/tokensmith/pkg/deviceflow"
 )
 
@@ -74,15 +74,8 @@ func (g *GitLab) call(ctx context.Context, path, bearer string, form url.Values,
 		return 0, ErrDenied
 	}
 	defer func() { _ = response.Body.Close() }()
-	if out != nil {
-		decoder := json.NewDecoder(io.LimitReader(response.Body, 65537))
-		if decoder.Decode(out) != nil {
-			return response.StatusCode, ErrDenied
-		}
-		var extra any
-		if decoder.Decode(&extra) != io.EOF {
-			return response.StatusCode, ErrDenied
-		}
+	if out != nil && httpjson.Decode(response.Body, out) != nil {
+		return response.StatusCode, ErrDenied
 	}
 	return response.StatusCode, nil
 }
