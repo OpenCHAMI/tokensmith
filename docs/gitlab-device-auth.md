@@ -50,8 +50,9 @@ The session authority implements the login lifecycle:
 
 1. `Start` keeps the private device code and returns a random transaction handle.
 2. `Poll` consumes approval once, verifies identity and membership, then fixes the
-   absolute deadline. Owner/Maintainer maps to admin, Developer to operator and
-   Reporter to viewer; Guest/nonmember is denied.
+   absolute deadline. By default Owner/Maintainer maps to admin, Developer to
+   operator and Reporter to viewer; Guest/nonmember is denied. An optional
+   `gitlab_role_mapping` can replace these assignments.
 3. `Renew` verifies the same user again, refreshes GitLab credentials when needed
    and rechecks membership within the cache budget. It cannot move the deadline.
 4. `Logout` removes renewal state before contacting GitLab to revoke access.
@@ -174,6 +175,45 @@ below describe a hypothetical registration, not a ready-to-use application:
   }
 }
 ```
+
+### Optional GitLab role mapping
+
+Omit `gitlab_role_mapping` (or set it to `null`) to retain the default assignment:
+Owner/Maintainer → `admin`, Developer → `operator`, Reporter → `viewer`, and
+Guest/nonmember → denied. The mapping selects the role signed into the token;
+consumer services still use Casbin rules to decide what that role can do.
+
+To replace the assignment, add this optional object inside `device_auth`:
+
+```json
+{
+  "gitlab_role_mapping": {
+    "owner": "admin",
+    "maintainer": "operator",
+    "developer": "viewer"
+  }
+}
+```
+
+A supplied object is a **complete replacement**, not a merge with defaults. This
+example grants Maintainers `operator` and Developers `viewer`; Reporters and
+Guests are denied because they are not listed. Even Owner is denied if omitted.
+An explicit empty object (`"gitlab_role_mapping": {}`) denies every role. Empty
+objects are preserved when configuration is saved and loaded; they never revert
+to the default mapping.
+
+Keys are case-sensitive: `owner`, `maintainer`, `developer`, `reporter`, `guest`.
+Values must be `admin`, `operator` or `viewer`; omit a key to deny that role.
+Unknown names and empty/unknown target values fail startup validation. Guest
+access is possible only through an explicit mapping. Nonmembers and unrecognized
+GitLab access levels are always denied. Role names and membership are never taken
+from the login request.
+
+The broker snapshots the mapping before serving. Changing the original Go map
+cannot replace active policy; apply configuration changes by restarting the
+broker, which requires fresh session approval. Existing JWTs expire normally.
+Renewal re-evaluates verified membership using the configured mapping when its
+membership cache expires, within the existing cache/token/clock budget.
 
 Register a GitLab application with device authorization and `read_user`. Provision
 an independent project API credential able to read effective membership, such

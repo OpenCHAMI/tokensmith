@@ -2,6 +2,7 @@ package deviceauth
 
 import (
 	"errors"
+	"maps"
 	"net/url"
 )
 
@@ -22,6 +23,9 @@ type Config struct {
 	TokenSeconds    int64  `json:"token_seconds"`
 	SkewSeconds     int64  `json:"skew_seconds"` // Total issuer-to-consumer clock error budget.
 	AbsoluteSeconds int64  `json:"absolute_seconds"`
+	// Nil uses the default mapping; a non-nil map replaces it completely.
+	// Do not omit empty maps when serializing: {} deliberately denies all roles.
+	GitLabRoleMapping map[string]string `json:"gitlab_role_mapping"`
 }
 
 // Validate enforces a five-minute worst-case revocation budget:
@@ -43,5 +47,56 @@ func (c Config) Validate() error {
 		return ErrDenied
 	}
 
+	for source, target := range c.GitLabRoleMapping {
+		switch source {
+		case "owner", "maintainer", "developer", "reporter", "guest":
+		default:
+			return ErrDenied
+		}
+		switch target {
+		case "admin", "operator", "viewer":
+		default:
+			return ErrDenied
+		}
+	}
 	return nil
+}
+
+// clone snapshots mutable policy before an authority or middleware retains it.
+func (c Config) clone() Config {
+	c.GitLabRoleMapping = maps.Clone(c.GitLabRoleMapping)
+	return c
+}
+
+// clusterRole maps only a verified effective GitLab access level. Unlisted or
+// unknown levels are denied; a configured map never falls back to defaults.
+func (c Config) clusterRole(level int) string {
+	var source string
+	switch level {
+	case 50:
+		source = "owner"
+	case 40:
+		source = "maintainer"
+	case 30:
+		source = "developer"
+	case 20:
+		source = "reporter"
+	case 10:
+		source = "guest"
+	default:
+		return ""
+	}
+	if c.GitLabRoleMapping != nil {
+		return c.GitLabRoleMapping[source]
+	}
+	switch source {
+	case "owner", "maintainer":
+		return "admin"
+	case "developer":
+		return "operator"
+	case "reporter":
+		return "viewer"
+	default:
+		return ""
+	}
 }

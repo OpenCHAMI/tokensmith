@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -171,7 +172,7 @@ func TestDeviceAuthFileConfigRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded, err := LoadFileConfig(path)
-	if err != nil || loaded.DeviceAuth == nil || *loaded.DeviceAuth != *config {
+	if err != nil || loaded.DeviceAuth == nil || !reflect.DeepEqual(loaded.DeviceAuth, config) {
 		t.Fatalf("device-authorization policy did not survive config loading: %v", err)
 	}
 }

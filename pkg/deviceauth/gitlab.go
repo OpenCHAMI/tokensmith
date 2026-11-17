@@ -39,6 +39,7 @@ type GitLab struct {
 
 // NewGitLab binds all calls to one configured GitLab origin and application.
 func NewGitLab(config Config, verifier string) (*GitLab, error) {
+	config = config.clone()
 	if config.Validate() != nil || strings.TrimSpace(verifier) == "" {
 		return nil, ErrDenied
 	}
