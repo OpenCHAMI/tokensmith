@@ -44,13 +44,38 @@ Tests use a local HTTPS GitLab fixture, including redirects, wrong applications,
 wrong users, blocked accounts, expired tokens and membership lookup failures.
 No GitLab account, cluster access or secrets are required.
 
-## User token contract
+## Session lifecycle
+
+The session authority implements the login lifecycle:
+
+1. `Start` keeps the private device code and returns a random transaction handle.
+2. `Poll` consumes approval once, verifies identity and membership, then fixes the
+   absolute deadline. Owner/Maintainer maps to admin, Developer to operator and
+   Reporter to viewer; Guest/nonmember is denied.
+3. `Renew` verifies the same user again, refreshes GitLab credentials when needed
+   and rechecks membership within the cache budget. It cannot move the deadline.
+4. `Logout` removes renewal state before contacting GitLab to revoke access.
 
 `tokens.go` signs and verifies the resulting user-session claim contract. Token
 expiry is strict: the reserved clock budget is not added again as expiry leeway.
 Each token expires at the earliest permitted token, upstream or session limit.
 Consumers still need issuer-bound keys, bounded clocks and route authorization.
 A signed role is useful only when the consumer enforces it.
+
+A short map mutex protects bounded state; separate cancellable gates serialize
+each transaction and each session’s credential rotation and logout. Upstream
+calls never hold the map mutex, so slow calls do not block unrelated sessions.
+Logout waits for an in-flight renewal of the same session before revoking its
+latest credential. Provider, signer and audit implementations must support
+concurrent calls. Audit callbacks run after all authority locks are released.
+State is memory-only; restart requires fresh approval.
+Logout does not recall JWTs already issued; those expire within their short life.
+Key rotation retains only old public keys; overlap is not persisted across restart.
+
+The session tests cover all roles, demotion/removal timing, refresh races, logout,
+outages, backwards clocks, the ten-hour boundary and a full HTTPS broker lifecycle.
+An independent JWK parser checks that published public keys verify issued tokens.
+The session authority is independent of HTTP route registration.
 
 The JWT retains `token_class: "human"` to distinguish user credentials from
 machine credentials. This class identifies the subject, not the package or
