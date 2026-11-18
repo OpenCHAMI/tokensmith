@@ -252,6 +252,7 @@ func TestConfigBudgetAndFixedAuthority(t *testing.T) {
 		{"origin with path", func(c *Config) { c.Issuer = "https://gitlab.example/path" }},
 		{"origin with credentials", func(c *Config) { c.Issuer = "https://user:secret@gitlab.example" }},
 		{"missing project", func(c *Config) { c.ProjectID = 0 }},
+		{"zero membership cache", func(c *Config) { c.CacheSeconds = 0 }},
 		{"membership cache too long", func(c *Config) { c.CacheSeconds = 91 }},
 		{"token lifetime too long", func(c *Config) { c.TokenSeconds = 181 }},
 		{"clock budget too large", func(c *Config) { c.SkewSeconds = 31 }},
