@@ -11,10 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/openchami/tokensmith/pkg/deviceauth"
 )
 
 // FileConfig represents the configuration stored in a file
 type FileConfig struct {
+	DeviceAuth                 *deviceauth.Config  `json:"device_auth,omitempty"`
 	GroupScopes                map[string][]string `json:"groupScopes"`
 	MaxExchangeSessionLifetime string              `json:"maxExchangeSessionLifetime,omitempty"`
 }

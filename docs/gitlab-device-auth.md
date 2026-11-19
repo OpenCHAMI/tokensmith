@@ -149,3 +149,68 @@ contract and is not a replacement for the device-authorization verifier.
 Apply this chain to protected consumer resources, not the broker's public
 approval-start/poll endpoints. Route registration and allowed actions remain
 service-owned.
+
+## Opt-in TokenSmith integration
+
+Enable device-authorization endpoints with the `device_auth` section in
+TokenSmith's JSON config.
+
+Omitting it leaves existing endpoints and credentials unchanged. Example values
+below describe a hypothetical registration, not a ready-to-use application:
+
+```json
+{
+  "device_auth": {
+    "issuer": "https://gitlab.example.org",
+    "client_id": "REGISTERED_APPLICATION_ID",
+    "project_id": 123,
+    "cluster_issuer": "https://tokens.example.org",
+    "audience": "openchami-device-auth",
+    "verifier_file": "/run/secrets/gitlab-membership-verifier",
+    "cache_seconds": 90,
+    "token_seconds": 180,
+    "skew_seconds": 30,
+    "absolute_seconds": 36000
+  }
+}
+```
+
+Register a GitLab application with device authorization and `read_user`. Provision
+an independent project API credential able to read effective membership, such
+as a Reporter credential with `read_api`. Put its value in the private verifier
+file (0600), not JSON or command arguments. Keep the existing TokenSmith signing
+key persistent. `cluster_issuer` must match the service issuer and its signing
+algorithm must be PS256. A bad configuration fails at startup.
+Existing OIDC/service configuration remains required by the current server CLI.
+
+Serve the broker through HTTPS. Device-authorization endpoints accept only POST
+requests with `Content-Type: application/json`; responses have
+`Cache-Control: no-store`:
+
+| Route | Request | Result |
+| --- | --- | --- |
+| `/device-auth/start` | `{}` | Public approval URL/code, polling interval and broker transaction handle. |
+| `/device-auth/poll` | `{"transaction":"BROKER_HANDLE"}` | Pending/slow-down, or cluster token plus private renewal handle. |
+| `/device-auth/renew` | `{}` plus renewal handle as a Bearer credential | Short cluster token; unchanged absolute deadline. |
+| `/device-auth/logout` | `{}` plus renewal handle as a Bearer credential | Renewal removed; upstream access revoked when reachable. |
+
+The client must protect transaction/renewal handles like credentials. The broker
+never accepts caller-selected identity, role, application or project fields.
+Device-authorization routes bypass the legacy request-metadata logger, including
+rejected query strings; audit events contain only verified IDs, role, time and
+fixed outcomes.
+
+The integration reuses the existing PS256 key and existing JWKS handler. It does
+not replace OAuth exchange, revocation, local-peer protection or mTLS service
+identity. Key rotation during maintenance must coordinate cached consumers; there
+is no live rotation API or persistent session database.
+
+TokenSmith issues user credentials; downstream services are responsible for
+gateway configuration and route enforcement. Consumers must use the
+device-authorization verifier and authorize actual actions. The GitHub, Entra and Google transport-only
+login stubs cannot be selected as TokenSmith device-login backends.
+
+Run `go test -race -shuffle=on -count=1 ./...` and `go vet ./...`. The
+device-authorization suites need only local HTTPS listeners and synthetic
+credentials. No account approval, provider credentials, cluster deployment or
+live permission change is involved.

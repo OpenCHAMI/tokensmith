@@ -52,7 +52,9 @@ var serveCmd = &cobra.Command{
 		if strings.TrimSpace(issuer) == "" {
 			return fmt.Errorf("issuer is required: set --issuer or TOKENSMITH_ISSUER")
 		}
-		if strings.TrimSpace(oidcIssuerURL) == "" {
+		// Device authorization has its own provider configuration; legacy
+		// OAuth exchange still requires an OIDC issuer.
+		if strings.TrimSpace(oidcIssuerURL) == "" && fileConfig.DeviceAuth == nil {
 			return fmt.Errorf("OIDC issuer is required: set --oidc-issuer or TOKENSMITH_OIDC_PROVIDER")
 		}
 
@@ -178,6 +180,10 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("failed to create token service: %w", err)
 		}
 
+		if err := service.ConfigureDeviceAuth(fileConfig.DeviceAuth); err != nil {
+			return fmt.Errorf("invalid device authorization configuration")
+		}
+
 		// Start server
 		return service.Start(port)
 	},
@@ -201,7 +207,7 @@ func init() {
 	serveCmd.Flags().IntVar(&port, "port", 8080, "HTTP server port")
 	serveCmd.Flags().StringVar(&clusterID, "cluster-id", "cl-F00F00F00", "Unique identifier for this cluster")
 	serveCmd.Flags().StringVar(&openCHAMIID, "openchami-id", "oc-F00F00F00", "Unique identifier for this instance of OpenCHAMI")
-	serveCmd.Flags().StringVar(&oidcIssuerURL, "oidc-issuer", "", "OIDC provider issuer URL (required; or set TOKENSMITH_OIDC_PROVIDER)")
+	serveCmd.Flags().StringVar(&oidcIssuerURL, "oidc-issuer", "", "OIDC provider issuer URL (required without device_auth; or set TOKENSMITH_OIDC_PROVIDER)")
 	serveCmd.Flags().StringVar(&oidcClientID, "oidc-client-id", "", "OIDC client ID (or set OIDC_CLIENT_ID env var)")
 	serveCmd.Flags().StringVar(&oidcClientSecret, "oidc-client-secret", "", "OIDC client secret (or set OIDC_CLIENT_SECRET env var)")
 	serveCmd.Flags().StringVar(&oidcIntrospectionEndpoint, "oidc-introspection-endpoint", "", "OIDC token introspection endpoint override (or set TOKENSMITH_OIDC_INTROSPECTION_ENDPOINT)")
