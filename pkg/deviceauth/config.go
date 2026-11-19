@@ -18,7 +18,7 @@ type Config struct {
 	ClusterIssuer   string `json:"cluster_issuer"` // Issuer of the resulting cluster JWT.
 	Audience        string `json:"audience"`
 	VerifierFile    string `json:"verifier_file"` // Private project-membership API credential.
-	CacheSeconds    int64  `json:"cache_seconds"` // Maximum age of an effective-membership result.
+	CacheSeconds    int64  `json:"cache_seconds"` // Maximum age of an effective-membership result; 1–90 seconds.
 	TokenSeconds    int64  `json:"token_seconds"`
 	SkewSeconds     int64  `json:"skew_seconds"` // Total issuer-to-consumer clock error budget.
 	AbsoluteSeconds int64  `json:"absolute_seconds"`
@@ -37,7 +37,7 @@ func (c Config) Validate() error {
 		c.Audience == "" || c.VerifierFile == "" {
 		return ErrDenied
 	}
-	if c.CacheSeconds < 0 || c.CacheSeconds > 90 || c.TokenSeconds <= 0 ||
+	if c.CacheSeconds <= 0 || c.CacheSeconds > 90 || c.TokenSeconds <= 0 ||
 		c.TokenSeconds > 180 || c.SkewSeconds < 0 || c.SkewSeconds > 30 ||
 		c.AbsoluteSeconds != 36000 || c.CacheSeconds+c.TokenSeconds+c.SkewSeconds > 300 {
 		return ErrDenied

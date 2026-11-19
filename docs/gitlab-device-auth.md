@@ -32,6 +32,8 @@ The server configuration selects the HTTPS origin, application and project.
 Requests cannot select those values or their own role. Redirects are refused;
 errors never copy GitLab response bodies, URLs or credentials.
 
+The membership cache window must be positive (1–90 seconds); zero is rejected
+at configuration time because it leaves no time to complete a membership lookup.
 The configuration reserves at most 90 seconds of membership cache, 180 seconds
 of cluster-token life and 30 seconds of total clock error. Their sum cannot
 exceed five minutes. Session approval lasts exactly ten hours; renewal cannot
@@ -41,3 +43,84 @@ cached authority.
 Tests use a local HTTPS GitLab fixture, including redirects, wrong applications,
 wrong users, blocked accounts, expired tokens and membership lookup failures.
 No GitLab account, cluster access or secrets are required.
+
+## User token contract
+
+`tokens.go` signs and verifies the resulting user-session claim contract. Token
+expiry is strict: the reserved clock budget is not added again as expiry leeway.
+Each token expires at the earliest permitted token, upstream or session limit.
+Consumers still need issuer-bound keys, bounded clocks and route authorization.
+A signed role is useful only when the consumer enforces it.
+
+The JWT retains `token_class: "human"` to distinguish user credentials from
+machine credentials. This class identifies the subject, not the package or
+authentication method.
+
+## Authorizing protected service routes
+
+`deviceauth.VerifyPrincipal` applies the complete device-authorization token
+contract before returning `authz.Principal{ID: claims.Subject, Roles:
+[]string{claims.Role}}`. The role is taken only from verified signed claims.
+Applications must not construct a principal from an unverified JWT or a
+caller-selected role.
+
+For HTTP consumers, `deviceauth.Middleware` performs that verification and sets
+the existing generic `authz` principal context. Install it before
+`authz.NewMiddleware` on protected service routes:
+
+```go
+import (
+    "crypto/rsa"
+    "net/http"
+
+    "github.com/openchami/tokensmith/pkg/authz"
+    "github.com/openchami/tokensmith/pkg/deviceauth"
+)
+
+func protectedNodes(
+    policy deviceauth.Config,
+    trustedKey func(string) (*rsa.PublicKey, error),
+    authorizer *authz.Authorizer,
+    nodes http.Handler,
+) (http.Handler, error) {
+    authenticate, err := deviceauth.Middleware(policy, trustedKey)
+    if err != nil {
+        return nil, err
+    }
+    authorize := authz.NewMiddleware(
+        authorizer,
+        authz.PathMethodMapper{MethodToAction: authz.MethodToActionREST()},
+        authz.WithMode(authz.ModeEnforce),
+        authz.WithRequireAuthn(true),
+    )
+    return authenticate(authorize.Handler(nodes)), nil
+}
+```
+
+Construct `authorizer` using the existing Casbin policy loader and the service's
+own model and rules; see [the Casbin-first guide](casbin-first-guide.md). For
+example, a policy for the `/nodes` object can grant `role:viewer` `read`,
+`role:operator` `read`/`write`, and `role:admin` `read`/`write`/`delete`. The
+path/method mapper above maps GET to `read`, POST to `write` and DELETE to
+`delete`. A valid viewer token can read `/nodes` but receives 403 for POST or
+DELETE when the policy grants no such permission. Missing, invalid or expired
+credentials receive 401 before the authorization middleware or service handler
+runs. Unmapped or unauthorized actions remain denied by the existing policy.
+
+`policy` and `trustedKey` are administrator-controlled inputs. Resolve key IDs
+only against keys trusted for `policy.ClusterIssuer`, with a bounded JWKS cache
+and rotation policy; never use a token-selected issuer or key URL. The HTTP
+middleware uses the host clock, whose total error must stay within
+`policy.SkewSeconds`. Strict token expiry and the membership/session budgets are
+checked by `Verify`; the generic AuthN middleware's default clock leeway is not
+used. The shared `Config.Validate` still requires `ClientID` and `VerifierFile`.
+The consumer does not read `VerifierFile` or need the private membership-verifier
+credential: that credential stays only with the issuing broker.
+
+This bridge targets `authz.NewMiddleware`'s generic net/http context. The
+`authz/chi` helpers have a separate principal context and require explicit
+service wiring. Existing generic `authn.Middleware` parses a different claims
+contract and is not a replacement for the device-authorization verifier.
+Apply this chain to protected consumer resources, not the broker's public
+approval-start/poll endpoints. Route registration and allowed actions remain
+service-owned.
