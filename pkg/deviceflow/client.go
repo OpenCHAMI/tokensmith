@@ -3,15 +3,14 @@
 package deviceflow
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/openchami/tokensmith/internal/httpjson"
 )
 
 var (
@@ -106,17 +105,7 @@ func (c *Client) post(ctx context.Context, endpoint string, form url.Values, out
 		return 0, ErrProtocol
 	}
 	defer func() { _ = response.Body.Close() }()
-	const maxResponseBytes = 64 * 1024
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
-	if err != nil || len(body) > maxResponseBytes {
-		return response.StatusCode, ErrProtocol
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if decoder.Decode(out) != nil {
-		return response.StatusCode, ErrProtocol
-	}
-	var extra any
-	if decoder.Decode(&extra) != io.EOF {
+	if httpjson.Decode(response.Body, out) != nil {
 		return response.StatusCode, ErrProtocol
 	}
 	return response.StatusCode, nil

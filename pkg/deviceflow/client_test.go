@@ -158,6 +158,8 @@ func TestGrantErrorsAndResponseBounds(t *testing.T) {
 		{"malformed", `{`, 200, ErrProtocol},
 		{"two documents", `{} {}`, 200, ErrProtocol},
 		{"oversized", strings.Repeat(" ", 65537), 200, ErrProtocol},
+		{"oversized valid JSON", `{"access_token":"secret","token_type":"Bearer"}` + strings.Repeat(" ", 65537), 200, ErrProtocol},
+		{"hidden trailing document", `{"access_token":"secret","token_type":"Bearer"}` + strings.Repeat(" ", 65537) + `{}`, 200, ErrProtocol},
 		{"missing access", `{"token_type":"Bearer"}`, 200, ErrProtocol},
 		{"wrong token type", `{"access_token":"secret","token_type":"Basic"}`, 200, ErrProtocol},
 		{"error with credential", `{"error":"slow_down","access_token":"secret"}`, 400, ErrProtocol},

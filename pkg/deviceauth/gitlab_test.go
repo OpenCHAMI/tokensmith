@@ -268,3 +268,42 @@ func TestConfigBudgetAndFixedAuthority(t *testing.T) {
 		})
 	}
 }
+
+// A valid JSON prefix must not hide an oversized response behind whitespace.
+func TestGitLabMembershipResponseBounds(t *testing.T) {
+	const limit = 64 * 1024
+	valid := `{"id":207,"access_level":30}`
+	for _, tc := range []struct {
+		name    string
+		body    string
+		allowed bool
+	}{
+		{"exact limit", valid + strings.Repeat(" ", limit-len(valid)), true},
+		{"one byte over", valid + strings.Repeat(" ", limit+1-len(valid)), false},
+		{"hidden trailing document", valid + strings.Repeat(" ", limit+1-len(valid)) + `{}`, false},
+		{"two documents", valid + `{}`, false},
+		{"malformed secret", `{"private-user-secret":`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			c := config()
+			c.Issuer = server.URL
+			g, err := NewGitLab(c, "verifier-secret")
+			if err != nil {
+				t.Fatal(err)
+			}
+			g.client.Transport = server.Client().Transport
+			level, err := g.Membership(context.Background(), 207)
+			if tc.allowed {
+				if err != nil || level != 30 {
+					t.Fatalf("valid membership rejected: %d, %v", level, err)
+				}
+			} else if err != ErrDenied || level != 0 {
+				t.Fatalf("expected sanitized denial, got %d, %v", level, err)
+			}
+		})
+	}
+}
