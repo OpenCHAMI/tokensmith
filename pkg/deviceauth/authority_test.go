@@ -72,6 +72,11 @@ type fixture struct {
 
 func setup(t *testing.T) *fixture {
 	t.Helper()
+	return setupWithConfig(t, config())
+}
+
+func setupWithConfig(t *testing.T, c Config) *fixture {
+	t.Helper()
 	x := &fixture{now: time.Unix(1800000000, 0)}
 	x.f = &fake{now: &x.now, level: 40, user: 207, expiry: x.now.Add(7200 * time.Second)}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -82,7 +87,7 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	x.a, err = New(config(), x.f, x.k, func(a Audit) {
+	x.a, err = New(c, x.f, x.k, func(a Audit) {
 		x.auditMu.Lock()
 		defer x.auditMu.Unlock()
 		x.audit = append(x.audit, a)

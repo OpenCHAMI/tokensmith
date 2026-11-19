@@ -39,6 +39,7 @@ func VerifyPrincipal(raw string, c Config, now time.Time, lookup func(string) (*
 // This uses the generic net/http authz context, not authz/chi's separate context.
 // lookup and the host clock must satisfy Verify's trust and freshness contract.
 func Middleware(c Config, lookup func(string) (*rsa.PublicKey, error)) (func(http.Handler) http.Handler, error) {
+	c = c.clone()
 	if c.Validate() != nil || lookup == nil {
 		return nil, ErrDenied
 	}

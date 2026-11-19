@@ -17,18 +17,6 @@ func random() string {
 	return base64.RawURLEncoding.EncodeToString(b[:])
 }
 
-func role(level int) string {
-	switch level {
-	case 50, 40:
-		return "admin"
-	case 30:
-		return "operator"
-	case 20:
-		return "viewer"
-	}
-	return ""
-}
-
 // Provider is the verified identity source; callers never submit their own roles.
 type Provider interface {
 	Start(context.Context) (Device, error)
@@ -116,6 +104,7 @@ type Authority struct {
 // Provider, Signer and audit must support concurrent calls. Audit runs without
 // authority locks; a slow callback delays only its calling request.
 func New(c Config, provider Provider, signer Signer, audit func(Audit)) (*Authority, error) {
+	c = c.clone()
 	if c.Validate() != nil || provider == nil || signer == nil || audit == nil {
 		return nil, ErrDenied
 	}
@@ -330,7 +319,7 @@ func (a *Authority) membership(ctx context.Context, s *session, now time.Time) e
 		if err != nil {
 			return ErrDenied
 		}
-		r := role(level)
+		r := a.config.clusterRole(level)
 		if r == "" {
 			return ErrDenied
 		}
