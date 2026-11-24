@@ -27,6 +27,7 @@ Canonical helpers:
 - `authz.PrincipalFromContext(ctx)`
 - `authn.PrincipalFromContext(ctx)`
 - `authn.VerifiedClaimsFromContext(ctx)` for verified claims not represented in principal
+- `authn.HumanSessionClaimsFromContext(ctx)` for defensive-copy typed human claims and exact int64 IDs
 
 When using `pkg/authn` middleware, no service-specific bridge is required:
 
@@ -43,20 +44,24 @@ When using `pkg/authn` middleware, no service-specific bridge is required:
 ## Working example
 
 ```go
-mapper := authn.MapperFunc(func(ctx context.Context, claims *token.TSClaims) (authz.Principal, error) {
+mapper := authn.PrincipalMapper(func(ctx context.Context, parsed *jwt.Token, claims jwt.MapClaims) (authz.Principal, error) {
+    subject, _ := claims["sub"].(string)
     return authz.Principal{
-        ID:    claims.Subject,
-        Type:  "service",
+        ID:    subject,
         Roles: []string{"service"},
     }, nil
 })
 
-r.Use(authn.Middleware(authn.Options{
-    Issuer:   "https://tokensmith.example",
-    Audience: []string{"metadata-service"},
+authenticate, err := authn.Middleware(authn.Options{
+    Issuers:   []string{"https://tokensmith.example"},
+    Audiences: []string{"metadata-service"},
     JWKSURLs: []string{"https://tokensmith.example/.well-known/jwks.json"},
     Mapper:   mapper,
-}))
+})
+if err != nil {
+    return err // During service startup, before accepting requests.
+}
+r.Use(authenticate)
 
 r.Use(authzMiddleware)
 
@@ -69,6 +74,13 @@ r.Get("/protected", func(w http.ResponseWriter, r *http.Request) {
     _, _ = w.Write([]byte(principal.ID))
 })
 ```
+
+This mapper is legacy-only and assigns a service-owned role after verification.
+For human or mixed consumers, use the explicit policy/profile configuration in
+[token-profiles.md](token-profiles.md) and its complete compiled example. Human
+roles come from signed claims, not this mapper. Import `jwt` from
+`github.com/golang-jwt/jwt/v5`. The generic AuthZ context used here is distinct
+from `authz/chi`'s context; do not assume an automatic bridge to that package.
 
 ## Failure expectations
 
@@ -101,15 +113,18 @@ propagated to other services or replicas. Consumers that need cross-process
 revocation must provide their own shared checker implementation. Tokens without
 a `jti` are not checked or stored as revoked.
 
-TokenSmith's claim validator still enforces the TokenSmith/NIST claim set when
-called with `enforce=true`. Provider-specific exchange paths, such as Vault mode,
+Legacy validation still enforces the TokenSmith/NIST claim set when
+called with `enforce=true`; human sessions use their own strict bounded policy,
+not fabricated MFA/assurance. The optional JTI check runs for both profiles; it
+does not make logout a distributed/session-wide JWT revocation mechanism.
+Provider-specific exchange paths, such as Vault mode,
 must populate safe generated values before minting a TokenSmith JWT instead of
 globally disabling claim enforcement.
 
 ## Adoption checklist
 
 1. Configure `authn.Middleware(authn.Options{...})` with issuer, audience, and JWKS or static key material.
-2. Provide an `authn.Mapper` that maps verified claims into `authz.Principal`.
+2. For legacy claims, optionally provide an `authn.PrincipalMapper`; for human sessions explicitly enable the profile and policy.
 3. Attach an `authn.RevocationChecker` when the service has a revocation source.
 4. Attach AuthZ middleware with a route mapper or path/method mapper.
 5. Read principal in handlers with `authn.PrincipalFromContext` or `authz.PrincipalFromContext`.

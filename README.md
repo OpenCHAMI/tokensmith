@@ -205,6 +205,10 @@ go get github.com/openchami/tokensmith
 
 Use the main module and wire TokenSmith JWT validation with `pkg/authn` plus authorization with `pkg/authz`.
 
+Use `authn.Middleware` for both legacy and explicitly enabled human sessions;
+the default remains legacy only. See [signed profiles and migration](docs/token-profiles.md)
+and the [compiled consumer example](examples/profiles/example_test.go).
+
 ```bash
 go get github.com/openchami/tokensmith
 ```
