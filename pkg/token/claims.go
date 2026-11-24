@@ -27,7 +27,8 @@ import (
 //   - JWT Best Practices: RFC 8725 (§3.1–3.5, §3.2 header & claim rules)
 //   - FIPS 140-2/3:    Approved security functions (e.g., RSA-PSS, ECDSA P-256, AES-GCM) https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.140-3.pdf and https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.140-2.pdf
 type TSClaims struct {
-	jwt.RegisteredClaims // Embedded RegisteredClaims provides standard JWT fields like "iss", "sub", "aud", etc.
+	jwt.RegisteredClaims         // Embedded RegisteredClaims provides standard JWT fields like "iss", "sub", "aud", etc.
+	TokenProfile         Profile `json:"token_profile,omitempty"`
 	// Issuer identifies the principal that issued the JWT.
 	// JSON key: "iss"
 	// RFC 7519 §4.1.1; RFC 8725 §3.2: verify that the verification key belongs to this issuer.
