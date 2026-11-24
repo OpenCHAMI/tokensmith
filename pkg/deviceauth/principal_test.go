@@ -14,6 +14,7 @@ import (
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
+	"github.com/openchami/tokensmith/pkg/authn"
 	"github.com/openchami/tokensmith/pkg/authz"
 )
 
@@ -85,6 +86,13 @@ func TestVerifiedTokenCasbinAuthorization(t *testing.T) {
 		principal, ok = authz.PrincipalFromContext(r.Context())
 		if !ok {
 			t.Fatal("verified principal missing in handler")
+		}
+		common, ok := authn.PrincipalFromContext(r.Context())
+		if !ok || !reflect.DeepEqual(common, *principal) {
+			t.Fatal("device middleware did not install common AuthN principal")
+		}
+		if claims, ok := authn.HumanSessionClaimsFromContext(r.Context()); !ok || claims.UserID != 207 {
+			t.Fatal("device middleware did not install typed human claims")
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})))
@@ -196,7 +204,7 @@ func TestVerifiedTokenCasbinAuthorization(t *testing.T) {
 			if response.Code != 401 || mapper.calls != 0 || handled != 0 {
 				t.Fatalf("invalid authentication reached authorization: status=%d maps=%d handlers=%d", response.Code, mapper.calls, handled)
 			}
-			if response.Body.String() != ErrDenied.Error()+"\n" || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("WWW-Authenticate") != "Bearer" {
+			if response.Body.String() != "invalid token\n" || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("WWW-Authenticate") != "Bearer" {
 				t.Fatal("authentication failure was not sanitized and non-cacheable")
 			}
 		})

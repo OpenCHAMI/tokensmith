@@ -57,7 +57,8 @@ The session authority implements the login lifecycle:
    and rechecks membership within the cache budget. It cannot move the deadline.
 4. `Logout` removes renewal state before contacting GitLab to revoke access.
 
-`tokens.go` signs and verifies the resulting user-session claim contract. Token
+The broker signs the shared `token.HumanSessionClaims` contract with the
+`human-session-v1` marker; `token.VerifyHumanSession` owns validation. Token
 expiry is strict: the reserved clock budget is not added again as expiry leeway.
 Each token expires at the earliest permitted token, upstream or session limit.
 Consumers still need issuer-bound keys, bounded clocks and route authorization.
@@ -90,38 +91,14 @@ contract before returning `authz.Principal{ID: claims.Subject, Roles:
 Applications must not construct a principal from an unverified JWT or a
 caller-selected role.
 
-For HTTP consumers, `deviceauth.Middleware` performs that verification and sets
-the existing generic `authz` principal context. Install it before
-`authz.NewMiddleware` on protected service routes:
-
-```go
-import (
-    "crypto/rsa"
-    "net/http"
-
-    "github.com/openchami/tokensmith/pkg/authz"
-    "github.com/openchami/tokensmith/pkg/deviceauth"
-)
-
-func protectedNodes(
-    policy deviceauth.Config,
-    trustedKey func(string) (*rsa.PublicKey, error),
-    authorizer *authz.Authorizer,
-    nodes http.Handler,
-) (http.Handler, error) {
-    authenticate, err := deviceauth.Middleware(policy, trustedKey)
-    if err != nil {
-        return nil, err
-    }
-    authorize := authz.NewMiddleware(
-        authorizer,
-        authz.PathMethodMapper{MethodToAction: authz.MethodToActionREST()},
-        authz.WithMode(authz.ModeEnforce),
-        authz.WithRequireAuthn(true),
-    )
-    return authenticate(authorize.Handler(nodes)), nil
-}
-```
+For HTTP consumers, use **`authn.Middleware`** with explicit
+`Profiles: []token.Profile{token.ProfileHumanSessionV1}` and a secret-free
+`HumanSessionPolicy`. Install it before generic `authz.NewMiddleware`. See
+[the canonical migration guide](token-profiles.md) and its
+[compiled example](../examples/profiles/example_test.go).
+`deviceauth.Middleware` is a deprecated forwarding wrapper, not a second
+recommended consumer API. Previously issued unmarked draft human tokens require
+reissue; default legacy-only AuthN deliberately rejects human tokens.
 
 Construct `authorizer` using the existing Casbin policy loader and the service's
 own model and rules; see [the Casbin-first guide](casbin-first-guide.md). For
@@ -133,20 +110,18 @@ DELETE when the policy grants no such permission. Missing, invalid or expired
 credentials receive 401 before the authorization middleware or service handler
 runs. Unmapped or unauthorized actions remain denied by the existing policy.
 
-`policy` and `trustedKey` are administrator-controlled inputs. Resolve key IDs
-only against keys trusted for `policy.ClusterIssuer`, with a bounded JWKS cache
-and rotation policy; never use a token-selected issuer or key URL. The HTTP
-middleware uses the host clock, whose total error must stay within
-`policy.SkewSeconds`. Strict token expiry and the membership/session budgets are
-checked by `Verify`; the generic AuthN middleware's default clock leeway is not
-used. The shared `Config.Validate` still requires `ClientID` and `VerifierFile`.
-The consumer does not read `VerifierFile` or need the private membership-verifier
-credential: that credential stays only with the issuing broker.
+Policy and keys are administrator-controlled. Resolve only against the fixed
+cluster issuer's configured static/JWKS trust; a supplied `HumanSessionKeyLookup`
+is authoritative and never falls back on error. Human/mixed mode requires one
+matching issuer and audience with enforcement enabled. The host clock error must
+stay within policy skew; human expiry never uses generic legacy expiry leeway.
+Use `Config.ConsumerPolicy()` or construct `token.HumanSessionPolicy` directly:
+consumers need neither ClientID, VerifierFile nor private membership credentials.
 
-This bridge targets `authz.NewMiddleware`'s generic net/http context. The
+Common AuthN targets `authz.NewMiddleware`'s generic net/http context. The
 `authz/chi` helpers have a separate principal context and require explicit
-service wiring. Existing generic `authn.Middleware` parses a different claims
-contract and is not a replacement for the device-authorization verifier.
+service wiring. Human IDs stay int64 through `HumanSessionClaimsFromContext`;
+the legacy Mapper is not invoked for human sessions.
 Apply this chain to protected consumer resources, not the broker's public
 approval-start/poll endpoints. Route registration and allowed actions remain
 service-owned.
@@ -247,7 +222,7 @@ is no live rotation API or persistent session database.
 
 TokenSmith issues user credentials; downstream services are responsible for
 gateway configuration and route enforcement. Consumers must use the
-device-authorization verifier and authorize actual actions. The GitHub, Entra and Google transport-only
+common AuthN middleware with explicit human policy and authorize actual actions. The GitHub, Entra and Google transport-only
 login stubs cannot be selected as TokenSmith device-login backends.
 
 Run `go test -race -shuffle=on -count=1 ./...` and `go vet ./...`. The

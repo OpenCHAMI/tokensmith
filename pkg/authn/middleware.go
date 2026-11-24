@@ -5,418 +5,121 @@
 package authn
 
 import (
+	"bytes"
 	"context"
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/rsa"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
-	"time"
+	"slices"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openchami/tokensmith/pkg/authz"
-	"github.com/openchami/tokensmith/pkg/keys"
-	"github.com/openchami/tokensmith/pkg/oidc"
 	tstoken "github.com/openchami/tokensmith/pkg/token"
-	"github.com/rs/zerolog/log"
 )
-
-// Mode controls behavior when authentication fails.
-//
-// AuthN is expected to be fail-closed by default.
-// AuthNOff exists only for explicit opt-out.
-type Mode int
-
-const (
-	AuthNEnforce Mode = iota
-	AuthNOff
-)
-
-type nowFunc func() time.Time
-
-// PrincipalMapper maps verified JWT claims into an authz.Principal.
-//
-// Services should avoid placing sensitive data in the principal.
-// Returning an error fails the request.
-//
-// Implementations MUST NOT log the raw token.
-type PrincipalMapper func(ctx context.Context, token *jwt.Token, claims jwt.MapClaims) (authz.Principal, error)
-
-// RevocationChecker checks if a JWT ID (JTI) has been revoked.
-// Per RFC 7009, implementations should check the revocation status
-// of tokens after signature verification but before granting access.
-type RevocationChecker interface {
-	IsRevoked(jti string) bool
-}
-
-type Options struct {
-	Mode Mode
-
-	// ValidateIssuer enables issuer validation (default true).
-	// Disable explicitly by setting this field to false.
-	ValidateIssuer          bool
-	DisableIssuerValidation bool
-	Issuers                 []string
-
-	// ValidateAudience enables audience validation (default true).
-	// Disable explicitly by setting this field to false.
-	ValidateAudience          bool
-	DisableAudienceValidation bool
-	Audiences                 []string
-
-	// ClockSkew is the allowed clock skew for exp/nbf checks.
-	// Default 2m. Maximum 10m.
-	ClockSkew time.Duration
-
-	StaticKeys []crypto.PublicKey
-	JWKSURLs   []string
-
-	// Deterministic JWKS caching.
-	JWKSCacheSoftTTL time.Duration
-	JWKSCacheHardTTL time.Duration
-
-	HTTPClient *http.Client
-
-	Mapper PrincipalMapper
-
-	RevocationChecker RevocationChecker
-
-	staticKeysByKID map[string]crypto.PublicKey
-
-	now nowFunc
-}
-
-func (o Options) withDefaults() (Options, error) {
-	out := o
-	if out.Mode == 0 {
-		out.Mode = AuthNEnforce
-	}
-
-	// Defaults: issuer/audience validation ON. Disabling requires an explicit option.
-	out.ValidateIssuer = !out.DisableIssuerValidation
-	out.ValidateAudience = !out.DisableAudienceValidation
-
-	if out.ClockSkew == 0 {
-		out.ClockSkew = 2 * time.Minute
-	}
-	if out.ClockSkew > 10*time.Minute {
-		return Options{}, errors.New("clock skew too large (max 10m)")
-	}
-	if out.HTTPClient == nil {
-		out.HTTPClient = http.DefaultClient
-	}
-	if out.JWKSCacheSoftTTL == 0 {
-		out.JWKSCacheSoftTTL = 10 * time.Minute
-	}
-	if out.JWKSCacheHardTTL == 0 {
-		out.JWKSCacheHardTTL = 1 * time.Hour
-	}
-	if out.now == nil {
-		out.now = time.Now
-	}
-	if out.Mapper == nil {
-		out.Mapper = func(ctx context.Context, token *jwt.Token, claims jwt.MapClaims) (authz.Principal, error) {
-			sub, _ := claims["sub"].(string)
-			return authz.Principal{ID: sub}, nil
-		}
-	}
-
-	if len(out.StaticKeys) > 0 {
-		out.staticKeysByKID = make(map[string]crypto.PublicKey, len(out.StaticKeys))
-		for _, key := range out.StaticKeys {
-			kid, err := keys.RFC7638Thumbprint(key)
-			if err != nil {
-				return Options{}, fmt.Errorf("invalid static key for RFC 7638 kid derivation: %w", err)
-			}
-			out.staticKeysByKID[kid] = key
-		}
-	}
-
-	if out.ValidateIssuer && len(out.Issuers) == 0 {
-		return Options{}, errors.New("issuer validation enabled but no issuers configured")
-	}
-	if out.ValidateAudience && len(out.Audiences) == 0 {
-		return Options{}, errors.New("audience validation enabled but no audiences configured")
-	}
-	if len(out.StaticKeys) == 0 && len(out.JWKSURLs) == 0 {
-		return Options{}, errors.New("no JWT verification keys configured (StaticKeys or JWKSURLs required)")
-	}
-	return out, nil
-}
 
 func Middleware(opt Options) (func(http.Handler) http.Handler, error) {
 	opt, err := opt.withDefaults()
 	if err != nil {
 		return nil, err
 	}
-
-	cache := newJWKSCache()
-	jwksOpt := jwksCacheOptions{
-		client:  opt.HTTPClient,
-		softTTL: opt.JWKSCacheSoftTTL,
-		hardTTL: opt.JWKSCacheHardTTL,
-	}
-
+	resolver := keyResolver{opt: opt, cache: newJWKSCache()}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if opt.Mode == AuthNOff {
 				next.ServeHTTP(w, r)
 				return
 			}
-
-			tokStr, ok := bearerToken(r.Header.Get("Authorization"))
-			if !ok {
+			raw, ok := bearerToken(r.Header.Get("Authorization"))
+			if !ok || len(r.Header.Values("Authorization")) != 1 {
 				logAuthNFailure(r, "missing_bearer_token", nil)
-				http.Error(w, "missing bearer token", http.StatusUnauthorized)
+				rejectAuthentication(w)
 				return
 			}
-
+			profile, err := tstoken.SelectProfile(raw)
+			if err != nil || !slices.Contains(opt.Profiles, profile) {
+				logAuthNFailure(r, "invalid_token_profile", nil)
+				rejectAuthentication(w)
+				return
+			}
 			now := opt.now()
-
-			parserOpts := []jwt.ParserOption{
-				jwt.WithValidMethods(keys.GetFIPSApprovedAlgorithms()),
-				jwt.WithLeeway(opt.ClockSkew),
-				jwt.WithExpirationRequired(),
-				jwt.WithIssuedAt(),
-				jwt.WithTimeFunc(func() time.Time { return now }),
+			var parsed *jwt.Token
+			var claims jwt.MapClaims
+			var human *tstoken.HumanSessionClaims
+			var id string
+			switch profile {
+			case tstoken.ProfileLegacyV1:
+				parsed, claims, err = resolver.verifyLegacy(r, raw, now)
+				if err == nil {
+					id, _ = claims["jti"].(string)
+				}
+			case tstoken.ProfileHumanSessionV1:
+				human, err = tstoken.VerifyHumanSession(r.Context(), raw, tstoken.HumanSessionVerification{
+					Policy: *opt.HumanSessionPolicy, Now: now,
+					Lookup: func(ctx context.Context, kid string) (*rsa.PublicKey, error) {
+						if opt.HumanSessionKeyLookup != nil {
+							return opt.HumanSessionKeyLookup(ctx, kid)
+						}
+						key, err := resolver.resolve(ctx, &jwt.Token{Header: map[string]any{"kid": kid}, Method: jwt.SigningMethodPS256}, now)
+						if err != nil {
+							return nil, err
+						}
+						rsaKey, ok := key.(*rsa.PublicKey)
+						if !ok {
+							return nil, tstoken.ErrHumanSessionDenied
+						}
+						return rsaKey, nil
+					},
+				})
+				if err == nil {
+					id = human.ID
+					var data []byte
+					data, err = json.Marshal(human)
+					if err == nil {
+						d := json.NewDecoder(bytes.NewReader(data))
+						d.UseNumber()
+						err = d.Decode(&claims)
+					}
+				}
+				if err != nil {
+					logAuthNFailure(r, "human_session_denied", nil)
+				}
+			default:
+				err = errors.New("invalid token profile")
 			}
-			parser := jwt.NewParser(parserOpts...)
-			claims := &tstoken.TSClaims{}
-
-			token, err := parser.ParseWithClaims(tokStr, claims, func(t *jwt.Token) (any, error) {
-				kid, ok := t.Header["kid"].(string)
-				if !ok || kid == "" {
-					return nil, errors.New("missing kid header")
-				}
-				if !keys.IsRFC7638Thumbprint(kid) {
-					return nil, errors.New("invalid kid header format")
-				}
-				alg := t.Method.Alg()
-
-				if err := keys.ValidateAlgorithm(alg); err != nil {
-					return nil, err
-				}
-
-				if kid != "" {
-					if k, ok := cache.getKey(now, kid, alg); ok {
-						return ensureAlgCompatibleKey(alg, k)
-					}
-
-					// Prefer cached keys; refresh opportunistically.
-					if len(opt.JWKSURLs) > 0 && cache.shouldRefresh(now) {
-						_ = refreshAllJWKS(r.Context(), cache, now, opt.JWKSURLs, jwksOpt)
-						if k, ok := cache.getKey(now, kid, alg); ok {
-							return ensureAlgCompatibleKey(alg, k)
-						}
-					}
-				}
-
-				if k, ok := opt.staticKeysByKID[kid]; ok {
-					return ensureAlgCompatibleKey(alg, k)
-				}
-
-				// If we have no usable cached keys, refresh once (fail closed if fetch fails).
-				if len(opt.JWKSURLs) > 0 && !cache.hasUsableKeys(now) {
-					if err := refreshAllJWKS(r.Context(), cache, now, opt.JWKSURLs, jwksOpt); err != nil {
-						return nil, err
-					}
-					if kid != "" {
-						if k, ok := cache.getKey(now, kid, alg); ok {
-							return ensureAlgCompatibleKey(alg, k)
-						}
-					}
-				}
-
-				return nil, errors.New("no matching verification key")
-			})
-			if err != nil || token == nil || !token.Valid {
-				logAuthNFailure(r, "parse_or_verify_failed", err)
-				http.Error(w, "invalid token", http.StatusUnauthorized)
+			if err != nil {
+				rejectAuthentication(w)
 				return
 			}
-			if err := claims.ValidateAt(true, now); err != nil {
-				logAuthNFailure(r, "claims_validation_failed", err)
-				http.Error(w, "invalid token", http.StatusUnauthorized)
-				return
-			}
-
-			if opt.RevocationChecker != nil && claims.ID != "" && opt.RevocationChecker.IsRevoked(claims.ID) {
+			if opt.RevocationChecker != nil && id != "" && opt.RevocationChecker.IsRevoked(id) {
 				logAuthNFailure(r, "token_revoked", nil)
-				http.Error(w, "token has been revoked", http.StatusUnauthorized)
+				rejectAuthentication(w)
 				return
 			}
-
-			mapClaims, err := tsClaimsToMapClaims(claims)
-			if err != nil {
-				logAuthNFailure(r, "invalid_token_claims_type", nil)
-				http.Error(w, "invalid token claims", http.StatusUnauthorized)
-				return
-			}
-
-			// Additional issuer/audience checks. jwt/v5 helpers are not variadic.
-			if opt.ValidateIssuer {
-				iss, _ := mapClaims["iss"].(string)
-				if !stringInSlice(iss, opt.Issuers) {
-					logAuthNFailureWithFields(r, "issuer_mismatch", nil, map[string]any{
-						"token_iss":       iss,
-						"allowed_issuers": opt.Issuers,
-					})
-					http.Error(w, "invalid token", http.StatusUnauthorized)
+			var p authz.Principal
+			if human != nil {
+				p = authz.Principal{ID: human.Subject, Roles: []string{human.Role}}
+			} else {
+				p, err = opt.Mapper(r.Context(), parsed, claims)
+				if err != nil {
+					logAuthNFailure(r, "principal_mapping_failed", err)
+					rejectAuthentication(w)
 					return
 				}
 			}
-			if opt.ValidateAudience {
-				audOK := false
-				if audRaw, ok := mapClaims["aud"]; ok {
-					switch v := audRaw.(type) {
-					case string:
-						audOK = stringInSlice(v, opt.Audiences)
-					case []any:
-						for _, it := range v {
-							if s, ok := it.(string); ok && stringInSlice(s, opt.Audiences) {
-								audOK = true
-								break
-							}
-						}
-					case []string:
-						for _, s := range v {
-							if stringInSlice(s, opt.Audiences) {
-								audOK = true
-								break
-							}
-						}
-					}
-				}
-				if !audOK {
-					logAuthNFailureWithFields(r, "audience_mismatch", nil, map[string]any{
-						"token_aud":         extractAudienceValues(mapClaims),
-						"allowed_audiences": opt.Audiences,
-					})
-					http.Error(w, "invalid token", http.StatusUnauthorized)
-					return
-				}
-			}
-
-			p, err := opt.Mapper(r.Context(), token, mapClaims)
-			if err != nil {
-				logAuthNFailure(r, "principal_mapping_failed", err)
-				http.Error(w, "invalid token", http.StatusUnauthorized)
-				return
-			}
-
 			ctx := ContextWithPrincipal(r.Context(), p)
 			ctx = authz.SetPrincipal(ctx, &p)
-			ctx = ContextWithVerifiedClaims(ctx, mapClaims)
+			ctx = ContextWithVerifiedClaims(ctx, claims)
+			if human != nil {
+				ctx = context.WithValue(ctx, humanClaimsContextKey{}, *human)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}, nil
 }
 
-func tsClaimsToMapClaims(claims *tstoken.TSClaims) (jwt.MapClaims, error) {
-	b, err := json.Marshal(claims)
-	if err != nil {
-		return nil, err
-	}
-	var out jwt.MapClaims
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func refreshAllJWKS(ctx context.Context, cache *jwksCache, now time.Time, urls []string, opt jwksCacheOptions) error {
-	var lastErr error
-	for _, u := range urls {
-		if err := cache.refresh(ctx, now, u, opt); err != nil {
-			lastErr = err
-			continue
-		}
-		return nil
-	}
-	if lastErr == nil {
-		return errNoCachedKeys
-	}
-	return lastErr
-}
-
-func bearerToken(authzHeader string) (string, bool) {
-	return oidc.ParseBearerToken(authzHeader)
-}
-
-func stringInSlice(s string, list []string) bool {
-	for _, it := range list {
-		if it == s {
-			return true
-		}
-	}
-	return false
-}
-
-func ensureAlgCompatibleKey(alg string, k crypto.PublicKey) (crypto.PublicKey, error) {
-	switch {
-	case strings.HasPrefix(alg, "RS") || strings.HasPrefix(alg, "PS"):
-		if _, ok := k.(*rsa.PublicKey); !ok {
-			return nil, errors.New("alg requires RSA key")
-		}
-	case strings.HasPrefix(alg, "ES"):
-		if _, ok := k.(*ecdsa.PublicKey); !ok {
-			return nil, errors.New("alg requires ECDSA key")
-		}
-	case strings.HasPrefix(alg, "Ed"):
-		if _, ok := k.(ed25519.PublicKey); !ok {
-			return nil, errors.New("alg requires Ed25519 key")
-		}
-	default:
-		return nil, errors.New("unsupported alg")
-	}
-	return k, nil
-}
-
-func logAuthNFailure(r *http.Request, reason string, err error) {
-	logAuthNFailureWithFields(r, reason, err, nil)
-}
-
-func logAuthNFailureWithFields(r *http.Request, reason string, err error, extra map[string]any) {
-	evt := log.Warn().
-		Str("component", "authn_middleware").
-		Str("reason", reason).
-		Str("method", r.Method).
-		Str("path", r.URL.Path)
-	if err != nil {
-		evt = evt.Err(err)
-	}
-	if requestID := r.Header.Get("X-Request-ID"); requestID != "" {
-		evt = evt.Str("request_id", requestID)
-	}
-	for k, v := range extra {
-		evt = evt.Interface(k, v)
-	}
-	evt.Msg("JWT authentication failed")
-}
-
-func extractAudienceValues(claims jwt.MapClaims) []string {
-	audRaw, ok := claims["aud"]
-	if !ok {
-		return nil
-	}
-	switch v := audRaw.(type) {
-	case string:
-		return []string{v}
-	case []string:
-		return v
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, it := range v {
-			if s, ok := it.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
+func rejectAuthentication(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	http.Error(w, "invalid token", http.StatusUnauthorized)
 }

@@ -37,5 +37,7 @@ Use `Config.ConsumerPolicy()` to project broker configuration into consumer trus
 policy. Existing helper signatures, ring key IDs, signing, rotation, and JWKS
 publication are retained. Logout still denies renewal, not already issued JWTs.
 
-This layer does not add human acceptance to `pkg/authn`; common middleware
-integration and its consumer migration guide belong to the following layer.
+Use `authn.Middleware` with explicit profiles and a consumer policy for HTTP
+consumers; `deviceauth.Middleware` is now a deprecated human-only forwarding
+wrapper. See [the canonical profile and migration guide](token-profiles.md) and
+its compiled example. Legacy remains the common middleware's default.
