@@ -6,13 +6,27 @@ package authn
 
 import (
 	"context"
+	"slices"
 
 	"github.com/openchami/tokensmith/pkg/authz"
+	tstoken "github.com/openchami/tokensmith/pkg/token"
 )
 
 type principalContextKey struct{}
 
 type claimsContextKey struct{}
+
+type humanClaimsContextKey struct{}
+
+// HumanSessionClaimsFromContext returns a defensive copy of verified human claims.
+func HumanSessionClaimsFromContext(ctx context.Context) (*tstoken.HumanSessionClaims, bool) {
+	c, ok := ctx.Value(humanClaimsContextKey{}).(tstoken.HumanSessionClaims)
+	if !ok {
+		return nil, false
+	}
+	c.Audience = slices.Clone(c.Audience)
+	return &c, true
+}
 
 // ContextWithPrincipal returns a derived context containing the principal.
 func ContextWithPrincipal(ctx context.Context, p authz.Principal) context.Context {
