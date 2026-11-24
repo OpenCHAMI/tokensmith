@@ -4,12 +4,14 @@
 package deviceauth
 
 import (
+	"context"
 	"crypto/rsa"
 	"net/http"
 	"time"
 
+	"github.com/openchami/tokensmith/pkg/authn"
 	"github.com/openchami/tokensmith/pkg/authz"
-	"github.com/openchami/tokensmith/pkg/oidc"
+	"github.com/openchami/tokensmith/pkg/token"
 )
 
 // VerifyPrincipal applies the complete device-authorization token contract before
@@ -20,47 +22,28 @@ func VerifyPrincipal(raw string, c Config, now time.Time, lookup func(string) (*
 	if lookup == nil {
 		return authz.Principal{}, ErrDenied
 	}
-	claims, err := Verify(raw, c, now, func(kid string) (*rsa.PublicKey, error) {
-		key, err := lookup(kid)
-		if err != nil || key == nil {
-			return nil, ErrDenied
-		}
-		return key, nil
-	})
+	claims, err := Verify(raw, c, now, lookup)
 	if err != nil {
 		return authz.Principal{}, ErrDenied
 	}
 	return authz.Principal{ID: claims.Subject, Roles: []string{claims.Role}}, nil
 }
 
-// Middleware authenticates Bearer credentials with VerifyPrincipal and attaches
-// the principal using authz.SetPrincipal. Install it before authz.NewMiddleware
-// on protected service routes; it does not choose policy or authorize actions.
-// This uses the generic net/http authz context, not authz/chi's separate context.
-// lookup and the host clock must satisfy Verify's trust and freshness contract.
+// Middleware forwards the human-only device contract to the common AuthN path.
+// Deprecated: use authn.Middleware with explicit human-session policy.
 func Middleware(c Config, lookup func(string) (*rsa.PublicKey, error)) (func(http.Handler) http.Handler, error) {
 	c = c.clone()
 	if c.Validate() != nil || lookup == nil {
 		return nil, ErrDenied
 	}
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			raw, ok := oidc.ParseBearerToken(r.Header.Get("Authorization"))
-			var principal authz.Principal
-			var err error
-			if ok && len(r.Header.Values("Authorization")) == 1 {
-				principal, err = VerifyPrincipal(raw, c, time.Now(), lookup)
-			} else {
-				err = ErrDenied
-			}
-			if err != nil {
-				w.Header().Set("Cache-Control", "no-store")
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				http.Error(w, ErrDenied.Error(), http.StatusUnauthorized)
-				return
-			}
-			ctx := authz.SetPrincipal(r.Context(), &principal)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}, nil
+	p := c.ConsumerPolicy()
+	mw, err := authn.Middleware(authn.Options{
+		Profiles: []token.Profile{token.ProfileHumanSessionV1}, HumanSessionPolicy: &p,
+		Issuers: []string{c.ClusterIssuer}, Audiences: []string{c.Audience},
+		HumanSessionKeyLookup: func(_ context.Context, kid string) (*rsa.PublicKey, error) { return lookup(kid) },
+	})
+	if err != nil {
+		return nil, ErrDenied
+	}
+	return mw, nil
 }
