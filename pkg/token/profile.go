@@ -21,13 +21,11 @@ const (
 
 var ErrInvalidProfile = errors.New("invalid token profile")
 
-// SelectProfile inspects bounded, UNVERIFIED routing metadata, never identity.
+// SelectProfile inspects UNVERIFIED routing metadata, never identity.
 // Callers must allow the result before key lookup, verify the signature, and
-// apply exactly that profile's validator without fallback.
+// apply exactly that profile's validator without fallback. Input size is bounded
+// by the caller; this selector does not impose a new legacy token size policy.
 func SelectProfile(raw string) (Profile, error) {
-	if len(raw) > 8192 {
-		return "", ErrInvalidProfile
-	}
 	parts := strings.Split(raw, ".")
 	if len(parts) != 3 {
 		return "", ErrInvalidProfile

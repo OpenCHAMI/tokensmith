@@ -22,6 +22,9 @@ type HumanSessionVerification struct {
 
 // VerifyHumanSession verifies one explicitly marked human session, without fallback.
 func VerifyHumanSession(ctx context.Context, raw string, verification HumanSessionVerification) (*HumanSessionClaims, error) {
+	if len(raw) > 8192 {
+		return nil, ErrHumanSessionDenied
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrHumanSessionDenied, err)
 	}

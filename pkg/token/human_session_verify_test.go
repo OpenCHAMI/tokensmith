@@ -40,6 +40,7 @@ func TestVerifyHumanSession(t *testing.T) {
 		want   bool
 	}{
 		{"valid", jwt.SigningMethodPS256, "key-1", "JWT", "", true},
+		{"oversized", jwt.SigningMethodPS256, "key-1", "JWT", `,"padding":"` + strings.Repeat("a", 9000) + `"`, false},
 		{"RS256", jwt.SigningMethodRS256, "key-1", "JWT", "", false},
 		{"HS256", jwt.SigningMethodHS256, "key-1", "JWT", "", false},
 		{"none", jwt.SigningMethodNone, "key-1", "JWT", "", false},
