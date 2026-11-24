@@ -4,6 +4,8 @@ import (
 	"errors"
 	"maps"
 	"net/url"
+
+	"github.com/openchami/tokensmith/pkg/token"
 )
 
 // ErrDenied deliberately contains no upstream error, URL or credential value.
@@ -26,6 +28,16 @@ type Config struct {
 	// Nil uses the default mapping; a non-nil map replaces it completely.
 	// Do not omit empty maps when serializing: {} deliberately denies all roles.
 	GitLabRoleMapping map[string]string `json:"gitlab_role_mapping"`
+}
+
+// ConsumerPolicy excludes broker credentials and role-mapping provisioning.
+func (c Config) ConsumerPolicy() token.HumanSessionPolicy {
+	return token.HumanSessionPolicy{
+		ClusterIssuer: c.ClusterIssuer, Audience: c.Audience,
+		GitLabIssuer: c.Issuer, ProjectID: c.ProjectID,
+		CacheSeconds: c.CacheSeconds, TokenSeconds: c.TokenSeconds,
+		SkewSeconds: c.SkewSeconds, AbsoluteSeconds: c.AbsoluteSeconds,
+	}
 }
 
 // Validate enforces a five-minute worst-case revocation budget:

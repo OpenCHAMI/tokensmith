@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"sync"
 	"time"
+
+	"github.com/openchami/tokensmith/pkg/token"
 )
 
 func random() string {
@@ -429,6 +431,7 @@ func (a *Authority) issue(s *session, now time.Time) (Result, error) {
 	}
 	s.lastIssuedAt = now
 	claims := Claims{
+		TokenProfile:        token.ProfileHumanSessionV1,
 		Issuer:              a.config.ClusterIssuer,
 		Subject:             a.config.Issuer + "/user/" + decimal(s.userID),
 		Audience:            []string{a.config.Audience},

@@ -11,6 +11,7 @@ import (
 
 	"github.com/MicahParks/jwkset"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/token"
 )
 
 // tokenFixture supplies explicit valid claims without a session authority or
@@ -37,6 +38,7 @@ func newTokenFixture(t *testing.T) *tokenFixture {
 		k:   ring,
 		now: now,
 		claims: Claims{
+			TokenProfile:        token.ProfileHumanSessionV1,
 			Issuer:              policy.ClusterIssuer,
 			Subject:             policy.Issuer + "/user/207",
 			Audience:            []string{policy.Audience},

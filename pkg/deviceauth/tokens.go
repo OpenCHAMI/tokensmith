@@ -1,6 +1,7 @@
 package deviceauth
 
 import (
+	"context"
 	"crypto/rsa"
 	"encoding/base64"
 	"math/big"
@@ -9,43 +10,12 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/openchami/tokensmith/pkg/token"
 )
 
-// Claims binds a user-session JWT to one provider, project, user and bounded session.
-type Claims struct {
-	Issuer    string   `json:"iss"`
-	Subject   string   `json:"sub"`
-	Audience  []string `json:"aud"`
-	IssuedAt  int64    `json:"iat"`
-	NotBefore int64    `json:"nbf"`
-	ExpiresAt int64    `json:"exp"`
-	ID        string   `json:"jti"`
-	// Class "human" identifies the approving user, not the authentication method.
-	Class               string `json:"token_class"`
-	GitLabIssuer        string `json:"gitlab_issuer"`
-	ProjectID           int64  `json:"gitlab_project_id"`
-	UserID              int64  `json:"gitlab_user_id"`
-	SessionID           string `json:"session_id"`
-	ApprovedAt          int64  `json:"approved_at"`
-	SessionExp          int64  `json:"session_exp"`
-	MembershipCheckedAt int64  `json:"membership_checked_at"`
-	Role                string `json:"role"`
-}
-
-// These accessors preserve the integer wire format while letting jwt validate
-// registered claims directly, without a lossy MapClaims conversion.
-func (c Claims) GetExpirationTime() (*jwt.NumericDate, error) {
-	return jwt.NewNumericDate(time.Unix(c.ExpiresAt, 0)), nil
-}
-func (c Claims) GetIssuedAt() (*jwt.NumericDate, error) {
-	return jwt.NewNumericDate(time.Unix(c.IssuedAt, 0)), nil
-}
-func (c Claims) GetNotBefore() (*jwt.NumericDate, error) {
-	return jwt.NewNumericDate(time.Unix(c.NotBefore, 0)), nil
-}
-func (c Claims) GetIssuer() (string, error)             { return c.Issuer, nil }
-func (c Claims) GetSubject() (string, error)            { return c.Subject, nil }
-func (c Claims) GetAudience() (jwt.ClaimStrings, error) { return c.Audience, nil }
+// Claims is the shared, integer-preserving human-session contract.
+// Deprecated: use token.HumanSessionClaims for consumer code.
+type Claims = token.HumanSessionClaims
 
 type publicKey struct {
 	key   *rsa.PublicKey
@@ -142,54 +112,18 @@ func Verify(raw string, c Config, now time.Time, lookup func(string) (*rsa.Publi
 	if c.Validate() != nil || len(raw) > 8192 {
 		return nil, ErrDenied
 	}
-	var claims Claims
-	parsed, err := jwt.ParseWithClaims(raw, &claims, func(t *jwt.Token) (any, error) {
-		kid, ok := t.Header["kid"].(string)
-		if !ok || kid == "" || t.Header["typ"] != "JWT" {
-			return nil, ErrDenied
-		}
-		return lookup(kid)
-	},
-		jwt.WithValidMethods([]string{"PS256"}),
-		jwt.WithIssuer(c.ClusterIssuer),
-		jwt.WithAudience(c.Audience),
-		jwt.WithExpirationRequired(),
-		jwt.WithIssuedAt(),
-		jwt.WithLeeway(time.Duration(c.SkewSeconds)*time.Second),
-		jwt.WithTimeFunc(func() time.Time { return now }),
-	)
-	if err != nil || !parsed.Valid {
+	if lookup == nil {
 		return nil, ErrDenied
 	}
-
-	n := now.Unix()
-	// Identity and token class cannot be borrowed from machine or CI tokens.
-	if claims.Class != "human" || claims.GitLabIssuer != c.Issuer || claims.ProjectID != c.ProjectID ||
-		claims.UserID <= 0 || claims.Subject != c.Issuer+"/user/"+decimal(claims.UserID) ||
-		len(claims.Audience) != 1 || claims.Audience[0] != c.Audience ||
-		(claims.Role != "admin" && claims.Role != "operator" && claims.Role != "viewer") ||
-		claims.ID == "" || claims.SessionID == "" {
+	claims, err := token.VerifyHumanSession(context.Background(), raw, token.HumanSessionVerification{
+		Policy: c.ConsumerPolicy(),
+		Now:    now,
+		Lookup: func(_ context.Context, kid string) (*rsa.PublicKey, error) { return lookup(kid) },
+	})
+	if err != nil {
 		return nil, ErrDenied
 	}
-	// Expiry has no extra leeway. Thirty seconds of clock offset is already
-	// reserved by the issuance caps and the 300-second revocation budget.
-	if claims.IssuedAt <= 0 || claims.NotBefore != claims.IssuedAt || claims.IssuedAt > n+c.SkewSeconds ||
-		n >= claims.ExpiresAt || claims.ExpiresAt <= claims.IssuedAt ||
-		claims.ExpiresAt-claims.IssuedAt > c.TokenSeconds {
-		return nil, ErrDenied
-	}
-	if claims.ApprovedAt <= 0 || claims.ApprovedAt > claims.IssuedAt ||
-		claims.SessionExp-claims.ApprovedAt != c.AbsoluteSeconds || n >= claims.SessionExp ||
-		claims.ExpiresAt+c.SkewSeconds > claims.SessionExp {
-		return nil, ErrDenied
-	}
-	if claims.MembershipCheckedAt < claims.ApprovedAt || claims.MembershipCheckedAt > claims.IssuedAt ||
-		claims.IssuedAt-claims.MembershipCheckedAt > c.CacheSeconds ||
-		claims.ExpiresAt > claims.MembershipCheckedAt+c.CacheSeconds+c.TokenSeconds {
-		return nil, ErrDenied
-	}
-
-	return &claims, nil
+	return claims, nil
 }
 
 // Verify applies the user-session token contract using this ring's public keys.
